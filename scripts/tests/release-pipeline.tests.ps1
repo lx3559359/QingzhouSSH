@@ -37,6 +37,20 @@ foreach ($requiredText in @(
 if ([regex]::Matches($workflow, 'pnpm tauri build --bundles nsis').Count -ne 1) {
   throw 'Release workflow must build the signed NSIS bundle exactly once'
 }
+$preflightStart = $workflow.IndexOf('name: Preflight release credentials', [StringComparison]::Ordinal)
+$signedBuildStart = $workflow.IndexOf('name: Build signed NSIS bundle once', [StringComparison]::Ordinal)
+if ($preflightStart -lt 0 -or $signedBuildStart -lt 0 -or $preflightStart -gt $signedBuildStart) {
+  throw 'Tagged releases must validate every credential before signed build or publication'
+}
+$preflightBlock = $workflow.Substring($preflightStart, $signedBuildStart - $preflightStart)
+foreach ($requiredCredential in @(
+  'secrets.TAURI_SIGNING_PRIVATE_KEY',
+  'secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD',
+  'secrets.MODELSCOPE_API_TOKEN',
+  'vars.QINGZHOU_MODELSCOPE_NAMESPACE'
+)) {
+  if (-not $preflightBlock.Contains($requiredCredential)) { throw "Release preflight is missing: $requiredCredential" }
+}
 if ($workflow -match 'shell:\s*powershell') { throw 'Release workflow must use PowerShell 7 native error propagation' }
 if ([regex]::Matches($workflow, '\$PSNativeCommandUseErrorActionPreference\s*=\s*\$true').Count -lt 10) {
   throw 'Every command-bearing release step must fail on a non-zero native exit code'
