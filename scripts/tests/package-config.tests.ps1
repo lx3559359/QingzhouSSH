@@ -2,10 +2,15 @@ $ErrorActionPreference = 'Stop'
 
 $projectRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 $tauri = Get-Content -Raw -Encoding utf8 (Join-Path $projectRoot 'src-tauri\tauri.conf.json') | ConvertFrom-Json
+$vite = Get-Content -Raw -Encoding utf8 (Join-Path $projectRoot 'vite.config.ts')
 
 if ($tauri.bundle.targets -ne 'nsis') { throw 'Only the per-user NSIS target may be enabled' }
 if ($tauri.bundle.createUpdaterArtifacts -ne $true) { throw 'Signed updater artifacts must be enabled' }
+if ($tauri.bundle.useLocalToolsDir -ne $true) { throw 'NSIS tools must be cached in project target/.tauri instead of user AppData' }
 if ($tauri.bundle.windows.nsis.installMode -ne 'currentUser') { throw 'NSIS must not require administrator rights' }
+foreach ($ignoredDirectory in @('**/.local/**', '**/target/**', '**/artifacts/**')) {
+  if (-not $vite.Contains($ignoredDirectory)) { throw "Vite must ignore project-local generated directory: $ignoredDirectory" }
+}
 if ($tauri.bundle.windows.nsis.displayLanguageSelector -ne $true) { throw 'Installer language selection must be explicit' }
 $languages = @($tauri.bundle.windows.nsis.languages)
 if ($languages -notcontains 'SimpChinese' -or $languages -notcontains 'English') {

@@ -17,6 +17,7 @@
     "active": true,
     "targets": "nsis",
     "createUpdaterArtifacts": true,
+    "useLocalToolsDir": true,
     "icon": ["icons/icon.ico"],
     "windows": {
       "nsis": {

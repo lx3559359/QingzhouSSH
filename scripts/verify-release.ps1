@@ -1,10 +1,12 @@
 param(
   [Parameter(Mandatory = $true)]
-  [string]$ReleaseDirectory
+  [string]$ReleaseDirectory,
+  [string]$UpdaterPublicKey
 )
 
 $ErrorActionPreference = 'Stop'
 $projectRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
+& (Join-Path $PSScriptRoot 'dev-env.ps1') -Quiet | Out-Null
 $resolvedRelease = [IO.Path]::GetFullPath($ReleaseDirectory)
 $projectPrefix = $projectRoot.TrimEnd([IO.Path]::DirectorySeparatorChar) + [IO.Path]::DirectorySeparatorChar
 if (-not $resolvedRelease.StartsWith($projectPrefix, [StringComparison]::OrdinalIgnoreCase)) {
@@ -41,7 +43,7 @@ foreach ($record in @($metadata.files)) {
   if ((Get-Item -LiteralPath $path).Length -ne [int64]$record.size) { throw "Release size mismatch: $name" }
   if ((Get-LowerHash $path) -ne [string]$record.sha256) { throw "Release hash mismatch: $name" }
 }
-foreach ($requiredRole in @('installer', 'updater', 'updater-signature', 'portable')) {
+foreach ($requiredRole in @('installer-updater', 'updater-signature', 'portable')) {
   if (@($metadata.files | Where-Object role -eq $requiredRole).Count -ne 1) { throw "Release role is missing or duplicated: $requiredRole" }
 }
 
@@ -51,6 +53,18 @@ try { [void][Convert]::FromBase64String($signature) } catch { throw 'Updater sig
 $updaterPath = Join-Path $resolvedRelease ([string]$metadata.updaterFile)
 $updaterHash = Get-LowerHash $updaterPath
 $updaterSize = (Get-Item -LiteralPath $updaterPath).Length
+if ([string]::IsNullOrWhiteSpace($UpdaterPublicKey)) {
+  $tauriConfig = Get-Content -Raw -Encoding utf8 (Join-Path $projectRoot 'src-tauri\tauri.conf.json') | ConvertFrom-Json
+  $UpdaterPublicKey = [string]$tauriConfig.plugins.updater.pubkey
+}
+if ([string]::IsNullOrWhiteSpace($UpdaterPublicKey)) { throw 'Updater public key is not configured' }
+$signatureVerification = & cargo run --quiet `
+  --manifest-path (Join-Path $projectRoot 'src-tauri\Cargo.toml') `
+  --example verify_release_signature `
+  -- $UpdaterPublicKey $signaturePath $updaterPath 2>&1
+if ($LASTEXITCODE -ne 0) {
+  throw "Updater signature cryptographic verification failed: $($signatureVerification -join [Environment]::NewLine)"
+}
 
 $github = Read-Json ([string]$metadata.githubManifest)
 $modelscope = Read-Json ([string]$metadata.modelscopeManifest)
@@ -66,7 +80,9 @@ foreach ($platform in @($githubPlatform, $modelscopePlatform)) {
 }
 $expectedGithubPrefix = "https://github.com/lx3559359/QingzhouSSH/releases/download/v$($metadata.version)/"
 if (-not ([string]$githubPlatform.url).StartsWith($expectedGithubPrefix, [StringComparison]::Ordinal)) { throw 'GitHub manifest URL is outside the trusted release' }
-if ([string]$githubPlatform.url -notlike "*/$($metadata.updaterFile)") { throw 'GitHub manifest references the wrong updater file' }
+$githubUri = [Uri]([string]$githubPlatform.url)
+$githubFile = [Uri]::UnescapeDataString($githubUri.Segments[$githubUri.Segments.Length - 1])
+if ($githubFile -ne [string]$metadata.updaterFile) { throw 'GitHub manifest references the wrong updater file' }
 $modelscopeUri = [Uri]([string]$modelscopePlatform.url)
 if ($modelscopeUri.Scheme -ne 'https' -or $modelscopeUri.Host -notin @('modelscope.cn', 'www.modelscope.cn')) { throw 'ModelScope manifest URL is not trusted HTTPS' }
 $query = [Uri]::UnescapeDataString($modelscopeUri.Query)
@@ -86,7 +102,7 @@ foreach ($record in @($metadata.files)) {
 $sumsPath = Join-Path $resolvedRelease 'SHA256SUMS'
 $sumRecords = @{}
 foreach ($line in Get-Content -Encoding utf8 $sumsPath) {
-  if ($line -notmatch '^([0-9a-f]{64})  ([0-9A-Za-z._/-]+)$') { throw "Invalid SHA256SUMS line: $line" }
+  if ($line -notmatch '^([0-9a-f]{64})  (.+)$') { throw "Invalid SHA256SUMS line: $line" }
   if ($sumRecords.ContainsKey($Matches[2])) { throw "Duplicate SHA256SUMS entry: $($Matches[2])" }
   $sumRecords[$Matches[2]] = $Matches[1]
 }

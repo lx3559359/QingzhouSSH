@@ -194,9 +194,26 @@ export const tauriApi = {
   clearDownloadedUpdate: () => invoke<UpdateStatus>('clear_downloaded_update'),
 };
 
+export function previewModeFromSearch(
+  search: string,
+  development: boolean,
+): 'ready' | 'data-root' | null {
+  if (!development) return null;
+  const parameters = new URLSearchParams(search);
+  const preview = parameters.get('preview');
+  if (preview === 'ready' || preview === 'data-root') return preview;
+  const update = parameters.get('update');
+  return update === 'github' ||
+    update === 'modelscope' ||
+    update === 'reject' ||
+    update === 'up_to_date'
+    ? 'ready'
+    : null;
+}
+
 const previewRequested =
-  import.meta.env.DEV && typeof window !== 'undefined'
-    ? new URLSearchParams(window.location.search).get('preview')
+  typeof window !== 'undefined'
+    ? previewModeFromSearch(window.location.search, import.meta.env.DEV)
     : null;
 
 export const api =

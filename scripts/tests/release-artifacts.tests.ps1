@@ -6,13 +6,13 @@ $inputRoot = Join-Path $testRoot 'input'
 $outputRoot = Join-Path $testRoot 'output'
 New-Item -ItemType Directory -Force -Path $inputRoot | Out-Null
 
-$installer = Join-Path $inputRoot 'QingzhouSSH_0.1.0_x64-setup.exe'
-$updater = Join-Path $inputRoot 'QingzhouSSH_0.1.0_x64-setup.nsis.zip'
-$signature = "$updater.sig"
+$installer = Join-Path $inputRoot 'Qingzhou SSH_0.1.0_x64-setup.exe'
+$signature = "$installer.sig"
 $portable = Join-Path $inputRoot 'QingzhouSSH-v0.1.0-windows-x86_64-portable.zip'
-[IO.File]::WriteAllBytes($installer, [byte[]](1..32))
-[IO.File]::WriteAllBytes($updater, [byte[]](33..96))
-[IO.File]::WriteAllText($signature, [Convert]::ToBase64String([byte[]](1..96)), [Text.UTF8Encoding]::new($false))
+$fixturePublicKey = 'RWQf6LRCGA9i53mlYecO4IzT51TGPpvWucNSCh1CBM0QTaLn73Y7GFO3'
+$fixtureSignature = "untrusted comment: signature from minisign secret key`nRUQf6LRCGA9i559r3g7V1qNyJDApGip8MfqcadIgT9CuhV3EMhHoN1mGTkUidF/z7SrlQgXdy8ofjb7bNJJylDOocrCo8KLzZwo=`ntrusted comment: timestamp:1633700835`tfile:test`tprehashed`nwLMDjy9FLAuxZ3q4NlEvkgtyhrr0gtTu6KC4KBJdITbbOeAi1zBIYo0v4iTgt8jJpIidRJnp94ABQkJAgAooBQ=="
+[IO.File]::WriteAllBytes($installer, [Text.UTF8Encoding]::new($false).GetBytes('test'))
+[IO.File]::WriteAllText($signature, [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($fixtureSignature)), [Text.UTF8Encoding]::new($false))
 [IO.File]::WriteAllBytes($portable, [byte[]](97..128))
 
 try {
@@ -20,7 +20,6 @@ try {
   try {
     & (Join-Path $projectRoot 'scripts\build-release.ps1') `
       -InstallerPath $installer `
-      -UpdaterArchivePath $updater `
       -UpdaterSignaturePath $signature `
       -PortableArchivePath $portable `
       -OutputDirectory 'D:\qingzhou-release-outside-test' `
@@ -34,7 +33,6 @@ try {
 
   & (Join-Path $projectRoot 'scripts\build-release.ps1') `
     -InstallerPath $installer `
-    -UpdaterArchivePath $updater `
     -UpdaterSignaturePath $signature `
     -PortableArchivePath $portable `
     -OutputDirectory $outputRoot `
@@ -55,21 +53,21 @@ try {
   $modelscope = Get-Content -Raw -Encoding utf8 $modelscopeManifestPath | ConvertFrom-Json
   $githubPlatform = $github.platforms.'windows-x86_64'
   $modelscopePlatform = $modelscope.platforms.'windows-x86_64'
-  $expectedUpdaterHash = (Get-FileHash -LiteralPath $updater -Algorithm SHA256).Hash.ToLowerInvariant()
+  $expectedUpdaterHash = (Get-FileHash -LiteralPath $installer -Algorithm SHA256).Hash.ToLowerInvariant()
   $expectedSignature = (Get-Content -Raw -Encoding utf8 $signature).Trim()
 
   if ($github.version -ne '0.1.0' -or $modelscope.version -ne '0.1.0') { throw 'Manifest version is not synchronized' }
   if ($github.pub_date -ne '2026-08-04T10:00:00Z') { throw 'Published time was not preserved' }
-  if ($githubPlatform.url -ne 'https://github.com/lx3559359/QingzhouSSH/releases/download/v0.1.0/QingzhouSSH_0.1.0_x64-setup.nsis.zip') {
+  if ($githubPlatform.url -ne 'https://github.com/lx3559359/QingzhouSSH/releases/download/v0.1.0/Qingzhou%20SSH_0.1.0_x64-setup.exe') {
     throw 'GitHub updater URL is not pinned to the public release'
   }
-  if ($modelscopePlatform.url -ne 'https://modelscope.cn/api/v1/studios/lx3559359/QingzhouSSH/repo?Revision=master&FilePath=releases%2Fv0.1.0%2FQingzhouSSH_0.1.0_x64-setup.nsis.zip') {
+  if ($modelscopePlatform.url -ne 'https://modelscope.cn/api/v1/studios/lx3559359/QingzhouSSH/repo?Revision=master&FilePath=releases%2Fv0.1.0%2FQingzhou%20SSH_0.1.0_x64-setup.exe') {
     throw 'ModelScope updater URL is not pinned to the mirrored release'
   }
   foreach ($platform in @($githubPlatform, $modelscopePlatform)) {
     if ($platform.signature -ne $expectedSignature) { throw 'Updater signature was not copied exactly' }
     if ($platform.sha256 -ne $expectedUpdaterHash) { throw 'Updater SHA-256 is incorrect' }
-    if ([int64]$platform.size -ne (Get-Item -LiteralPath $updater).Length) { throw 'Updater size is incorrect' }
+    if ([int64]$platform.size -ne (Get-Item -LiteralPath $installer).Length) { throw 'Updater size is incorrect' }
   }
   if ($githubPlatform.build_id -ne $modelscopePlatform.build_id -or $githubPlatform.build_id -notmatch '^build-0\.1\.0-[0-9a-f]{12}$') {
     throw 'Dual-source build identifiers differ or are not reproducible'
@@ -79,7 +77,6 @@ try {
   $payloadNames = @($metadata.files | ForEach-Object name)
   foreach ($requiredName in @(
     (Split-Path $installer -Leaf),
-    (Split-Path $updater -Leaf),
     (Split-Path $signature -Leaf),
     (Split-Path $portable -Leaf)
   )) {
@@ -95,9 +92,9 @@ try {
   if ($sbom.spdxVersion -ne 'SPDX-2.3' -or $sbom.dataLicense -ne 'CC0-1.0') { throw 'SBOM is not SPDX 2.3 JSON' }
   if (@($sbom.packages | Where-Object name -eq 'react').Count -ne 1) { throw 'SBOM is missing npm dependencies' }
   if (@($sbom.packages | Where-Object name -eq 'tauri').Count -ne 1) { throw 'SBOM is missing Cargo dependencies' }
-  if (@($sbom.files).Count -lt 4) { throw 'SBOM is missing release files' }
+  if (@($sbom.files).Count -lt 3) { throw 'SBOM is missing release files' }
 
-  & (Join-Path $projectRoot 'scripts\verify-release.ps1') -ReleaseDirectory $outputRoot | Out-Null
+  & (Join-Path $projectRoot 'scripts\verify-release.ps1') -ReleaseDirectory $outputRoot -UpdaterPublicKey $fixturePublicKey | Out-Null
 
   $firstBuildHashes = @{}
   Get-ChildItem -LiteralPath $outputRoot -File -Recurse | ForEach-Object {
@@ -106,7 +103,6 @@ try {
   }
   & (Join-Path $projectRoot 'scripts\build-release.ps1') `
     -InstallerPath $installer `
-    -UpdaterArchivePath $updater `
     -UpdaterSignaturePath $signature `
     -PortableArchivePath $portable `
     -OutputDirectory $outputRoot `
@@ -122,18 +118,18 @@ try {
     }
   }
 
-  $updaterOutput = Join-Path $outputRoot (Split-Path $updater -Leaf)
+  $updaterOutput = Join-Path $outputRoot (Split-Path $installer -Leaf)
   [IO.File]::WriteAllBytes($updaterOutput, [byte[]](9, 9, 9))
   $tamperRejected = $false
   try {
-    & (Join-Path $projectRoot 'scripts\verify-release.ps1') -ReleaseDirectory $outputRoot | Out-Null
+    & (Join-Path $projectRoot 'scripts\verify-release.ps1') -ReleaseDirectory $outputRoot -UpdaterPublicKey $fixturePublicKey | Out-Null
   } catch {
     $tamperRejected = $true
   }
-  if (-not $tamperRejected) { throw 'Tampered updater archive must be rejected' }
+  if (-not $tamperRejected) { throw 'Tampered signed installer must be rejected' }
 
-  Copy-Item -LiteralPath $updater -Destination $updaterOutput -Force
-  & (Join-Path $projectRoot 'scripts\verify-release.ps1') -ReleaseDirectory $outputRoot | Out-Null
+  Copy-Item -LiteralPath $installer -Destination $updaterOutput -Force
+  & (Join-Path $projectRoot 'scripts\verify-release.ps1') -ReleaseDirectory $outputRoot -UpdaterPublicKey $fixturePublicKey | Out-Null
 } finally {
   if (Test-Path -LiteralPath $testRoot) {
     $resolvedTestRoot = [IO.Path]::GetFullPath($testRoot)

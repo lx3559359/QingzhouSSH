@@ -37,18 +37,19 @@ function Start-And-Check([string]$Executable, [string]$ExpectedDataRoot) {
   $process.WaitForExit()
 }
 
-$installer = File-ForRole 'installer'
+$installer = File-ForRole 'installer-updater'
 $portableArchive = File-ForRole 'portable'
-$updaterArchive = File-ForRole 'updater' # .nsis.zip
+# Tauri signs the NSIS installer directly as setup.exe.sig; the same EXE is the updater payload.
+$updaterSignature = File-ForRole 'updater-signature' # .exe.sig
 $smokeRoot = Join-Path $projectRoot ('.local\release-smoke-' + [Guid]::NewGuid().ToString('N'))
 $portableRoot = Join-Path $smokeRoot 'portable'
-$updaterRoot = Join-Path $smokeRoot 'updater'
 $installedData = Join-Path $smokeRoot 'installed-data'
 $oldDataRoot = $env:QINGZHOU_DATA_ROOT
 $uninstaller = $null
 
-New-Item -ItemType Directory -Force -Path $portableRoot, $updaterRoot, $installedData | Out-Null
+New-Item -ItemType Directory -Force -Path $portableRoot, $installedData | Out-Null
 try {
+  if (-not (Test-Path -LiteralPath $updaterSignature -PathType Leaf)) { throw 'Signed NSIS installer has no .exe.sig sidecar' }
   Expand-Archive -LiteralPath $portableArchive -DestinationPath $portableRoot
   $portableExe = Join-Path $portableRoot 'QingzhouSSH.exe'
   if (-not (Test-Path -LiteralPath (Join-Path $portableRoot 'portable.flag') -PathType Leaf)) { throw 'Portable smoke package has no portable.flag' }
@@ -67,9 +68,7 @@ try {
   $env:QINGZHOU_DATA_ROOT = $installedData
   Start-And-Check $installedExe.FullName $installedData
 
-  Expand-Archive -LiteralPath $updaterArchive -DestinationPath $updaterRoot
-  $updateInstaller = Get-ChildItem -LiteralPath $updaterRoot -Filter '*.exe' -File -Recurse | Select-Object -First 1
-  if ($null -eq $updateInstaller) { throw 'Updater archive does not contain an installer' }
+  $updateInstaller = Get-Item -LiteralPath $installer
   $installedHash = (Get-FileHash -LiteralPath $installedExe.FullName -Algorithm SHA256).Hash
   # update replacement: corrupt the stopped app, then require the signed updater installer to restore it.
   [IO.File]::WriteAllBytes($installedExe.FullName, [byte[]](1, 2, 3, 4))

@@ -36,4 +36,5 @@ winreg = "0.56"
 zeroize = { version = "1", features = ["derive"] }
 
 [dev-dependencies]
+minisign-verify = "0.2.5"
 tempfile = "3"

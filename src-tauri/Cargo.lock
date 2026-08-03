@@ -3367,6 +3367,7 @@ version = "0.1.0"
 dependencies = [
  "atomicwrites",
  "base64 0.22.1",
+ "minisign-verify",
  "reqwest",
  "russh",
  "russh-sftp",

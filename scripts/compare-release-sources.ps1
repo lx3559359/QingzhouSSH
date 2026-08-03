@@ -1,7 +1,8 @@
 param(
   [Parameter(Mandatory = $true)] [string]$ReleaseDirectory,
   [Parameter(Mandatory = $true)] [string]$GitHubDirectory,
-  [Parameter(Mandatory = $true)] [string]$ModelScopeDirectory
+  [Parameter(Mandatory = $true)] [string]$ModelScopeDirectory,
+  [string]$UpdaterPublicKey
 )
 
 $ErrorActionPreference = 'Stop'
@@ -29,7 +30,11 @@ function Read-Manifest([string]$Path) {
 $releaseRoot = Resolve-ProjectDirectory 'Release directory' $ReleaseDirectory
 $githubRoot = Resolve-ProjectDirectory 'GitHub readback directory' $GitHubDirectory
 $modelscopeRoot = Resolve-ProjectDirectory 'ModelScope readback directory' $ModelScopeDirectory
-& (Join-Path $PSScriptRoot 'verify-release.ps1') -ReleaseDirectory $releaseRoot | Out-Null
+$verifyArguments = @{ ReleaseDirectory = $releaseRoot }
+if (-not [string]::IsNullOrWhiteSpace($UpdaterPublicKey)) {
+  $verifyArguments.UpdaterPublicKey = $UpdaterPublicKey
+}
+& (Join-Path $PSScriptRoot 'verify-release.ps1') @verifyArguments | Out-Null
 
 $metadata = Get-Content -Raw -Encoding utf8 (Join-Path $releaseRoot 'release-metadata.json') | ConvertFrom-Json
 $commonFiles = @($metadata.files | ForEach-Object name) + @('SHA256SUMS', 'SBOM.spdx.json', 'release-metadata.json')

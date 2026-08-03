@@ -1,6 +1,5 @@
 param(
   [Parameter(Mandatory = $true)] [string]$InstallerPath,
-  [Parameter(Mandatory = $true)] [string]$UpdaterArchivePath,
   [Parameter(Mandatory = $true)] [string]$UpdaterSignaturePath,
   [Parameter(Mandatory = $true)] [string]$PortableArchivePath,
   [Parameter(Mandatory = $true)] [string]$OutputDirectory,
@@ -58,14 +57,13 @@ try { [void][DateTimeOffset]::Parse($PublishedAt, [Globalization.CultureInfo]::I
 if ([string]::IsNullOrWhiteSpace($ReleaseNotes)) { $ReleaseNotes = "QingzhouSSH v$version" }
 
 $installer = Resolve-ProjectFile 'Installer' $InstallerPath
-$updater = Resolve-ProjectFile 'Updater archive' $UpdaterArchivePath
 $signatureFile = Resolve-ProjectFile 'Updater signature' $UpdaterSignaturePath
 $portable = Resolve-ProjectFile 'Portable archive' $PortableArchivePath
-if ((Split-Path $signatureFile -Leaf) -ne ((Split-Path $updater -Leaf) + '.sig')) {
-  throw 'Updater signature file must be named after the updater archive'
+if ((Split-Path $signatureFile -Leaf) -ne ((Split-Path $installer -Leaf) + '.sig')) {
+  throw 'Updater signature file must be named after the signed NSIS installer'
 }
-$names = @($installer, $updater, $signatureFile, $portable | ForEach-Object { Split-Path $_ -Leaf })
-if (@($names | Select-Object -Unique).Count -ne 4) { throw 'Release artifact names must be unique' }
+$names = @($installer, $signatureFile, $portable | ForEach-Object { Split-Path $_ -Leaf })
+if (@($names | Select-Object -Unique).Count -ne 3) { throw 'Release artifact names must be unique' }
 
 $signature = (Get-Content -Raw -Encoding utf8 $signatureFile).Trim()
 if ($signature.Length -lt 64 -or $signature.Length -gt 16384 -or $signature -match 'placeholder|replace|todo') {
@@ -73,9 +71,9 @@ if ($signature.Length -lt 64 -or $signature.Length -gt 16384 -or $signature -mat
 }
 try { [void][Convert]::FromBase64String($signature) } catch { throw 'Updater signature is not valid Base64' }
 
-$updaterSize = (Get-Item -LiteralPath $updater).Length
+$updaterSize = (Get-Item -LiteralPath $installer).Length
 if ($updaterSize -le 0 -or $updaterSize -gt 536870912) { throw 'Updater archive size is invalid' }
-$updaterHash = Get-LowerHash $updater
+$updaterHash = Get-LowerHash $installer
 $buildId = "build-$version-$($updaterHash.Substring(0, 12))"
 $resolvedOutput = Assert-UnderProject 'Release output directory' $OutputDirectory
 $outputParent = Split-Path $resolvedOutput -Parent
@@ -85,13 +83,12 @@ $staging = Assert-UnderProject 'Release staging directory' (Join-Path $outputPar
 New-Item -ItemType Directory -Path $staging | Out-Null
 try {
   New-Item -ItemType Directory -Path (Join-Path $staging 'github'), (Join-Path $staging 'modelscope') | Out-Null
-  foreach ($source in @($installer, $updater, $signatureFile, $portable)) {
+  foreach ($source in @($installer, $signatureFile, $portable)) {
     Copy-Item -LiteralPath $source -Destination $staging
   }
 
   $fileRecords = @(
-    (New-FileRecord (Join-Path $staging (Split-Path $installer -Leaf)) 'installer'),
-    (New-FileRecord (Join-Path $staging (Split-Path $updater -Leaf)) 'updater'),
+    (New-FileRecord (Join-Path $staging (Split-Path $installer -Leaf)) 'installer-updater'),
     (New-FileRecord (Join-Path $staging (Split-Path $signatureFile -Leaf)) 'updater-signature'),
     (New-FileRecord (Join-Path $staging (Split-Path $portable -Leaf)) 'portable')
   )
@@ -160,7 +157,7 @@ try {
   }
   Write-Json (Join-Path $staging 'SBOM.spdx.json') $sbom
 
-  $updaterName = Split-Path $updater -Leaf
+  $updaterName = Split-Path $installer -Leaf
   $githubUrl = "https://github.com/$($releaseConfig.github.repository)/releases/download/v$version/$([Uri]::EscapeDataString($updaterName))"
   $modelscopeFile = [Uri]::EscapeDataString("releases/v$version/$updaterName")
   $modelscopeUrl = "https://modelscope.cn/api/v1/studios/$ModelScopeNamespace/$($releaseConfig.modelscope.repository)/repo?Revision=master&FilePath=$modelscopeFile"

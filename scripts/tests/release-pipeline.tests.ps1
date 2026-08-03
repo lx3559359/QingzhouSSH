@@ -47,7 +47,7 @@ if ($workflow -notmatch '(?s)env:\s+.*?QINGZHOU_MODELSCOPE_NAMESPACE:\s*\$\{\{\s
 }
 
 $smoke = Get-Content -Raw -Encoding utf8 $smokePath
-foreach ($requiredText in @('/S', 'portable.flag', '.nsis.zip', 'update replacement', 'uninstall')) {
+foreach ($requiredText in @('/S', 'portable.flag', '.exe.sig', 'update replacement', 'uninstall')) {
   if (-not $smoke.Contains($requiredText)) { throw "Release smoke test is missing: $requiredText" }
 }
 if ($smoke -notmatch 'QINGZHOU_DATA_ROOT') { throw 'Installed smoke launch must use an explicit data root' }
@@ -68,18 +68,17 @@ $githubRoot = Join-Path $testRoot 'readback\github'
 $modelscopeRoot = Join-Path $testRoot 'readback\modelscope'
 New-Item -ItemType Directory -Force -Path $inputRoot, $githubRoot, $modelscopeRoot | Out-Null
 $installer = Join-Path $inputRoot 'QingzhouSSH_0.1.0_x64-setup.exe'
-$updater = Join-Path $inputRoot 'QingzhouSSH_0.1.0_x64-setup.nsis.zip'
-$signature = "$updater.sig"
+$signature = "$installer.sig"
 $portable = Join-Path $inputRoot 'QingzhouSSH-v0.1.0-windows-x86_64-portable.zip'
-[IO.File]::WriteAllBytes($installer, [byte[]](1..16))
-[IO.File]::WriteAllBytes($updater, [byte[]](17..64))
-[IO.File]::WriteAllText($signature, [Convert]::ToBase64String([byte[]](1..96)), [Text.UTF8Encoding]::new($false))
+$fixturePublicKey = 'RWQf6LRCGA9i53mlYecO4IzT51TGPpvWucNSCh1CBM0QTaLn73Y7GFO3'
+$fixtureSignature = "untrusted comment: signature from minisign secret key`nRUQf6LRCGA9i559r3g7V1qNyJDApGip8MfqcadIgT9CuhV3EMhHoN1mGTkUidF/z7SrlQgXdy8ofjb7bNJJylDOocrCo8KLzZwo=`ntrusted comment: timestamp:1633700835`tfile:test`tprehashed`nwLMDjy9FLAuxZ3q4NlEvkgtyhrr0gtTu6KC4KBJdITbbOeAi1zBIYo0v4iTgt8jJpIidRJnp94ABQkJAgAooBQ=="
+[IO.File]::WriteAllBytes($installer, [Text.UTF8Encoding]::new($false).GetBytes('test'))
+[IO.File]::WriteAllText($signature, [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($fixtureSignature)), [Text.UTF8Encoding]::new($false))
 [IO.File]::WriteAllBytes($portable, [byte[]](65..96))
 
 try {
   & (Join-Path $projectRoot 'scripts\build-release.ps1') `
     -InstallerPath $installer `
-    -UpdaterArchivePath $updater `
     -UpdaterSignaturePath $signature `
     -PortableArchivePath $portable `
     -OutputDirectory $releaseRoot `
@@ -95,12 +94,12 @@ try {
   Copy-Item -LiteralPath (Join-Path $releaseRoot 'github\latest.json') -Destination (Join-Path $githubRoot 'latest.json')
   Copy-Item -LiteralPath (Join-Path $releaseRoot 'modelscope\latest.json') -Destination (Join-Path $modelscopeRoot 'latest.json')
 
-  & $comparePath -ReleaseDirectory $releaseRoot -GitHubDirectory $githubRoot -ModelScopeDirectory $modelscopeRoot | Out-Null
+  & $comparePath -ReleaseDirectory $releaseRoot -GitHubDirectory $githubRoot -ModelScopeDirectory $modelscopeRoot -UpdaterPublicKey $fixturePublicKey | Out-Null
 
   [IO.File]::WriteAllBytes((Join-Path $modelscopeRoot $metadata.updaterFile), [byte[]](9, 9, 9))
   $tamperRejected = $false
   try {
-    & $comparePath -ReleaseDirectory $releaseRoot -GitHubDirectory $githubRoot -ModelScopeDirectory $modelscopeRoot | Out-Null
+    & $comparePath -ReleaseDirectory $releaseRoot -GitHubDirectory $githubRoot -ModelScopeDirectory $modelscopeRoot -UpdaterPublicKey $fixturePublicKey | Out-Null
   } catch {
     $tamperRejected = $true
   }

@@ -14,7 +14,7 @@ const { invoke, channels, MockChannel } = vi.hoisted(() => {
 
 vi.mock('@tauri-apps/api/core', () => ({ Channel: MockChannel, invoke }));
 
-import { api, asAppError, tauriApi } from './tauri';
+import { api, asAppError, previewModeFromSearch, tauriApi } from './tauri';
 
 describe('Tauri API wrapper', () => {
   beforeEach(() => {
@@ -54,6 +54,16 @@ describe('Tauri API wrapper', () => {
       ['trust_server_host_key', { serverId: 'server-1', observation }],
       ['test_server_connection', { serverId: 'server-1' }],
     ]);
+  });
+
+  it('routes update scenario URLs to the browser preview API in development', () => {
+    expect(previewModeFromSearch('?update=github', true)).toBe('ready');
+    expect(previewModeFromSearch('?update=modelscope', true)).toBe('ready');
+    expect(previewModeFromSearch('?update=reject', true)).toBe('ready');
+    expect(previewModeFromSearch('?update=up_to_date', true)).toBe('ready');
+    expect(previewModeFromSearch('?update=unknown', true)).toBeNull();
+    expect(previewModeFromSearch('?preview=data-root', true)).toBe('data-root');
+    expect(previewModeFromSearch('?update=github', false)).toBeNull();
   });
 
   it('uses milestone two command names and forwards only monotonic channel events', async () => {
