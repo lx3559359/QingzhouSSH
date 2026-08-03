@@ -5,4 +5,5 @@ pub mod root_registry;
 pub mod secret_protector;
 pub mod ssh;
 pub mod system_probe;
+pub mod tasks;
 pub mod vault;

@@ -4,7 +4,7 @@ use serde::Serialize;
 
 use crate::error::{AppError, AppResult};
 
-pub const PROBE_COMMAND: &str = r#"printf '__QZ_OS_BEGIN__\n'; cat /etc/os-release; printf '__QZ_OS_END__\n'; if command -v apt >/dev/null 2>&1; then echo PKG=apt; elif command -v dnf >/dev/null 2>&1; then echo PKG=dnf; elif command -v yum >/dev/null 2>&1; then echo PKG=yum; else echo PKG=; fi; if command -v systemctl >/dev/null 2>&1; then echo SERVICE=systemd; else echo SERVICE=service; fi; printf 'ARCH='; uname -m; printf 'SHELL='; printf '%s\n' "${SHELL:-unknown}""#;
+pub const PROBE_COMMAND: &str = r#"printf '__QZ_OS_BEGIN__\n'; cat /etc/os-release; printf '__QZ_OS_END__\n'; if command -v apt >/dev/null 2>&1; then echo PKG=apt; elif command -v dnf >/dev/null 2>&1; then echo PKG=dnf; elif command -v yum >/dev/null 2>&1; then echo PKG=yum; else echo PKG=; fi; if command -v systemctl >/dev/null 2>&1; then echo SERVICE=systemd; elif command -v service >/dev/null 2>&1; then echo SERVICE=service; else echo SERVICE=unknown; fi; printf 'ARCH='; uname -m; printf 'SHELL='; printf '%s\n' "${SHELL:-unknown}"; printf 'COMMANDS='; first=1; for cmd in grep gzip systemctl service ps head df uptime uname free ip hostname sh; do if command -v "$cmd" >/dev/null 2>&1; then if [ "$first" -eq 0 ]; then printf ','; fi; printf '%s' "$cmd"; first=0; fi; done; printf '\n'"#;
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -16,6 +16,15 @@ pub struct SystemCapabilities {
     pub service_manager: String,
     pub architecture: String,
     pub shell: String,
+    pub commands: Vec<String>,
+}
+
+impl SystemCapabilities {
+    pub fn has_command(&self, command: &str) -> bool {
+        self.commands.iter().any(|available| available == command)
+            || (command == "systemctl" && self.service_manager == "systemd")
+            || (command == "service" && self.service_manager == "service")
+    }
 }
 
 fn unquote(value: &str) -> String {
@@ -73,6 +82,15 @@ pub fn parse_probe(output: &str) -> AppResult<SystemCapabilities> {
     }
     .to_string();
 
+    let commands = capabilities
+        .remove("COMMANDS")
+        .unwrap_or_default()
+        .split(',')
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+        .collect();
+
     Ok(SystemCapabilities {
         os_id,
         os_family,
@@ -87,6 +105,7 @@ pub fn parse_probe(output: &str) -> AppResult<SystemCapabilities> {
         shell: capabilities
             .remove("SHELL")
             .unwrap_or_else(|| "unknown".into()),
+        commands,
     })
 }
 
