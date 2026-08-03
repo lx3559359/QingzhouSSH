@@ -196,10 +196,10 @@
 - Test: `src/features/workflows/WorkflowPage.test.tsx`
 - Test: `src/app/AppShell.test.tsx`
 
-- [ ] 写失败测试：工作流列表、创建/删除、八类步骤库、添加节点、选中、拖动、SVG 连线、缩放和无 M3 占位说明。
-- [ ] 实现三栏布局；复用白银渐变、高光、强三层阴影和点阵背景，左右卡片与中间背景连续。
-- [ ] 运行组件测试和生产构建。
-- [ ] 提交：`feat: add dimensional workflow canvas`
+- [x] 写失败测试：工作流列表、创建/删除、八类步骤库、添加节点、选中、拖动、SVG 连线、缩放和无 M3 占位说明。
+- [x] 实现三栏布局；复用白银渐变、高光、强三层阴影和点阵背景，左右卡片与中间背景连续。
+- [x] 运行组件测试和生产构建。
+- [x] 提交：`feat: add dimensional workflow canvas`
 
 ## Task 13：节点参数、连接和校验诊断
 

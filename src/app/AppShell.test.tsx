@@ -21,11 +21,14 @@ vi.mock('../features/downloads/DownloadsPage', () => ({
 vi.mock('../features/history/ExecutionHistoryPage', () => ({
   ExecutionHistoryPage: () => <section aria-label="执行记录内容">执行记录内容</section>,
 }));
+vi.mock('../features/workflows/WorkflowPage', () => ({
+  WorkflowPage: () => <section aria-label="工作流内容">工作流内容</section>,
+}));
 
 import { AppShell } from './AppShell';
 
 describe('AppShell', () => {
-  it('offers the complete navigation and labels workflow as the next milestone', async () => {
+  it('offers the complete navigation and opens the workflow builder', async () => {
     const user = userEvent.setup();
     render(<AppShell />);
 
@@ -40,7 +43,7 @@ describe('AppShell', () => {
     expect(screen.getByLabelText('日志检索内容')).toBeVisible();
 
     await user.click(screen.getByRole('button', { name: '工作流' }));
-    expect(screen.getByRole('heading', { name: '工作流将在下一里程碑开放' })).toBeVisible();
-    expect(screen.queryByRole('button', { name: /运行工作流/ })).not.toBeInTheDocument();
+    expect(screen.getByLabelText('工作流内容')).toBeVisible();
+    expect(screen.queryByText('工作流将在下一里程碑开放')).not.toBeInTheDocument();
   });
 });

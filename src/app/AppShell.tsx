@@ -17,6 +17,7 @@ import { LogSearchPage } from '../features/logs/LogSearchPage';
 import { FileTransferPage } from '../features/transfers/FileTransferPage';
 import { DownloadsPage } from '../features/downloads/DownloadsPage';
 import { ExecutionHistoryPage } from '../features/history/ExecutionHistoryPage';
+import { WorkflowPage } from '../features/workflows/WorkflowPage';
 
 type PageKey =
   | 'home'
@@ -83,7 +84,7 @@ export function AppShell() {
         {page === 'tasks' && <TaskPage />}
         {page === 'logs' && <LogSearchPage />}
         {page === 'transfers' && <FileTransferPage />}
-        {page === 'workflows' && <WorkflowNotice />}
+        {page === 'workflows' && <WorkflowPage />}
         {page === 'history' && <ExecutionHistoryPage />}
         {page === 'downloads' && <DownloadsPage />}
         {page === 'settings' && <SectionNotice title="设置" description="数据目录、安全策略与更新设置集中在这里。" />}
@@ -121,19 +122,6 @@ function HomePage({ onNavigate }: { onNavigate: (page: PageKey) => void }) {
         </ol>
       </article>
     </section>
-  );
-}
-
-function WorkflowNotice() {
-  return (
-    <article className="silver-card milestone-notice">
-      <span className="feature-icon feature-icon--blue"><FlowArrow weight="duotone" /></span>
-      <div>
-        <span className="eyebrow">Milestone 3</span>
-        <h1>工作流将在下一里程碑开放</h1>
-        <p>届时会复用当前已经验证的任务、日志和传输接口，加入条件分支、重试和恢复点。</p>
-      </div>
-    </article>
   );
 }
 
