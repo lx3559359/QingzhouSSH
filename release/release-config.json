@@ -9,6 +9,7 @@
   "modelscope": {
     "repository": "QingzhouSSH",
     "repositoryType": "studio",
+    "namespace": "lx3559359",
     "namespaceEnvironment": "QINGZHOU_MODELSCOPE_NAMESPACE",
     "manifestPath": "releases/latest.json"
   }

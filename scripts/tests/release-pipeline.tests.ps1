@@ -42,6 +42,9 @@ if ($workflow -match '(?i)(token|private.key|password)\s*:\s*["''][^$][^"'']+["'
 }
 if ($workflow -notmatch '(?m)^\s*contents:\s*write\s*$') { throw 'Release publication requires explicit contents: write permission' }
 if ($workflow -notmatch '\$\{\{\s*github\.workspace\s*\}\}\\\.local') { throw 'Release caches must be rooted inside the checkout' }
+if ($workflow -notmatch '(?s)env:\s+.*?QINGZHOU_MODELSCOPE_NAMESPACE:\s*\$\{\{\s*vars\.QINGZHOU_MODELSCOPE_NAMESPACE\s*\}\}.*?steps:') {
+  throw 'ModelScope namespace must be present before the signed compilation step'
+}
 
 $smoke = Get-Content -Raw -Encoding utf8 $smokePath
 foreach ($requiredText in @('/S', 'portable.flag', '.nsis.zip', 'update replacement', 'uninstall')) {
@@ -80,7 +83,7 @@ try {
     -UpdaterSignaturePath $signature `
     -PortableArchivePath $portable `
     -OutputDirectory $releaseRoot `
-    -ModelScopeNamespace 'domestic-user' `
+    -ModelScopeNamespace 'lx3559359' `
     -PublishedAt '2026-08-04T10:00:00Z' | Out-Null
 
   $metadata = Get-Content -Raw -Encoding utf8 (Join-Path $releaseRoot 'release-metadata.json') | ConvertFrom-Json

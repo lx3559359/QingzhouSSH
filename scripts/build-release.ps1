@@ -52,6 +52,7 @@ $releaseConfig = Get-Content -Raw -Encoding utf8 (Join-Path $projectRoot 'releas
 $version = [string]$package.version
 
 if ($ModelScopeNamespace -notmatch '^[0-9A-Za-z_-]{1,64}$') { throw 'ModelScope namespace is invalid' }
+if ($ModelScopeNamespace -ne [string]$releaseConfig.modelscope.namespace) { throw 'ModelScope namespace differs from the trusted release configuration' }
 if ($PublishedAt -notmatch '^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z$') { throw 'PublishedAt must be an RFC 3339 UTC timestamp' }
 try { [void][DateTimeOffset]::Parse($PublishedAt, [Globalization.CultureInfo]::InvariantCulture) } catch { throw 'PublishedAt is invalid' }
 if ([string]::IsNullOrWhiteSpace($ReleaseNotes)) { $ReleaseNotes = "QingzhouSSH v$version" }

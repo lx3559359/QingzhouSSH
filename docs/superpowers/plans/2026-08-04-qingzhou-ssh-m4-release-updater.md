@@ -84,9 +84,9 @@
 
 ## Task 14：创建 GitHub 与 ModelScope 公共项目
 
-- [ ] 创建 `lx3559359/QingzhouSSH` 公共 GitHub 仓库并配置远端。
-- [ ] 使用用户的 ModelScope 身份创建同名公共项目；SDK 的 HOME/cache 必须位于项目目录。
-- [ ] 配置 Tauri 私钥/口令与 ModelScope token 为 GitHub Actions secrets，不在输出或文件中暴露。
+- [x] 创建 `lx3559359/QingzhouSSH` 公共 GitHub 仓库并配置远端。
+- [x] 使用用户的 ModelScope 身份创建同名公共项目；SDK 的 HOME/cache 必须位于项目目录。
+- [ ] 配置 Tauri 私钥/口令与 ModelScope token 为 GitHub Actions secrets，不在输出或文件中暴露（Tauri secrets 已完成，等待用户提供 ModelScope token）。
 - [ ] 提交并推送已本地合并的 `master`，不推送临时工作树分支。
 
 ## Task 15：M4 全量验收

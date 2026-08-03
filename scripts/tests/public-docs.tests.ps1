@@ -18,7 +18,7 @@ $license = Get-Content -Raw -Encoding utf8 (Join-Path $projectRoot 'LICENSE')
 if ($license -notmatch 'Apache License\s+Version 2\.0') { throw 'Apache-2.0 license text is incomplete' }
 
 $readme = Get-Content -Raw -Encoding utf8 (Join-Path $projectRoot 'README.md')
-foreach ($required in @('No SSH Terminal', 'Log search', 'Workflow', 'currentUser', 'portable.flag', 'Online update', 'github.com/lx3559359/QingzhouSSH', 'modelscope.cn', 'Data root')) {
+foreach ($required in @('No SSH Terminal', 'Log search', 'Workflow', 'currentUser', 'portable.flag', 'Online update', 'github.com/lx3559359/QingzhouSSH', 'modelscope.cn/studios/lx3559359/QingzhouSSH', 'Data root')) {
   if (-not $readme.Contains($required)) { throw "README is missing public product information: $required" }
 }
 if ($readme -match 'TODO|TBD|placeholder|Milestone 3') { throw 'README still describes an incomplete milestone or placeholder' }

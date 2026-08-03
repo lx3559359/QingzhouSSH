@@ -18,7 +18,7 @@ QingzhouSSH 是一款面向 Windows 的图形化服务器快捷运维工具。�
 ## 下载与安装
 
 - [GitHub Releases](https://github.com/lx3559359/QingzhouSSH/releases/latest)：主下载入口、源码、Issue 和安全公告。
-- [ModelScope](https://modelscope.cn/studios)：国内镜像入口；在 Studio 中搜索 `QingzhouSSH`，项目创建后 README 会补充直达地址。
+- [ModelScope](https://modelscope.cn/studios/lx3559359/QingzhouSSH)：国内镜像入口与同字节发布物。
 
 Windows x64 安装版使用 NSIS `currentUser` 模式，不需要管理员权限。便携版解压后保留 `QingzhouSSH.exe` 旁的 `portable.flag`，应用数据会进入同目录的 `data`。
 

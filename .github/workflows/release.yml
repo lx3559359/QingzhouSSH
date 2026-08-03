@@ -26,6 +26,7 @@ jobs:
       PNPM_STORE_DIR: ${{ github.workspace }}\.local\pnpm-store
       QINGZHOU_DATA_ROOT: ${{ github.workspace }}\.local\ci-data
       QINGZHOU_ARTIFACTS_DIR: ${{ github.workspace }}\artifacts
+      QINGZHOU_MODELSCOPE_NAMESPACE: ${{ vars.QINGZHOU_MODELSCOPE_NAMESPACE }}
       MODELSCOPE_HOME: ${{ github.workspace }}\.local\modelscope-home
       MODELSCOPE_CACHE: ${{ github.workspace }}\.local\modelscope-cache
       PYTHONPYCACHEPREFIX: ${{ github.workspace }}\.local\python-cache

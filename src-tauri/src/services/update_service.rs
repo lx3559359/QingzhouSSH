@@ -610,7 +610,7 @@ fn public_service_error(error: &UpdateServiceError) -> String {
 pub fn default_source_policy() -> Result<TrustedSourcePolicy, UpdateAdapterError> {
     TrustedSourcePolicy::new(
         "lx3559359",
-        option_env!("QINGZHOU_MODELSCOPE_NAMESPACE").unwrap_or("unconfigured"),
+        option_env!("QINGZHOU_MODELSCOPE_NAMESPACE").unwrap_or("lx3559359"),
     )
     .map_err(|_| UpdateAdapterError::Manifest)
 }

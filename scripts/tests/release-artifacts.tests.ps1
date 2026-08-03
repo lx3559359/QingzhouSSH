@@ -24,7 +24,7 @@ try {
       -UpdaterSignaturePath $signature `
       -PortableArchivePath $portable `
       -OutputDirectory 'D:\qingzhou-release-outside-test' `
-      -ModelScopeNamespace 'domestic-user' `
+      -ModelScopeNamespace 'lx3559359' `
       -PublishedAt '2026-08-04T10:00:00Z' | Out-Null
   } catch {
     $outsideRejected = $true
@@ -38,7 +38,7 @@ try {
     -UpdaterSignaturePath $signature `
     -PortableArchivePath $portable `
     -OutputDirectory $outputRoot `
-    -ModelScopeNamespace 'domestic-user' `
+    -ModelScopeNamespace 'lx3559359' `
     -PublishedAt '2026-08-04T10:00:00Z' `
     -ReleaseNotes 'Release contract fixture' | Out-Null
 
@@ -63,7 +63,7 @@ try {
   if ($githubPlatform.url -ne 'https://github.com/lx3559359/QingzhouSSH/releases/download/v0.1.0/QingzhouSSH_0.1.0_x64-setup.nsis.zip') {
     throw 'GitHub updater URL is not pinned to the public release'
   }
-  if ($modelscopePlatform.url -ne 'https://modelscope.cn/api/v1/studios/domestic-user/QingzhouSSH/repo?Revision=master&FilePath=releases%2Fv0.1.0%2FQingzhouSSH_0.1.0_x64-setup.nsis.zip') {
+  if ($modelscopePlatform.url -ne 'https://modelscope.cn/api/v1/studios/lx3559359/QingzhouSSH/repo?Revision=master&FilePath=releases%2Fv0.1.0%2FQingzhouSSH_0.1.0_x64-setup.nsis.zip') {
     throw 'ModelScope updater URL is not pinned to the mirrored release'
   }
   foreach ($platform in @($githubPlatform, $modelscopePlatform)) {
@@ -110,7 +110,7 @@ try {
     -UpdaterSignaturePath $signature `
     -PortableArchivePath $portable `
     -OutputDirectory $outputRoot `
-    -ModelScopeNamespace 'domestic-user' `
+    -ModelScopeNamespace 'lx3559359' `
     -PublishedAt '2026-08-04T10:00:00Z' `
     -ReleaseNotes 'Release contract fixture' | Out-Null
   $secondFiles = @(Get-ChildItem -LiteralPath $outputRoot -File -Recurse)
