@@ -42,8 +42,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-d-drive.ps1
 pnpm test
 pnpm build
 cargo fmt --manifest-path .\src-tauri\Cargo.toml -- --check
-cargo clippy --manifest-path .\src-tauri\Cargo.toml --all-targets -- -D warnings
-cargo test --manifest-path .\src-tauri\Cargo.toml
+cargo clippy --locked --manifest-path .\src-tauri\Cargo.toml --all-targets -- -D warnings
+cargo test --locked --manifest-path .\src-tauri\Cargo.toml --all-targets -- --nocapture
 ```
 
 Tauri 调试构建（不生成安装包）：
@@ -55,7 +55,7 @@ pnpm tauri build --debug --no-bundle
 
 ## 真实 SSH 集成测试
 
-推荐使用项目内 AsyncSSH 夹具。脚本会把 Python 包、pip 缓存、字节码、日志、主机密钥和带口令 Ed25519 测试密钥写到 `.local`，并在结束时关闭夹具进程：
+推荐使用项目内 AsyncSSH 夹具。脚本会把 Python 包、pip 缓存、字节码、日志、远端模拟目录、主机密钥和带口令 Ed25519 测试密钥写到 `.local`，并在结束时关闭夹具进程：
 
 ```powershell
 .\scripts\test-ssh-live.ps1
@@ -67,7 +67,21 @@ pnpm tauri build --debug --no-bundle
 .\scripts\test-ssh-live.ps1 -SkipPythonDependencyInstall
 ```
 
-测试覆盖密码认证、带口令私钥认证和错误主机指纹优先拦截。
+脚本依次执行 `ssh_live`、`sftp_live` 和 `m2_live`。覆盖密码认证、带口令私钥认证、错误主机指纹优先拦截、128 KiB 以上 SFTP 往返、内置/高级任务、普通与 gzip 日志检索下载、历史闭环以及凭据 canary 扫描。
+
+需要单独控制夹具时使用：
+
+```powershell
+.\scripts\ssh-fixture.ps1 -Action Start -SkipPythonDependencyInstall
+.\scripts\ssh-fixture.ps1 -Action Status
+.\scripts\ssh-fixture.ps1 -Action Stop
+```
+
+夹具生命周期幂等性检查：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\tests\ssh-fixture.tests.ps1
+```
 
 若开发机已经确认 Docker 的数据根目录不会写入 C 盘，可使用 Ubuntu OpenSSH 夹具：
 
@@ -92,3 +106,11 @@ try {
 - `dist`：前端生产构建；不提交。
 - `artifacts`：调试包、安装包和后续发布产物；不提交。
 - 用户选择的数据根目录：`app.db`、`vault`、`logs`、`downloads`、`backups`、`templates`、`cache` 和 `updates`。
+
+## M2 运行限制与状态语义
+
+- 单个 stdout/stderr 事件最多 32 KiB，单次任务或日志捕获最多 32 MiB，历史摘要最多 8 KiB。
+- 日志路径必须是远端绝对 `.log` 或 `.gz` 路径；关键词最多 512 字节，上下文 0–20 行，结果上限 1–10,000，界面每页 50 条。
+- SFTP 以 64 KiB 分块，下载只能写入数据根目录下的 `downloads`；上传/下载完成前使用 `.partial` 临时文件，成功后执行 SHA-256 校验。
+- `cancelled` 表示已经确认本地执行通道终止；若无法确认远端进程是否停止，或应用重启时发现遗留 `running` 记录，则状态为 `uncertain`，不会误报成功。
+- 服务启动、停止、重启以及高级命令/脚本都要求二次确认。高级模式仍是一次性非交互执行，不提供 SSH 终端。
