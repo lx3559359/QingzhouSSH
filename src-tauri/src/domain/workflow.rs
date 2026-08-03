@@ -313,6 +313,84 @@ pub struct FinishWorkflowNode {
     pub retryable: bool,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WorkflowRestorePointStatus {
+    Creating,
+    Available,
+    Failed,
+    RollingBack,
+    RolledBack,
+    Expired,
+}
+
+impl WorkflowRestorePointStatus {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Creating => "creating",
+            Self::Available => "available",
+            Self::Failed => "failed",
+            Self::RollingBack => "rolling_back",
+            Self::RolledBack => "rolled_back",
+            Self::Expired => "expired",
+        }
+    }
+}
+
+impl FromStr for WorkflowRestorePointStatus {
+    type Err = AppError;
+
+    fn from_str(value: &str) -> AppResult<Self> {
+        match value {
+            "creating" => Ok(Self::Creating),
+            "available" => Ok(Self::Available),
+            "failed" => Ok(Self::Failed),
+            "rolling_back" => Ok(Self::RollingBack),
+            "rolled_back" => Ok(Self::RolledBack),
+            "expired" => Ok(Self::Expired),
+            _ => Err(AppError::Validation("数据库中的恢复点状态无效".into())),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkflowRestorePoint {
+    pub id: Uuid,
+    pub run_id: Uuid,
+    pub node_id: Uuid,
+    pub remote_path: String,
+    pub relative_path: Option<String>,
+    pub original_existed: bool,
+    pub size_bytes: Option<u64>,
+    pub sha256: Option<String>,
+    pub status: WorkflowRestorePointStatus,
+    pub applicability: Value,
+    pub error_message: Option<String>,
+    pub created_at: i64,
+    pub updated_at: i64,
+}
+
+#[derive(Debug, Clone)]
+pub struct NewWorkflowRestorePoint {
+    pub run_id: Uuid,
+    pub node_id: Uuid,
+    pub remote_path: String,
+    pub relative_path: Option<String>,
+    pub applicability: Value,
+}
+
+#[derive(Debug, Clone)]
+pub struct FinishWorkflowRestorePoint {
+    pub id: Uuid,
+    pub status: WorkflowRestorePointStatus,
+    pub original_existed: bool,
+    pub relative_path: Option<String>,
+    pub size_bytes: Option<u64>,
+    pub sha256: Option<String>,
+    pub error_message: Option<String>,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WorkflowRunEvent {
@@ -328,6 +406,7 @@ pub struct WorkflowRunEvent {
 pub struct WorkflowRunDetails {
     pub run: WorkflowRunRecord,
     pub node_runs: Vec<WorkflowNodeRun>,
+    pub restore_points: Vec<WorkflowRestorePoint>,
     pub events: Vec<WorkflowRunEvent>,
 }
 

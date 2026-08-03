@@ -62,6 +62,7 @@ CREATE TABLE workflow_restore_points (
   sha256 TEXT CHECK (sha256 IS NULL OR length(sha256) = 64),
   status TEXT NOT NULL CHECK (status IN ('creating','available','failed','rolling_back','rolled_back','expired')),
   applicability_json TEXT NOT NULL,
+  error_message TEXT CHECK (error_message IS NULL OR length(CAST(error_message AS BLOB)) <= 8192),
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL
 );
@@ -80,4 +81,3 @@ CREATE INDEX idx_workflow_runs_created ON workflow_runs(created_at DESC);
 CREATE INDEX idx_workflow_runs_server_status ON workflow_runs(server_id, status, created_at DESC);
 CREATE INDEX idx_workflow_node_runs_run ON workflow_node_runs(run_id, node_id, attempt);
 CREATE INDEX idx_workflow_restore_points_run ON workflow_restore_points(run_id, created_at DESC);
-

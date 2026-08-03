@@ -101,11 +101,11 @@
 - Modify: `src-tauri/src/services/mod.rs`
 - Test: `src-tauri/tests/workflow_restore_points.rs`
 
-- [ ] 写路径失败测试：只能位于 `backups/workflows/<run>/<node>`，拒绝绝对路径、`..`、NUL 和数据库外文件。
-- [ ] 写 SFTP 失败测试：已有远端文件流式备份并 SHA-256 校验；不存在文件记录 create/delete 语义；取消/断线清理 partial。
-- [ ] 实现 restore-point create、available/failed 状态和元数据持久化。
-- [ ] 运行恢复点与 SFTP 回归测试。
-- [ ] 提交：`feat: capture verified workflow restore points`
+- [x] 写路径失败测试：只能位于 `backups/workflows/<run>/<node>`，拒绝绝对路径、`..`、NUL 和数据库外文件。
+- [x] 写 SFTP 失败测试：已有远端文件流式备份并 SHA-256 校验；不存在文件记录 create/delete 语义；取消/断线清理 partial。
+- [x] 实现 restore-point create、available/failed 状态和元数据持久化。
+- [x] 运行恢复点与 SFTP 回归测试。
+- [x] 提交：`feat: capture verified workflow restore points`
 
 ## Task 7：串行运行器与条件分支
 

@@ -27,6 +27,7 @@ use crate::{
     error::{AppError, AppResult},
     repositories::{
         execution_repository::ExecutionRepository, server_repository::ServerRepository,
+        workflow_repository::WorkflowRepository,
     },
     services::{
         execution_service::{
@@ -34,6 +35,7 @@ use crate::{
             TaskExecutionRequest,
         },
         log_service::LogService,
+        restore_point_service::RestorePointService,
         server_connector::ServerConnector,
         transfer_service::TransferService,
     },
@@ -63,6 +65,8 @@ pub struct AppServices {
     executions: ExecutionService,
     logs: LogService,
     transfers: TransferService,
+    workflows: WorkflowRepository,
+    restore_points: RestorePointService,
 }
 
 impl AppServices {
@@ -80,8 +84,15 @@ impl AppServices {
         let vault = Vault::new(root, protector);
         let execution_repository = ExecutionRepository::new(database.pool().clone());
         execution_repository.recover_interrupted().await?;
+        let workflow_repository = WorkflowRepository::new(database.pool().clone());
+        workflow_repository.recover_interrupted().await?;
         let registry = ExecutionRegistry::default();
         let connector = ServerConnector::new(servers.clone(), vault.clone());
+        let restore_points = RestorePointService::new(
+            root.to_path_buf(),
+            workflow_repository.clone(),
+            connector.clone(),
+        );
         Ok(Self {
             data_root: root.to_path_buf(),
             servers,
@@ -104,6 +115,8 @@ impl AppServices {
                 connector,
                 registry,
             ),
+            workflows: workflow_repository,
+            restore_points,
         })
     }
 
@@ -121,6 +134,14 @@ impl AppServices {
 
     pub fn transfer_service(&self) -> TransferService {
         self.transfers.clone()
+    }
+
+    pub fn workflow_repository(&self) -> WorkflowRepository {
+        self.workflows.clone()
+    }
+
+    pub fn restore_point_service(&self) -> RestorePointService {
+        self.restore_points.clone()
     }
 
     pub async fn create_server(&self, request: CreateServerRequest) -> AppResult<ServerProfile> {

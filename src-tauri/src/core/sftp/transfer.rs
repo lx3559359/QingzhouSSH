@@ -11,7 +11,13 @@ use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
 use crate::{
-    core::ssh::{executor::EventSink, transport::AuthenticatedSshSession},
+    core::{
+        ssh::{
+            executor::{EventSink, VecEventSink},
+            transport::AuthenticatedSshSession,
+        },
+        workflows::resolve_restore_point_path,
+    },
     domain::events::{EventSequence, ExecutionEventPayload},
     error::{AppError, AppResult},
 };
@@ -210,16 +216,13 @@ pub async fn download<E: EventSink>(
     }
 
     let sftp = open_sftp(ssh).await?;
-    let result = download_to_partial(
-        &sftp,
+    let target = LocalDownloadTarget {
         data_root,
-        request,
-        &destination,
-        &partial,
-        events,
-        cancel,
-    )
-    .await;
+        destination: &destination,
+        partial: &partial,
+        overwrite: request.overwrite,
+    };
+    let result = download_to_partial(&sftp, &request.remote_path, target, events, cancel).await;
     if result.is_err() && partial.exists() {
         let _ = tokio::fs::remove_file(&partial).await;
     }
@@ -227,26 +230,24 @@ pub async fn download<E: EventSink>(
     result
 }
 
+struct LocalDownloadTarget<'a> {
+    data_root: &'a Path,
+    destination: &'a Path,
+    partial: &'a Path,
+    overwrite: bool,
+}
+
 async fn download_to_partial<E: EventSink>(
     sftp: &SftpSession,
-    data_root: &Path,
-    request: &DownloadRequest,
-    destination: &Path,
-    partial: &Path,
+    remote_path: &str,
+    target: LocalDownloadTarget<'_>,
     events: &mut E,
     cancel: CancellationToken,
 ) -> AppResult<TransferOutcome> {
-    let expected_hash = hash_remote_with_sftp(sftp, &request.remote_path, cancel.clone()).await?;
-    let total = sftp
-        .metadata(request.remote_path.clone())
-        .await
-        .map_err(sftp_error)?
-        .size;
-    let mut remote = sftp
-        .open(request.remote_path.clone())
-        .await
-        .map_err(sftp_error)?;
-    let mut local = File::create(partial).await?;
+    let expected_hash = hash_remote_with_sftp(sftp, remote_path, cancel.clone()).await?;
+    let total = sftp.metadata(remote_path).await.map_err(sftp_error)?.size;
+    let mut remote = sftp.open(remote_path).await.map_err(sftp_error)?;
+    let mut local = File::create(target.partial).await?;
     let mut hasher = Sha256::new();
     let mut block = vec![0_u8; TRANSFER_BLOCK_BYTES];
     let mut transferred = 0_u64;
@@ -275,18 +276,63 @@ async fn download_to_partial<E: EventSink>(
             "下载文件 SHA-256 不一致：远端 {expected_hash}，本地 {actual_hash}"
         )));
     }
-    if request.overwrite && destination.exists() {
-        tokio::fs::remove_file(destination).await?;
+    if target.overwrite && target.destination.exists() {
+        tokio::fs::remove_file(target.destination).await?;
     }
-    tokio::fs::rename(partial, destination).await?;
-    let relative = destination
-        .strip_prefix(data_root)
+    tokio::fs::rename(target.partial, target.destination).await?;
+    let relative = target
+        .destination
+        .strip_prefix(target.data_root)
         .map_err(|_| AppError::Security("下载目标逃逸数据根目录".into()))?;
     Ok(TransferOutcome {
         bytes: transferred,
         sha256: actual_hash,
         location: relative.to_string_lossy().replace('\\', "/"),
     })
+}
+
+pub(crate) async fn backup_remote_file(
+    ssh: &AuthenticatedSshSession,
+    data_root: &Path,
+    remote_path: &str,
+    relative_path: &str,
+    cancel: CancellationToken,
+) -> AppResult<Option<TransferOutcome>> {
+    validate_remote_path(remote_path)?;
+    let destination = resolve_restore_point_path(data_root, relative_path)?;
+    let partial = local_partial_path(&destination);
+    let sftp = open_sftp(ssh).await?;
+    let exists = sftp_try_exists(&sftp, remote_path).await;
+    let exists = match exists {
+        Ok(exists) => exists,
+        Err(error) => {
+            let _ = sftp.close().await;
+            return Err(error);
+        }
+    };
+    if !exists {
+        let _ = sftp.close().await;
+        return Ok(None);
+    }
+    if let Some(parent) = destination.parent() {
+        tokio::fs::create_dir_all(parent).await?;
+    }
+    if partial.exists() {
+        tokio::fs::remove_file(&partial).await?;
+    }
+    let mut events = VecEventSink::default();
+    let target = LocalDownloadTarget {
+        data_root,
+        destination: &destination,
+        partial: &partial,
+        overwrite: true,
+    };
+    let result = download_to_partial(&sftp, remote_path, target, &mut events, cancel).await;
+    if result.is_err() && partial.exists() {
+        let _ = tokio::fs::remove_file(&partial).await;
+    }
+    let _ = sftp.close().await;
+    result.map(Some)
 }
 
 pub async fn hash_remote_file(

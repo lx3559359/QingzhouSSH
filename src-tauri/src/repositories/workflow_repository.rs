@@ -7,13 +7,15 @@ use sqlx::{sqlite::SqliteRow, Row, SqlitePool};
 use uuid::Uuid;
 
 use crate::{
+    core::{sftp::validate_remote_path, workflows::validate_restore_point_relative_path},
     domain::{
         execution::now_millis,
         workflow::{
-            FinishWorkflowNode, NewWorkflowRun, WorkflowDefinition, WorkflowDraft, WorkflowEdge,
-            WorkflowNode, WorkflowNodeRun, WorkflowNodeStatus, WorkflowRunDetails,
-            WorkflowRunEvent, WorkflowRunFilter, WorkflowRunRecord, WorkflowRunStatus,
-            WorkflowSummary,
+            FinishWorkflowNode, FinishWorkflowRestorePoint, NewWorkflowRestorePoint,
+            NewWorkflowRun, WorkflowDefinition, WorkflowDraft, WorkflowEdge, WorkflowNode,
+            WorkflowNodeRun, WorkflowNodeStatus, WorkflowRestorePoint, WorkflowRestorePointStatus,
+            WorkflowRunDetails, WorkflowRunEvent, WorkflowRunFilter, WorkflowRunRecord,
+            WorkflowRunStatus, WorkflowSummary,
         },
     },
     error::{AppError, AppResult},
@@ -276,6 +278,125 @@ impl WorkflowRepository {
         ensure_one(result.rows_affected(), "工作流节点无法进入终态")
     }
 
+    pub async fn create_restore_point(
+        &self,
+        draft: NewWorkflowRestorePoint,
+    ) -> AppResult<WorkflowRestorePoint> {
+        validate_remote_path(&draft.remote_path)?;
+        if let Some(relative_path) = &draft.relative_path {
+            validate_restore_point_relative_path(relative_path)?;
+        }
+        let applicability_json = serde_json::to_string(&draft.applicability)
+            .map_err(|_| AppError::Validation("恢复点适用条件无法序列化".into()))?;
+        if applicability_json.len() > 8 * 1024 {
+            return Err(AppError::Validation("恢复点适用条件超过 8 KiB".into()));
+        }
+        let id = Uuid::new_v4();
+        let now = now_millis();
+        sqlx::query(
+            "INSERT INTO workflow_restore_points (id,run_id,node_id,remote_path,relative_path,original_existed,size_bytes,sha256,status,applicability_json,error_message,created_at,updated_at) VALUES (?,?,?,?,?,0,NULL,NULL,'creating',?,NULL,?,?)",
+        )
+        .bind(id.to_string())
+        .bind(draft.run_id.to_string())
+        .bind(draft.node_id.to_string())
+        .bind(draft.remote_path)
+        .bind(draft.relative_path)
+        .bind(applicability_json)
+        .bind(now)
+        .bind(now)
+        .execute(&self.pool)
+        .await?;
+        self.get_restore_point(id)
+            .await?
+            .ok_or_else(|| AppError::Database(sqlx::Error::RowNotFound))
+    }
+
+    pub async fn finish_restore_point(
+        &self,
+        mut finish: FinishWorkflowRestorePoint,
+    ) -> AppResult<()> {
+        if !matches!(
+            finish.status,
+            WorkflowRestorePointStatus::Available | WorkflowRestorePointStatus::Failed
+        ) {
+            return Err(AppError::Validation("恢复点创建结果状态无效".into()));
+        }
+        if let Some(relative_path) = &finish.relative_path {
+            validate_restore_point_relative_path(relative_path)?;
+        }
+        match finish.status {
+            WorkflowRestorePointStatus::Available if finish.original_existed => {
+                let valid_hash = finish.sha256.as_deref().is_some_and(|hash| {
+                    hash.len() == 64 && hash.bytes().all(|byte| byte.is_ascii_hexdigit())
+                });
+                if finish.relative_path.is_none() || finish.size_bytes.is_none() || !valid_hash {
+                    return Err(AppError::Validation(
+                        "已有远程文件的恢复点缺少备份路径、大小或 SHA-256".into(),
+                    ));
+                }
+                finish.error_message = None;
+            }
+            WorkflowRestorePointStatus::Available => {
+                finish.relative_path = None;
+                finish.size_bytes = None;
+                finish.sha256 = None;
+                finish.error_message = None;
+            }
+            WorkflowRestorePointStatus::Failed => {
+                finish.original_existed = false;
+                finish.relative_path = None;
+                finish.size_bytes = None;
+                finish.sha256 = None;
+                if finish.error_message.as_deref().is_none_or(str::is_empty) {
+                    finish.error_message = Some("恢复点创建失败".into());
+                }
+            }
+            _ => unreachable!(),
+        }
+        let size_bytes = finish
+            .size_bytes
+            .map(i64::try_from)
+            .transpose()
+            .map_err(|_| AppError::Validation("恢复点大小超出范围".into()))?;
+        let result = sqlx::query(
+            "UPDATE workflow_restore_points SET status=?,original_existed=?,relative_path=?,size_bytes=?,sha256=?,error_message=?,updated_at=? WHERE id=? AND status='creating'",
+        )
+        .bind(finish.status.as_str())
+        .bind(finish.original_existed)
+        .bind(finish.relative_path)
+        .bind(size_bytes)
+        .bind(finish.sha256)
+        .bind(cap_utf8(finish.error_message, 8 * 1024))
+        .bind(now_millis())
+        .bind(finish.id.to_string())
+        .execute(&self.pool)
+        .await?;
+        ensure_one(result.rows_affected(), "恢复点不处于可完成状态")
+    }
+
+    pub async fn get_restore_point(&self, id: Uuid) -> AppResult<Option<WorkflowRestorePoint>> {
+        sqlx::query(
+            "SELECT id,run_id,node_id,remote_path,relative_path,original_existed,size_bytes,sha256,status,applicability_json,error_message,created_at,updated_at FROM workflow_restore_points WHERE id=?",
+        )
+        .bind(id.to_string())
+        .fetch_optional(&self.pool)
+        .await?
+        .map(|row| map_restore_point(&row))
+        .transpose()
+    }
+
+    pub async fn list_restore_points(&self, run_id: Uuid) -> AppResult<Vec<WorkflowRestorePoint>> {
+        sqlx::query(
+            "SELECT id,run_id,node_id,remote_path,relative_path,original_existed,size_bytes,sha256,status,applicability_json,error_message,created_at,updated_at FROM workflow_restore_points WHERE run_id=? ORDER BY created_at,id",
+        )
+        .bind(run_id.to_string())
+        .fetch_all(&self.pool)
+        .await?
+        .iter()
+        .map(map_restore_point)
+        .collect()
+    }
+
     pub async fn append_event(
         &self,
         run_id: Uuid,
@@ -332,9 +453,11 @@ impl WorkflowRepository {
         .iter()
         .map(map_event)
         .collect::<AppResult<Vec<_>>>()?;
+        let restore_points = self.list_restore_points(run_id).await?;
         Ok(Some(WorkflowRunDetails {
             run,
             node_runs,
+            restore_points,
             events,
         }))
     }
@@ -504,6 +627,28 @@ fn map_event(row: &SqliteRow) -> AppResult<WorkflowRunEvent> {
         payload: serde_json::from_str(&payload_json)
             .map_err(|_| AppError::Validation("数据库中的工作流事件损坏".into()))?,
         emitted_at: row.try_get("emitted_at")?,
+    })
+}
+
+fn map_restore_point(row: &SqliteRow) -> AppResult<WorkflowRestorePoint> {
+    let status: String = row.try_get("status")?;
+    let applicability_json: String = row.try_get("applicability_json")?;
+    let size_bytes: Option<i64> = row.try_get("size_bytes")?;
+    Ok(WorkflowRestorePoint {
+        id: parse_uuid(row.try_get("id")?)?,
+        run_id: parse_uuid(row.try_get("run_id")?)?,
+        node_id: parse_uuid(row.try_get("node_id")?)?,
+        remote_path: row.try_get("remote_path")?,
+        relative_path: row.try_get("relative_path")?,
+        original_existed: row.try_get("original_existed")?,
+        size_bytes: size_bytes.map(parse_u64).transpose()?,
+        sha256: row.try_get("sha256")?,
+        status: WorkflowRestorePointStatus::from_str(&status)?,
+        applicability: serde_json::from_str(&applicability_json)
+            .map_err(|_| AppError::Validation("数据库中的恢复点适用条件损坏".into()))?,
+        error_message: row.try_get("error_message")?,
+        created_at: row.try_get("created_at")?,
+        updated_at: row.try_get("updated_at")?,
     })
 }
 
