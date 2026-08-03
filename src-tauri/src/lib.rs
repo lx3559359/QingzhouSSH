@@ -1,7 +1,9 @@
 #![allow(linker_messages)]
 
 pub mod core;
+pub mod domain;
 pub mod error;
+pub mod repositories;
 pub mod window;
 
 use core::data_root::{initialize_data_root, resolve_runtime_data_root};
