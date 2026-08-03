@@ -1,5 +1,6 @@
 # Brainstorming previews and local design state
 .superpowers/
+.worktrees/
 
 # Project-local dependencies, caches, and build output
 .local/
