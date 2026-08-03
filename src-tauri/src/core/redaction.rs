@@ -1,10 +1,11 @@
 use serde_json::{Map, Value};
+use zeroize::Zeroizing;
 
 pub const REDACTED: &str = "[REDACTED]";
 
 #[derive(Debug, Clone, Default)]
 pub struct Redactor {
-    runtime_secrets: Vec<String>,
+    runtime_secrets: Vec<Zeroizing<String>>,
 }
 
 impl Redactor {
@@ -15,7 +16,7 @@ impl Redactor {
     {
         let mut runtime_secrets = runtime_secrets
             .into_iter()
-            .map(Into::into)
+            .map(|secret| Zeroizing::new(secret.into()))
             .filter(|secret| !secret.is_empty())
             .collect::<Vec<_>>();
         runtime_secrets.sort_by_key(|secret| std::cmp::Reverse(secret.len()));
@@ -26,7 +27,7 @@ impl Redactor {
     pub fn redact(&self, input: &str) -> String {
         let mut output = redact_private_key_blocks(input);
         for secret in &self.runtime_secrets {
-            output = output.replace(secret, REDACTED);
+            output = output.replace(secret.as_str(), REDACTED);
         }
         redact_named_assignments(&output)
     }

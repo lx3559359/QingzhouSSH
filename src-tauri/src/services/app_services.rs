@@ -20,9 +20,29 @@ use crate::{
         system_probe::SystemCapabilities,
         vault::Vault,
     },
-    domain::server::{CreateServerRequest, ServerProfile, StoredCredential, StoredHostKey},
+    domain::{
+        execution::{ExecutionDetails, ExecutionFilter, ExecutionRecord},
+        server::{CreateServerRequest, ServerProfile, StoredCredential, StoredHostKey},
+    },
     error::{AppError, AppResult},
-    repositories::server_repository::ServerRepository,
+    repositories::{
+        execution_repository::ExecutionRepository, server_repository::ServerRepository,
+    },
+    services::{
+        execution_service::{
+            CustomExecutionRequest, ExecutionRegistry, ExecutionService, TaskAvailability,
+            TaskExecutionRequest,
+        },
+        log_service::LogService,
+        server_connector::ServerConnector,
+        transfer_service::TransferService,
+    },
+};
+
+use crate::core::{
+    logs::{LogResultPage, LogSearchRequest},
+    sftp::{DownloadRequest, UploadRequest},
+    ssh::executor::EventSink,
 };
 
 const DEFAULT_SSH_TIMEOUT: Duration = Duration::from_secs(15);
@@ -40,6 +60,9 @@ pub struct AppServices {
     data_root: PathBuf,
     servers: ServerRepository,
     vault: Vault,
+    executions: ExecutionService,
+    logs: LogService,
+    transfers: TransferService,
 }
 
 impl AppServices {
@@ -53,10 +76,34 @@ impl AppServices {
     ) -> AppResult<Self> {
         initialize_data_root(root)?;
         let database = Database::open(root).await?;
+        let servers = ServerRepository::new(database.pool().clone());
+        let vault = Vault::new(root, protector);
+        let execution_repository = ExecutionRepository::new(database.pool().clone());
+        execution_repository.recover_interrupted().await?;
+        let registry = ExecutionRegistry::default();
+        let connector = ServerConnector::new(servers.clone(), vault.clone());
         Ok(Self {
             data_root: root.to_path_buf(),
-            servers: ServerRepository::new(database.pool().clone()),
-            vault: Vault::new(root, protector),
+            servers,
+            vault,
+            executions: ExecutionService::new(
+                root.to_path_buf(),
+                execution_repository.clone(),
+                connector.clone(),
+                registry.clone(),
+            ),
+            logs: LogService::new(
+                root.to_path_buf(),
+                execution_repository.clone(),
+                connector.clone(),
+                registry.clone(),
+            ),
+            transfers: TransferService::new(
+                root.to_path_buf(),
+                execution_repository,
+                connector,
+                registry,
+            ),
         })
     }
 
@@ -150,6 +197,93 @@ impl AppServices {
         let expected_fingerprint = trusted.fingerprint_sha256;
 
         transport::probe_system(&endpoint, &username, &credential, &expected_fingerprint).await
+    }
+
+    pub async fn list_task_definitions(&self, server_id: &str) -> AppResult<Vec<TaskAvailability>> {
+        self.executions.list_task_definitions(server_id).await
+    }
+
+    pub async fn start_task_execution<E: EventSink>(
+        &self,
+        server_id: &str,
+        request: TaskExecutionRequest,
+        events: &mut E,
+    ) -> AppResult<ExecutionDetails> {
+        self.executions
+            .execute_task(server_id, request, events)
+            .await
+    }
+
+    pub async fn start_custom_execution<E: EventSink>(
+        &self,
+        server_id: &str,
+        request: CustomExecutionRequest,
+        events: &mut E,
+    ) -> AppResult<ExecutionDetails> {
+        self.executions
+            .execute_custom(server_id, request, events)
+            .await
+    }
+
+    pub async fn cancel_execution(&self, execution_id: Uuid) -> AppResult<()> {
+        self.executions.cancel(execution_id).await
+    }
+
+    pub async fn search_logs<E: EventSink>(
+        &self,
+        server_id: &str,
+        request: LogSearchRequest,
+        events: &mut E,
+    ) -> AppResult<ExecutionDetails> {
+        self.logs.search(server_id, request, events).await
+    }
+
+    pub async fn read_log_result_page(
+        &self,
+        execution_id: Uuid,
+        cursor: Option<&str>,
+        page_size: usize,
+    ) -> AppResult<LogResultPage> {
+        self.logs.read_page(execution_id, cursor, page_size).await
+    }
+
+    pub async fn download_log_result(
+        &self,
+        execution_id: Uuid,
+        suggested_name: &str,
+    ) -> AppResult<String> {
+        self.logs
+            .download_result(execution_id, suggested_name)
+            .await
+    }
+
+    pub async fn upload_file<E: EventSink>(
+        &self,
+        server_id: &str,
+        request: UploadRequest,
+        events: &mut E,
+    ) -> AppResult<ExecutionDetails> {
+        self.transfers.upload(server_id, request, events).await
+    }
+
+    pub async fn download_file<E: EventSink>(
+        &self,
+        server_id: &str,
+        request: DownloadRequest,
+        events: &mut E,
+    ) -> AppResult<ExecutionDetails> {
+        self.transfers.download(server_id, request, events).await
+    }
+
+    pub async fn list_executions(
+        &self,
+        filter: ExecutionFilter,
+    ) -> AppResult<Vec<ExecutionRecord>> {
+        self.executions.list(filter).await
+    }
+
+    pub async fn get_execution(&self, execution_id: Uuid) -> AppResult<Option<ExecutionDetails>> {
+        self.executions.get(execution_id).await
     }
 
     async fn require_server(&self, server_id: &str) -> AppResult<ServerProfile> {

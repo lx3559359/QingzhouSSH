@@ -42,6 +42,40 @@ pub enum AppError {
 }
 
 impl AppError {
+    pub fn code(&self) -> &'static str {
+        match self {
+            Self::Validation(_) => "validation",
+            Self::Compatibility(_) => "compatibility",
+            Self::Serialization(_) => "serialization",
+            Self::OutputLimitExceeded { .. } => "output_limit_exceeded",
+            Self::Transfer(_) => "transfer",
+            Self::Integrity(_) => "integrity",
+            Self::Permission(_) => "permission",
+            Self::DiskSpace(_) => "disk_space",
+            Self::Cancelled => "cancelled",
+            Self::RemoteStateUncertain(_) => "remote_state_uncertain",
+            Self::NotReady => "not_ready",
+            Self::Security(_) => "security",
+            Self::Io(_) => "io",
+            Self::Database(_) => "database",
+            Self::Migration(_) => "migration",
+            Self::Ssh(_) => "ssh",
+            Self::SshCommand { .. } => "ssh_command",
+            Self::Tauri(_) => "tauri",
+        }
+    }
+
+    pub fn retryable(&self) -> bool {
+        matches!(
+            self,
+            Self::Io(_)
+                | Self::Ssh(_)
+                | Self::Transfer(_)
+                | Self::DiskSpace(_)
+                | Self::RemoteStateUncertain(_)
+        )
+    }
+
     pub fn ssh_command(exit_status: i32, mut stderr: String) -> Self {
         const MAX_STDERR_BYTES: usize = 8 * 1024;
         if stderr.len() > MAX_STDERR_BYTES {
@@ -69,28 +103,8 @@ impl Serialize for AppError {
             message: String,
         }
 
-        let code = match self {
-            AppError::Validation(_) => "validation",
-            AppError::Compatibility(_) => "compatibility",
-            AppError::Serialization(_) => "serialization",
-            AppError::OutputLimitExceeded { .. } => "output_limit_exceeded",
-            AppError::Transfer(_) => "transfer",
-            AppError::Integrity(_) => "integrity",
-            AppError::Permission(_) => "permission",
-            AppError::DiskSpace(_) => "disk_space",
-            AppError::Cancelled => "cancelled",
-            AppError::RemoteStateUncertain(_) => "remote_state_uncertain",
-            AppError::NotReady => "not_ready",
-            AppError::Security(_) => "security",
-            AppError::Io(_) => "io",
-            AppError::Database(_) => "database",
-            AppError::Migration(_) => "migration",
-            AppError::Ssh(_) => "ssh",
-            AppError::SshCommand { .. } => "ssh_command",
-            AppError::Tauri(_) => "tauri",
-        };
         Payload {
-            code,
+            code: self.code(),
             message: self.to_string(),
         }
         .serialize(serializer)

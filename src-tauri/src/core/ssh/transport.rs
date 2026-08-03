@@ -56,6 +56,7 @@ struct HostKeyVerifier {
 
 pub struct AuthenticatedSshSession {
     handle: client::Handle<HostKeyVerifier>,
+    timeout: Duration,
 }
 
 impl AuthenticatedSshSession {
@@ -68,6 +69,10 @@ impl AuthenticatedSshSession {
             .handle
             .disconnect(Disconnect::ByApplication, "", "")
             .await;
+    }
+
+    pub fn timeout(&self) -> Duration {
+        self.timeout
     }
 }
 
@@ -331,7 +336,23 @@ pub async fn connect_authenticated(
         authenticate(&mut session, username, credential).await
     })
     .await?;
-    Ok(AuthenticatedSshSession { handle: session })
+    Ok(AuthenticatedSshSession {
+        handle: session,
+        timeout: endpoint.timeout,
+    })
+}
+
+pub async fn probe_authenticated(
+    session: &AuthenticatedSshSession,
+) -> AppResult<SystemCapabilities> {
+    let output = with_timeout(session.timeout(), "系统能力探测", async {
+        run_command(&session.handle, PROBE_COMMAND).await
+    })
+    .await?;
+    if output.exit_status != 0 {
+        return Err(AppError::ssh_command(output.exit_status, output.stderr));
+    }
+    parse_probe(&output.stdout)
 }
 
 pub async fn probe_system(
