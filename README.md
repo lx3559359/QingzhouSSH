@@ -2,7 +2,7 @@
 
 QingzhouSSH 是一个面向 Windows 的无交互式 SSH 终端工具。它把服务器连接、Linux 能力识别、快捷任务、日志检索下载和 SFTP 文件传输包装成图形界面，不提供交互式终端、PTY 或持续 stdin。
 
-当前开发版本已完成 **Milestone 2：快捷任务、日志与文件传输**，仍不是完整产品发行版。
+当前开发版本已完成 **Milestone 3：可视化工作流与恢复**，仍不是完整产品发行版。
 
 ## 当前已实现
 
@@ -17,14 +17,14 @@ QingzhouSSH 是一个面向 Windows 的无交互式 SSH 终端工具。它把服
 - 普通 `.log`/`.gz` 日志搜索、50 条分页预览和项目数据目录内下载。
 - SFTP 分块上传/下载、进度、SHA-256 校验、临时文件清理和原子完成。
 - 可筛选执行历史、`uncertain` 中断恢复语义和后端登记的下载文件清单。
-- 前端、Rust、D 盘路径审计及真实 SSH/SFTP/M2 闭环集成测试。
+- 可视化工作流列表、八类步骤库、点阵画布、SVG 连线、节点参数和显式真假分支编辑。
+- 不可变工作流版本、共享 Rust 图校验、单服务器串行运行、单调事件和持久化节点时间线。
+- 节点失败暂停与同节点重试、准确取消/`uncertain`、上传覆盖恢复点、逆序回滚和脱敏诊断下载。
+- 前端、Rust、D 盘路径审计及真实 SSH/SFTP/M2/M3 闭环集成测试。
 
 ## 后续里程碑
 
-- Milestone 3：可视化工作流、条件分支、重试、恢复点与运行控制。
 - Milestone 4：Windows 安装包、在线更新，以及 GitHub Releases + ModelScope（魔搭）双源发布。
-
-界面中的工作流入口会明确显示里程碑状态，不提供伪运行按钮。
 
 ## 开发快速开始
 
@@ -39,13 +39,13 @@ cargo test --manifest-path .\src-tauri\Cargo.toml
 pnpm tauri dev
 ```
 
-真实 SSH/SFTP/M2 闭环测试使用项目内的隔离夹具，生成的 Python 包、日志、远端模拟目录和测试密钥全部写入 `.local`：
+真实 SSH/SFTP/M2/M3 闭环测试使用项目内的隔离夹具，生成的 Python 包、日志、远端模拟目录和测试密钥全部写入 `.local`：
 
 ```powershell
 .\scripts\test-ssh-live.ps1
 ```
 
-完整命令和环境要求见 [开发指南](docs/development.md)，M2 验收证据见 [Milestone 2 验收记录](docs/milestone-2-acceptance.md)，安全边界见 [安全说明](docs/security.md)。
+完整命令和环境要求见 [开发指南](docs/development.md)，M3 验收证据见 [Milestone 3 验收记录](docs/milestone-3-acceptance.md)，安全边界见 [安全说明](docs/security.md)。
 
 ## 数据位置
 

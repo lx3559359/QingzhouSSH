@@ -255,10 +255,10 @@
 - Create: `docs/milestone-3-acceptance.md`
 - Modify: 本计划
 
-- [ ] 文档列出节点、图限制、条件、状态、重试、取消/uncertain、恢复点、回滚、诊断和数据目录。
-- [ ] 运行占位扫描，只允许 M4 路线图说明和真实 HTML placeholder 属性。
-- [ ] 运行 dev-env、D 盘路径、前端全量测试/构建、Rust fmt/Clippy/全量测试、Tauri 调试构建。
-- [ ] 用内置浏览器人工验收工作流列表、画布阴影、节点拖动、右侧参数背景、条件分支、危险确认、失败暂停、重试、回滚和诊断下载，并保存截图。
-- [ ] 精确扫描 C 盘 AppData、`D:\`、`D:\Codex Project`；所有项目数据保持在项目目录或用户选择的数据根目录。
-- [ ] 把本计划全部完成项改为 `[x]`，记录命令、测试数、live 结果和截图。
-- [ ] 提交：`docs: record milestone three acceptance`
+- [x] 文档列出节点、图限制、条件、状态、重试、取消/uncertain、恢复点、回滚、诊断和数据目录。
+- [x] 运行占位扫描，只允许 M4 路线图说明和真实 HTML placeholder 属性。
+- [x] 运行 dev-env、D 盘路径、前端全量测试/构建、Rust fmt/Clippy/全量测试、Tauri 调试构建。
+- [x] 用内置浏览器人工验收工作流列表、画布阴影、节点拖动、右侧参数背景、条件分支、危险确认、失败暂停、重试、回滚和诊断下载，并保存截图。
+- [x] 精确扫描 C 盘 AppData、`D:\`、`D:\Codex Project`；所有项目数据保持在项目目录或用户选择的数据根目录。
+- [x] 把本计划全部完成项改为 `[x]`，记录命令、测试数、live 结果和截图。
+- [x] 提交：`docs: record milestone three acceptance`
