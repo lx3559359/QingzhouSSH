@@ -64,6 +64,7 @@ Tauri v2 对 NSIS 安装器本身签名，更新载荷契约是同一个 `setup.
 
 - GitHub：<https://github.com/lx3559359/QingzhouSSH>（Public）
 - ModelScope：<https://modelscope.cn/studios/lx3559359/QingzhouSSH>（Public，Apache-2.0）
+- 本地 `feature/full-product` 已快进合并到 `master`，且仅推送合并后的 `master`；临时功能分支未推送。
 - GitHub Actions secrets 已配置：`TAURI_SIGNING_PRIVATE_KEY`、`TAURI_SIGNING_PRIVATE_KEY_PASSWORD`。
 - GitHub Actions variable 已配置：`QINGZHOU_MODELSCOPE_NAMESPACE=lx3559359`。
 - 待项目所有者配置：`MODELSCOPE_API_TOKEN`。令牌不得发送到聊天或写入项目文件，应直接通过 `gh secret set MODELSCOPE_API_TOKEN --repo lx3559359/QingzhouSSH` 的安全输入提示录入。

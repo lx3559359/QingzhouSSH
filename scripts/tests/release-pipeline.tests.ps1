@@ -37,6 +37,10 @@ foreach ($requiredText in @(
 if ([regex]::Matches($workflow, 'pnpm tauri build --bundles nsis').Count -ne 1) {
   throw 'Release workflow must build the signed NSIS bundle exactly once'
 }
+if ($workflow -match 'shell:\s*powershell') { throw 'Release workflow must use PowerShell 7 native error propagation' }
+if ([regex]::Matches($workflow, '\$PSNativeCommandUseErrorActionPreference\s*=\s*\$true').Count -lt 10) {
+  throw 'Every command-bearing release step must fail on a non-zero native exit code'
+}
 if ($workflow -match '(?i)(token|private.key|password)\s*:\s*["''][^$][^"'']+["'']') {
   throw 'Release workflow appears to contain a hard-coded secret'
 }

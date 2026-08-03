@@ -8,9 +8,10 @@ if ($tauri.bundle.targets -ne 'nsis') { throw 'Only the per-user NSIS target may
 if ($tauri.bundle.createUpdaterArtifacts -ne $true) { throw 'Signed updater artifacts must be enabled' }
 if ($tauri.bundle.useLocalToolsDir -ne $true) { throw 'NSIS tools must be cached in project target/.tauri instead of user AppData' }
 if ($tauri.bundle.windows.nsis.installMode -ne 'currentUser') { throw 'NSIS must not require administrator rights' }
-foreach ($ignoredDirectory in @('**/.local/**', '**/target/**', '**/artifacts/**')) {
+foreach ($ignoredDirectory in @('**/.local/**', '**/target/**', '**/artifacts/**', '**/.worktrees/**')) {
   if (-not $vite.Contains($ignoredDirectory)) { throw "Vite must ignore project-local generated directory: $ignoredDirectory" }
 }
+if ($vite -notmatch 'testTimeout:\s*15_?000') { throw 'Vitest needs a Windows CI-safe interaction timeout' }
 if ($tauri.bundle.windows.nsis.displayLanguageSelector -ne $true) { throw 'Installer language selection must be explicit' }
 $languages = @($tauri.bundle.windows.nsis.languages)
 if ($languages -notcontains 'SimpChinese' -or $languages -notcontains 'English') {

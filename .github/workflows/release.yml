@@ -44,8 +44,10 @@ jobs:
           cache: pnpm
 
       - name: Prepare project-local toolchain
-        shell: powershell
+        shell: pwsh
         run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
           & .\scripts\dev-env.ps1 -Quiet
           rustup toolchain install stable --profile minimal
           rustup default stable
@@ -53,21 +55,27 @@ jobs:
           pnpm install --frozen-lockfile
 
       - name: Project-local path audit
-        shell: powershell
+        shell: pwsh
         run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
           & .\scripts\dev-env.ps1 -Quiet
           & .\scripts\verify-d-drive.ps1
 
       - name: Frontend checks
-        shell: powershell
+        shell: pwsh
         run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
           & .\scripts\dev-env.ps1 -Quiet
           pnpm test
           pnpm build
 
       - name: Packaging and release script checks
-        shell: powershell
+        shell: pwsh
         run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
           & .\scripts\tests\dev-env.tests.ps1
           & .\scripts\tests\package-config.tests.ps1
           & .\scripts\tests\release-config.tests.ps1
@@ -75,8 +83,10 @@ jobs:
           & .\scripts\tests\release-pipeline.tests.ps1
 
       - name: Rust checks
-        shell: powershell
+        shell: pwsh
         run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
           & .\scripts\dev-env.ps1 -Quiet
           cargo fmt --manifest-path .\src-tauri\Cargo.toml -- --check
           cargo clippy --locked --manifest-path .\src-tauri\Cargo.toml --all-targets -- -D warnings
@@ -84,27 +94,33 @@ jobs:
 
       - name: Unsigned branch build
         if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
-        shell: powershell
+        shell: pwsh
         run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
           & .\scripts\dev-env.ps1 -Quiet
           pnpm tauri build --debug --no-bundle
 
       - name: Build signed NSIS bundle once
         if: ${{ startsWith(github.ref, 'refs/tags/v') }}
-        shell: powershell
+        shell: pwsh
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
           & .\scripts\dev-env.ps1 -Quiet
           pnpm tauri build --bundles nsis
 
       - name: Assemble signed release
         if: ${{ startsWith(github.ref, 'refs/tags/v') }}
-        shell: powershell
+        shell: pwsh
         env:
           QINGZHOU_MODELSCOPE_NAMESPACE: ${{ vars.QINGZHOU_MODELSCOPE_NAMESPACE }}
         run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
           & .\scripts\dev-env.ps1 -Quiet
           $version = (Get-Content -Raw -Encoding utf8 .\package.json | ConvertFrom-Json).version
           if ($env:GITHUB_REF_NAME -ne "v$version") { throw "Tag must equal v$version" }
@@ -123,8 +139,10 @@ jobs:
 
       - name: Install, update and portable smoke
         if: ${{ startsWith(github.ref, 'refs/tags/v') }}
-        shell: powershell
+        shell: pwsh
         run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
           & .\scripts\smoke-release.ps1 -ReleaseDirectory $env:QINGZHOU_RELEASE_DIR -AllowLocalMachineMutation
 
       - name: Upload workflow artifact
@@ -137,12 +155,20 @@ jobs:
 
       - name: Publish GitHub Release
         if: ${{ startsWith(github.ref, 'refs/tags/v') }}
-        shell: powershell
+        shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
           $tag = $env:GITHUB_REF_NAME
-          if (-not (gh release view $tag 2>$null)) { gh release create $tag --verify-tag --title "QingzhouSSH $tag" --generate-notes }
+          try {
+            gh release view $tag 2>$null | Out-Null
+            $releaseExists = $true
+          } catch {
+            $releaseExists = $false
+          }
+          if (-not $releaseExists) { gh release create $tag --verify-tag --title "QingzhouSSH $tag" --generate-notes }
           $metadata = Get-Content -Raw -Encoding utf8 (Join-Path $env:QINGZHOU_RELEASE_DIR 'release-metadata.json') | ConvertFrom-Json
           $files = @($metadata.files | ForEach-Object { Join-Path $env:QINGZHOU_RELEASE_DIR $_.name })
           $files += @('SHA256SUMS', 'SBOM.spdx.json', 'release-metadata.json') | ForEach-Object { Join-Path $env:QINGZHOU_RELEASE_DIR $_ }
@@ -151,11 +177,13 @@ jobs:
 
       - name: Publish identical bytes to ModelScope
         if: ${{ startsWith(github.ref, 'refs/tags/v') }}
-        shell: powershell
+        shell: pwsh
         env:
           MODELSCOPE_API_TOKEN: ${{ secrets.MODELSCOPE_API_TOKEN }}
           QINGZHOU_MODELSCOPE_NAMESPACE: ${{ vars.QINGZHOU_MODELSCOPE_NAMESPACE }}
         run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
           $pythonTarget = Join-Path $env:GITHUB_WORKSPACE '.local\python-modelscope'
           python -m pip install --disable-pip-version-check --target $pythonTarget 'modelscope-hub==0.1.8'
           $env:PYTHONPATH = $pythonTarget
@@ -163,12 +191,14 @@ jobs:
 
       - name: Read back and compare both public sources
         if: ${{ startsWith(github.ref, 'refs/tags/v') }}
-        shell: powershell
+        shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
           MODELSCOPE_API_TOKEN: ${{ secrets.MODELSCOPE_API_TOKEN }}
           QINGZHOU_MODELSCOPE_NAMESPACE: ${{ vars.QINGZHOU_MODELSCOPE_NAMESPACE }}
         run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
           $githubReadback = Join-Path $env:QINGZHOU_ARTIFACTS_DIR 'readback\github'
           $modelscopeReadback = Join-Path $env:QINGZHOU_ARTIFACTS_DIR 'readback\modelscope'
           New-Item -ItemType Directory -Force -Path $githubReadback, $modelscopeReadback | Out-Null

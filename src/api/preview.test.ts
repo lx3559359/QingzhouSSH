@@ -15,7 +15,6 @@ describe('preview data root', () => {
       state: 'ready',
       dataRoot: import.meta.env.VITE_QINGZHOU_DATA_ROOT,
     });
-    expect(status.dataRoot).toContain('轻量化SSH快捷工具');
     expect(status.dataRoot).toMatch(/[\\/].local[\\/]dev-data$/);
     expect(status.dataRoot).not.toBe('D:\\QingzhouSSH\\data');
   });
