@@ -5,6 +5,20 @@ use thiserror::Error;
 pub enum AppError {
     #[error("输入无效：{0}")]
     Validation(String),
+    #[error("输出超过 {limit} 字节上限")]
+    OutputLimitExceeded { limit: u64 },
+    #[error("文件传输失败：{0}")]
+    Transfer(String),
+    #[error("完整性校验失败：{0}")]
+    Integrity(String),
+    #[error("权限不足：{0}")]
+    Permission(String),
+    #[error("磁盘空间不足：{0}")]
+    DiskSpace(String),
+    #[error("操作已取消")]
+    Cancelled,
+    #[error("远程状态无法确认：{0}")]
+    RemoteStateUncertain(String),
     #[error("应用尚未完成数据目录初始化")]
     NotReady,
     #[error("安全检查失败：{0}")]
@@ -53,6 +67,13 @@ impl Serialize for AppError {
 
         let code = match self {
             AppError::Validation(_) => "validation",
+            AppError::OutputLimitExceeded { .. } => "output_limit_exceeded",
+            AppError::Transfer(_) => "transfer",
+            AppError::Integrity(_) => "integrity",
+            AppError::Permission(_) => "permission",
+            AppError::DiskSpace(_) => "disk_space",
+            AppError::Cancelled => "cancelled",
+            AppError::RemoteStateUncertain(_) => "remote_state_uncertain",
             AppError::NotReady => "not_ready",
             AppError::Security(_) => "security",
             AppError::Io(_) => "io",
