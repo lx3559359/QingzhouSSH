@@ -153,11 +153,11 @@ data/
 ├─ downloads/
 ├─ backups/
 ├─ templates/
-├─ cache/
+├─ cache/webview2/
 └─ updates/
 ```
 
-当前开发机上的源码、依赖缓存、Cargo 构建产物、Node 包缓存、测试数据、安装包和更新包均配置到 `D:\Codex Project\轻量化SSH快捷工具` 内。Windows、WebView2 或已安装工具产生的系统级数据无法完全禁止；发布前通过落盘审计验证应用自身不会偷偷写入默认 AppData。
+当前开发机上的源码、依赖缓存、Cargo 构建产物、Node 包缓存、测试数据、安装包和更新包均配置到 `D:\Codex Project\轻量化SSH快捷工具` 内。首次选择数据目录前使用无持久化的 WebView；选定后通过 Tauri 的 WebView 数据目录接口将持久化缓存固定到 `<数据根目录>\cache\webview2`。Windows、WebView2 运行时本体或已安装工具产生的系统级数据无法完全禁止；发布前通过落盘审计验证应用自身不会偷偷写入默认 AppData。
 
 数据迁移采用“复制到新目录 → 校验数据库和文件哈希 → 原子切换配置 → 用户确认后再清理旧目录”的顺序。失败时继续使用旧目录，不留下半迁移状态。
 
