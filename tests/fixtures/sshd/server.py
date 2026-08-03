@@ -50,6 +50,8 @@ LOG_RECORDS = (
     "__QZ_LOG__\x1f3\x1fcontext\x1f2026-08-03T10:00:01 recovery started\n"
 )
 
+FAILURE_MARKERS = ("workflow-fail.service", "workflow-fail-script", "workflow-fail.log")
+
 
 class FixtureServer(asyncssh.SSHServer):
     def password_auth_supported(self) -> bool:
@@ -60,6 +62,8 @@ class FixtureServer(asyncssh.SSHServer):
 
 
 def command_result(command: str) -> tuple[str, str, int]:
+    if any(marker in command for marker in FAILURE_MARKERS):
+        return "", "workflow fixture injected failure\n", 73
     if "__QZ_OS_BEGIN__" in command:
         return PROBE_OUTPUT, "", 0
     if command.strip() == "df -P -B1":
@@ -103,8 +107,12 @@ async def handle_process(process: asyncssh.SSHServerProcess[str]) -> None:
 def prepare_remote_root(remote_root: Path) -> None:
     log_root = remote_root / "var" / "log"
     temp_root = remote_root / "tmp"
+    deploy_root = remote_root / "opt" / "qingzhou-app"
+    service_root = remote_root / "run" / "qingzhou-fixture"
     log_root.mkdir(parents=True, exist_ok=True)
     temp_root.mkdir(parents=True, exist_ok=True)
+    deploy_root.mkdir(parents=True, exist_ok=True)
+    service_root.mkdir(parents=True, exist_ok=True)
     content = (
         "2026-08-03T09:59:59 fixture ready\n"
         "2026-08-03T10:00:00 ERROR fixture failure\n"
@@ -113,6 +121,8 @@ def prepare_remote_root(remote_root: Path) -> None:
     (log_root / "qingzhou.log").write_text(content, encoding="utf-8")
     with gzip.open(log_root / "qingzhou.log.gz", "wt", encoding="utf-8") as archive:
         archive.write(content)
+    (deploy_root / "config.yml").write_text("version: fixture-original\n", encoding="utf-8")
+    (service_root / "service.state").write_text("active\n", encoding="utf-8")
 
 
 async def serve(host_key: Path, authorized_keys: Path, remote_root: Path) -> None:

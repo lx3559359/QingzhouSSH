@@ -239,11 +239,11 @@
 - Modify: `scripts/test-ssh-live.ps1`
 - Modify: `scripts/tests/ssh-fixture.tests.ps1`
 
-- [ ] 扩展夹具部署目录、已有文件、服务和可注入失败点，数据仍只在项目 `.local`。
-- [ ] 写 ignored live 测试：参考部署成功、条件两分支、任务/脚本/日志/上传/下载节点失败暂停、失败节点重试、覆盖恢复点、逆序回滚和诊断包。
-- [ ] 扫描 workflow DB/events/backups/downloads，凭据与敏感脚本 canary 不得出现。
-- [ ] 运行 fixture 生命周期与 `scripts/test-ssh-live.ps1 -SkipPythonDependencyInstall`。
-- [ ] 提交：`test: cover recoverable workflow live flows`
+- [x] 扩展夹具部署目录、已有文件、服务和可注入失败点，数据仍只在项目 `.local`。
+- [x] 写 ignored live 测试：参考部署成功、条件两分支、任务/脚本/日志/上传/下载节点失败暂停、失败节点重试、覆盖恢复点、逆序回滚和诊断包。
+- [x] 扫描 workflow DB/events/backups/downloads，凭据与敏感脚本 canary 不得出现。
+- [x] 运行 fixture 生命周期与 `scripts/test-ssh-live.ps1 -SkipPythonDependencyInstall`。
+- [x] 提交：`test: cover recoverable workflow live flows`
 
 ## Task 16：M3 文档、视觉验收与完整门禁
 
