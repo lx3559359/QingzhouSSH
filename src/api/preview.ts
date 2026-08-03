@@ -27,6 +27,9 @@ import type {
   WorkflowRunStatus,
   WorkflowSummary,
   WorkflowValidationReport,
+  UpdateProgressEvent,
+  UpdateSource,
+  UpdateStatus,
 } from './contracts';
 
 const previewServer: ServerProfile = {
@@ -657,7 +660,141 @@ const workflowPreviewApi = {
   },
 };
 
+export type UpdatePreviewScenario = 'github' | 'modelscope' | 'reject' | 'up_to_date';
+
+function updateScenarioFromUrl(): UpdatePreviewScenario {
+  if (typeof window === 'undefined') return 'github';
+  const requested = new URLSearchParams(window.location.search).get('update');
+  return requested === 'modelscope' || requested === 'reject' || requested === 'up_to_date'
+    ? requested
+    : 'github';
+}
+
+function emptyUpdateStatus(autoCheck = true): UpdateStatus {
+  return {
+    currentVersion: '0.1.0',
+    phase: 'idle',
+    autoCheck,
+    lastCheckedAt: null,
+    lastResult: null,
+    release: null,
+    fallbackReason: null,
+    staged: null,
+    lastError: null,
+  };
+}
+
+let previewUpdateScenario: UpdatePreviewScenario = updateScenarioFromUrl();
+let previewUpdateStatus = emptyUpdateStatus();
+
+export function resetUpdatePreviewForTests(scenario: UpdatePreviewScenario = 'github') {
+  previewUpdateScenario = scenario;
+  previewUpdateStatus = emptyUpdateStatus();
+}
+
+function previewUpdateError(message: string) {
+  return { code: 'update', message };
+}
+
+function previewRelease(source: UpdateSource) {
+  return {
+    version: '0.2.0',
+    notes: '增强国产 Linux 自动识别、日志检索下载和更新安全校验。',
+    publishedAt: '2026-08-04T10:00:00Z',
+    size: 24 * 1024 * 1024,
+    buildId: 'preview-20260804',
+    source,
+    sourceLabel: source === 'github' ? 'GitHub Releases' : 'ModelScope 国内镜像',
+  };
+}
+
+const updatePreviewApi = {
+  getUpdateStatus: async (): Promise<UpdateStatus> => clone(previewUpdateStatus),
+  setAutoUpdateCheck: async (enabled: boolean): Promise<UpdateStatus> => {
+    previewUpdateStatus.autoCheck = enabled;
+    return clone(previewUpdateStatus);
+  },
+  checkForUpdate: async (manual: boolean): Promise<UpdateStatus> => {
+    if (!manual && !previewUpdateStatus.autoCheck) return clone(previewUpdateStatus);
+    const checkedAt = Math.floor(Date.now() / 1000);
+    previewUpdateStatus.lastCheckedAt = checkedAt;
+    previewUpdateStatus.lastError = null;
+    previewUpdateStatus.staged = null;
+    if (previewUpdateScenario === 'up_to_date') {
+      previewUpdateStatus = {
+        ...previewUpdateStatus,
+        phase: 'up_to_date',
+        release: null,
+        fallbackReason: null,
+        lastResult: {
+          status: 'up_to_date',
+          version: previewUpdateStatus.currentVersion,
+          source: 'github',
+          message: '当前已是最新版本',
+        },
+      };
+      return clone(previewUpdateStatus);
+    }
+    const source: UpdateSource = previewUpdateScenario === 'modelscope' ? 'modelscope' : 'github';
+    previewUpdateStatus = {
+      ...previewUpdateStatus,
+      phase: 'available',
+      release: previewRelease(source),
+      fallbackReason: source === 'modelscope' ? 'GitHub 暂时不可用，已切换国内镜像。' : null,
+      lastResult: {
+        status: 'available',
+        version: '0.2.0',
+        source,
+        message: '发现可用更新',
+      },
+    };
+    return clone(previewUpdateStatus);
+  },
+  downloadUpdate: async (
+    onEvent: (event: UpdateProgressEvent) => void,
+  ): Promise<UpdateStatus> => {
+    if (previewUpdateStatus.phase !== 'available' || !previewUpdateStatus.release) {
+      throw previewUpdateError('当前更新状态不允许下载。');
+    }
+    previewUpdateStatus.phase = 'downloading';
+    const total = previewUpdateStatus.release.size;
+    onEvent({ sequence: 1, downloadedBytes: Math.floor(total * 0.2), totalBytes: total });
+    onEvent({ sequence: 2, downloadedBytes: Math.floor(total * 0.7), totalBytes: total });
+    onEvent({ sequence: 3, downloadedBytes: total, totalBytes: total });
+    if (previewUpdateScenario === 'reject') {
+      previewUpdateStatus.phase = 'failed';
+      previewUpdateStatus.lastError = '更新签名验证失败，文件已拒绝并清理。';
+      throw previewUpdateError(previewUpdateStatus.lastError);
+    }
+    previewUpdateStatus.phase = 'downloaded';
+    previewUpdateStatus.staged = {
+      version: previewUpdateStatus.release.version,
+      relativePath: 'staged/0.2.0/QingzhouSSH-0.2.0-windows-x86_64.nsis',
+      sha256: 'a'.repeat(64),
+      size: total,
+    };
+    return clone(previewUpdateStatus);
+  },
+  installUpdate: async (confirmed: boolean): Promise<UpdateStatus> => {
+    if (!confirmed) throw previewUpdateError('安装更新前必须明确确认。');
+    if (previewUpdateStatus.phase !== 'downloaded') {
+      throw previewUpdateError('更新包尚未完成下载。');
+    }
+    previewUpdateStatus.phase = 'installing';
+    return clone(previewUpdateStatus);
+  },
+  clearDownloadedUpdate: async (): Promise<UpdateStatus> => {
+    previewUpdateStatus = {
+      ...emptyUpdateStatus(previewUpdateStatus.autoCheck),
+      lastCheckedAt: previewUpdateStatus.lastCheckedAt,
+      lastResult: previewUpdateStatus.lastResult,
+    };
+    return clone(previewUpdateStatus);
+  },
+};
+
 export const previewApi = {
+  ...updatePreviewApi,
   ...workflowPreviewApi,
   bootstrapStatus: async () => ({
     state: 'ready' as const,

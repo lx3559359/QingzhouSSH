@@ -309,6 +309,7 @@ impl UpdateManager {
     pub async fn clear_downloaded(&self) -> Result<UpdateStatus, UpdateManagerError> {
         self.download_service.clear_downloaded().await?;
         *self.staged.lock().await = None;
+        *self.fallback_reason.lock().await = None;
         self.lifecycle.lock().await.reset();
         self.status().await
     }

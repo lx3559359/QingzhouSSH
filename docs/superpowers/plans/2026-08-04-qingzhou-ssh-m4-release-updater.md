@@ -41,9 +41,9 @@
 
 ## Task 7：扩展前端 API 与 Preview
 
-- [ ] 先写 Tauri invoke 名称/参数和 Preview 主源、回退、拒绝、下载/安装状态测试。
-- [ ] 添加更新 DTO、单调进度通道和纯内存 Preview 更新器。
-- [ ] 提交：`test: model updater preview flows`
+- [x] 先写 Tauri invoke 名称/参数和 Preview 主源、回退、拒绝、下载/安装状态测试。
+- [x] 添加更新 DTO、单调进度通道和纯内存 Preview 更新器。
+- [x] 提交：`test: model updater preview flows`
 
 ## Task 8：实现立体设置与更新界面
 

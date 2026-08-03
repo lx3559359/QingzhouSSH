@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 
-import { previewApi, resetWorkflowPreviewForTests } from './preview';
+import {
+  previewApi,
+  resetUpdatePreviewForTests,
+  resetWorkflowPreviewForTests,
+} from './preview';
 import { createReferenceWorkflowDraft } from '../features/workflows/fixtures';
 
 describe('preview data root', () => {
@@ -96,5 +100,47 @@ describe('workflow preview API', () => {
     const diagnostics = await previewApi.exportWorkflowDiagnostics(failed.run.id);
     expect(diagnostics.relativePath).toMatch(/^downloads\//);
     expect(diagnostics.purpose).toBe('workflow_diagnostics_preview');
+  });
+});
+
+describe('update preview API', () => {
+  it('models the GitHub primary source, progress, confirmation and install state', async () => {
+    resetUpdatePreviewForTests('github');
+    expect((await previewApi.getUpdateStatus()).phase).toBe('idle');
+
+    const available = await previewApi.checkForUpdate(true);
+    expect(available.phase).toBe('available');
+    expect(available.release?.source).toBe('github');
+    expect(available.fallbackReason).toBeNull();
+
+    const progress: number[] = [];
+    const downloaded = await previewApi.downloadUpdate((event) => progress.push(event.sequence));
+    expect(downloaded.phase).toBe('downloaded');
+    expect(progress).toEqual([1, 2, 3]);
+    await expect(previewApi.installUpdate(false)).rejects.toMatchObject({
+      code: 'update',
+    });
+    expect((await previewApi.getUpdateStatus()).phase).toBe('downloaded');
+    expect((await previewApi.installUpdate(true)).phase).toBe('installing');
+  });
+
+  it('models ModelScope fallback without exposing source URLs', async () => {
+    resetUpdatePreviewForTests('modelscope');
+    const status = await previewApi.checkForUpdate(true);
+
+    expect(status.release?.source).toBe('modelscope');
+    expect(status.fallbackReason).toContain('GitHub');
+    expect(JSON.stringify(status)).not.toContain('https://');
+  });
+
+  it('models a verified-package rejection and cleanup', async () => {
+    resetUpdatePreviewForTests('reject');
+    await previewApi.checkForUpdate(true);
+    await expect(previewApi.downloadUpdate(() => undefined)).rejects.toMatchObject({
+      code: 'update',
+      message: expect.stringContaining('签名'),
+    });
+    expect((await previewApi.getUpdateStatus()).phase).toBe('failed');
+    expect((await previewApi.clearDownloadedUpdate()).phase).toBe('idle');
   });
 });

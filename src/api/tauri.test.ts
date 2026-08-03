@@ -187,6 +187,32 @@ describe('Tauri API wrapper', () => {
     expect(received).toEqual([1, 4]);
   });
 
+  it('uses all updater command names and filters non-monotonic progress', async () => {
+    const received: number[] = [];
+
+    await tauriApi.getUpdateStatus();
+    await tauriApi.setAutoUpdateCheck(false);
+    await tauriApi.checkForUpdate(true);
+    await tauriApi.downloadUpdate((event) => received.push(event.sequence));
+    await tauriApi.installUpdate(true);
+    await tauriApi.clearDownloadedUpdate();
+
+    expect(invoke.mock.calls.map(([command, args]) => [command, args && Object.keys(args)])).toEqual([
+      ['get_update_status', undefined],
+      ['set_auto_update_check', ['enabled']],
+      ['check_for_update', ['manual']],
+      ['download_update', ['onEvent']],
+      ['install_update', ['confirmed']],
+      ['clear_downloaded_update', undefined],
+    ]);
+
+    channels[0].onmessage?.({ sequence: 1, downloadedBytes: 4, totalBytes: 20 });
+    channels[0].onmessage?.({ sequence: 1, downloadedBytes: 2, totalBytes: 20 });
+    channels[0].onmessage?.({ sequence: 3, downloadedBytes: 20, totalBytes: 20 });
+    channels[0].onmessage?.({ sequence: 2, downloadedBytes: 10, totalBytes: 20 });
+    expect(received).toEqual([1, 3]);
+  });
+
   it('normalizes backend error DTOs without exposing arbitrary values', () => {
     expect(asAppError({ code: 'validation', message: 'invalid workflow' })).toEqual({
       code: 'validation',

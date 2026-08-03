@@ -479,3 +479,59 @@ export interface AppErrorDto {
   code: string;
   message: string;
 }
+
+export type UpdateSource = 'github' | 'modelscope';
+
+export type UpdatePhase =
+  | 'idle'
+  | 'checking'
+  | 'up_to_date'
+  | 'available'
+  | 'downloading'
+  | 'downloaded'
+  | 'installing'
+  | 'failed';
+
+export type StoredUpdateCheckStatus = 'up_to_date' | 'available' | 'failed';
+
+export interface StoredUpdateCheckResult {
+  status: StoredUpdateCheckStatus;
+  version: string | null;
+  source: UpdateSource | null;
+  message: string | null;
+}
+
+export interface AvailableUpdate {
+  version: string;
+  notes: string;
+  publishedAt: string | null;
+  size: number;
+  buildId: string;
+  source: UpdateSource;
+  sourceLabel: string;
+}
+
+export interface StagedUpdate {
+  version: string;
+  relativePath: string;
+  sha256: string;
+  size: number;
+}
+
+export interface UpdateStatus {
+  currentVersion: string;
+  phase: UpdatePhase;
+  autoCheck: boolean;
+  lastCheckedAt: number | null;
+  lastResult: StoredUpdateCheckResult | null;
+  release: AvailableUpdate | null;
+  fallbackReason: string | null;
+  staged: StagedUpdate | null;
+  lastError: string | null;
+}
+
+export interface UpdateProgressEvent {
+  sequence: number;
+  downloadedBytes: number;
+  totalBytes: number | null;
+}

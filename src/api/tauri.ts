@@ -29,6 +29,8 @@ import type {
   WorkflowRunRecord,
   WorkflowSummary,
   WorkflowValidationReport,
+  UpdateProgressEvent,
+  UpdateStatus,
 } from './contracts';
 import { dataRootPreviewApi, previewApi } from './preview';
 
@@ -178,6 +180,18 @@ export const tauriApi = {
     invoke<number>('cleanup_workflow_restore_points', { runId }),
   exportWorkflowDiagnostics: (runId: string) =>
     invoke<ExecutionFile>('export_workflow_diagnostics', { runId }),
+  getUpdateStatus: () => invoke<UpdateStatus>('get_update_status'),
+  setAutoUpdateCheck: (enabled: boolean) =>
+    invoke<UpdateStatus>('set_auto_update_check', { enabled }),
+  checkForUpdate: (manual: boolean) =>
+    invoke<UpdateStatus>('check_for_update', { manual }),
+  downloadUpdate: (onEvent: (event: UpdateProgressEvent) => void) =>
+    invoke<UpdateStatus>('download_update', {
+      onEvent: createMonotonicChannel(onEvent),
+    }),
+  installUpdate: (confirmed: boolean) =>
+    invoke<UpdateStatus>('install_update', { confirmed }),
+  clearDownloadedUpdate: () => invoke<UpdateStatus>('clear_downloaded_update'),
 };
 
 const previewRequested =
