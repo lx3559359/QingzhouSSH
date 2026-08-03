@@ -3,18 +3,29 @@ import {
   CheckCircle,
   ClockCounterClockwise,
   Database,
+  DownloadSimple,
   GearSix,
   GithubLogo,
   HardDrive,
+  ShieldWarning,
   ShieldCheck,
+  Trash,
   WarningCircle,
+  X,
 } from '@phosphor-icons/react';
 import { useCallback, useEffect, useState } from 'react';
 
-import type { UpdatePhase, UpdateStatus } from '../../api/contracts';
+import type { UpdatePhase, UpdateProgressEvent, UpdateStatus } from '../../api/contracts';
 import { api, asAppError } from '../../api/tauri';
 
-type BusyAction = 'loading' | 'checking' | 'preference' | null;
+type BusyAction =
+  | 'loading'
+  | 'checking'
+  | 'preference'
+  | 'downloading'
+  | 'installing'
+  | 'clearing'
+  | null;
 
 const phaseLabels: Record<UpdatePhase, string> = {
   idle: '尚未检查',
@@ -54,6 +65,8 @@ export function SettingsPage({ dataRoot }: { dataRoot: string }) {
   const [status, setStatus] = useState<UpdateStatus | null>(null);
   const [busy, setBusy] = useState<BusyAction>('loading');
   const [error, setError] = useState('');
+  const [progress, setProgress] = useState<UpdateProgressEvent | null>(null);
+  const [confirmInstall, setConfirmInstall] = useState(false);
 
   const loadStatus = useCallback(async () => {
     setBusy('loading');
@@ -74,6 +87,7 @@ export function SettingsPage({ dataRoot }: { dataRoot: string }) {
   const checkForUpdates = async () => {
     setBusy('checking');
     setError('');
+    setProgress(null);
     try {
       setStatus(await api.checkForUpdate(true));
     } catch (cause) {
@@ -103,6 +117,58 @@ export function SettingsPage({ dataRoot }: { dataRoot: string }) {
       setBusy(null);
     }
   };
+
+  const downloadUpdate = async () => {
+    if (!status || status.phase !== 'available') return;
+    setBusy('downloading');
+    setError('');
+    setProgress({ sequence: 0, downloadedBytes: 0, totalBytes: status.release?.size ?? null });
+    setStatus({ ...status, phase: 'downloading' });
+    try {
+      setStatus(await api.downloadUpdate(setProgress));
+    } catch (cause) {
+      setError(asAppError(cause).message);
+      try {
+        setStatus(await api.getUpdateStatus());
+      } catch {
+        setStatus({ ...status, phase: 'failed', lastError: asAppError(cause).message });
+      }
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const installUpdate = async () => {
+    setConfirmInstall(false);
+    setBusy('installing');
+    setError('');
+    try {
+      setStatus(await api.installUpdate(true));
+    } catch (cause) {
+      setError(asAppError(cause).message);
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const clearUpdate = async () => {
+    setBusy('clearing');
+    setError('');
+    try {
+      setStatus(await api.clearDownloadedUpdate());
+      setProgress(null);
+    } catch (cause) {
+      setError(asAppError(cause).message);
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const progressPercent = status?.phase === 'downloaded'
+    ? 100
+    : progress?.totalBytes
+      ? Math.min(100, Math.round((progress.downloadedBytes / progress.totalBytes) * 100))
+      : 0;
 
   return (
     <section className="settings-page" aria-labelledby="settings-title">
@@ -214,7 +280,11 @@ export function SettingsPage({ dataRoot }: { dataRoot: string }) {
                 </span>
                 <div>
                   <span className="eyebrow">最新状态</span>
-                  <h2>{status.lastResult?.message ?? phaseLabels[status.phase]}</h2>
+                  <h2>
+                    {status.phase === 'failed'
+                      ? phaseLabels.failed
+                      : status.lastResult?.message ?? phaseLabels[status.phase]}
+                  </h2>
                 </div>
               </header>
 
@@ -239,6 +309,60 @@ export function SettingsPage({ dataRoot }: { dataRoot: string }) {
                     <span>来源 · {status.release.sourceLabel}</span>
                     <span>构建 · {status.release.buildId}</span>
                   </div>
+
+                  {(status.phase === 'downloading' || status.phase === 'downloaded') && (
+                    <div className="update-download-progress" aria-live="polite">
+                      <div
+                        role="progressbar"
+                        aria-label="更新下载进度"
+                        aria-valuemin={0}
+                        aria-valuemax={100}
+                        aria-valuenow={progressPercent}
+                      >
+                        <i style={{ width: `${progressPercent}%` }} />
+                      </div>
+                      <span>{progressPercent}%</span>
+                    </div>
+                  )}
+
+                  <div className="update-actions">
+                    {status.phase === 'available' && (
+                      <button
+                        className="primary-button"
+                        type="button"
+                        disabled={busy !== null}
+                        onClick={() => void downloadUpdate()}
+                      >
+                        <DownloadSimple weight="bold" />下载并验证
+                      </button>
+                    )}
+                    {status.phase === 'downloading' && (
+                      <button className="primary-button" type="button" disabled>
+                        <ArrowsClockwise className="spin" weight="bold" />正在下载并校验
+                      </button>
+                    )}
+                    {status.phase === 'downloaded' && (
+                      <button
+                        className="success-button"
+                        type="button"
+                        disabled={busy !== null}
+                        onClick={() => setConfirmInstall(true)}
+                      >
+                        <ShieldCheck weight="bold" />安装更新
+                      </button>
+                    )}
+                    {(status.phase === 'downloaded' || status.phase === 'failed') && (
+                      <button
+                        className="secondary-button"
+                        type="button"
+                        disabled={busy !== null}
+                        onClick={() => void clearUpdate()}
+                      >
+                        <Trash weight="bold" />
+                        {busy === 'clearing' ? '正在清理' : '清理更新文件'}
+                      </button>
+                    )}
+                  </div>
                 </section>
               ) : (
                 <div className="update-empty">
@@ -249,6 +373,47 @@ export function SettingsPage({ dataRoot }: { dataRoot: string }) {
             </article>
           </div>
         </>
+      )}
+
+      {confirmInstall && status?.release && (
+        <div className="dialog-backdrop" role="presentation">
+          <section
+            className="silver-card modal-card update-install-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="update-install-title"
+          >
+            <header className="modal-header">
+              <div className="update-install-dialog__heading">
+                <ShieldWarning weight="fill" />
+                <div>
+                  <h2 id="update-install-title">确认安装更新</h2>
+                  <p>请先保存正在查看的信息。</p>
+                </div>
+              </div>
+              <button
+                className="icon-button"
+                type="button"
+                aria-label="关闭安装确认"
+                onClick={() => setConfirmInstall(false)}
+              >
+                <X weight="bold" />
+              </button>
+            </header>
+            <div className="update-install-warning">
+              <strong>轻舟 SSH 将退出并启动已验证的安装程序。</strong>
+              <span>版本 {status.release.version} 将按当前用户安装，不需要管理员权限；程序不会静默执行。</span>
+            </div>
+            <div className="modal-actions">
+              <button className="secondary-button" type="button" onClick={() => setConfirmInstall(false)}>
+                暂不安装
+              </button>
+              <button className="danger-button" type="button" onClick={() => void installUpdate()}>
+                确认安装并退出
+              </button>
+            </div>
+          </section>
+        </div>
       )}
     </section>
   );

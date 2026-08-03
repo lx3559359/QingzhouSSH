@@ -1312,6 +1312,94 @@ select {
   font-size: 0.7rem;
 }
 
+.update-download-progress {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 11px;
+  margin-top: 16px;
+  padding-top: 15px;
+  border-top: 1px solid rgb(128 145 168 / 30%);
+}
+
+.update-download-progress > div {
+  height: 12px;
+  overflow: hidden;
+  border: 1px solid #9eabba;
+  border-radius: 999px;
+  background: linear-gradient(180deg, #c9d1dc, #e4e9ef);
+  box-shadow: inset 0 2px 4px rgb(42 56 79 / 24%), 0 1px 0 #fff;
+}
+
+.update-download-progress i {
+  height: 100%;
+  display: block;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #55c99b, #4a81d6 66%, #6955ca);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 42%), 0 0 10px rgb(72 116 207 / 38%);
+  transition: width 180ms ease;
+}
+
+.update-download-progress > span {
+  min-width: 38px;
+  color: #365786;
+  font-size: 0.75rem;
+  font-weight: 850;
+  text-align: right;
+}
+
+.update-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 17px;
+}
+
+.update-actions:empty {
+  display: none;
+}
+
+.update-install-dialog {
+  width: min(570px, 100%);
+}
+
+.update-install-dialog__heading {
+  display: flex;
+  align-items: flex-start;
+  gap: 13px;
+}
+
+.update-install-dialog__heading > svg {
+  width: 38px;
+  height: 38px;
+  color: #d04b58;
+}
+
+.update-install-dialog__heading p {
+  margin-top: 4px;
+  font-size: 0.8rem;
+}
+
+.update-install-warning {
+  display: grid;
+  gap: 8px;
+  padding: 17px;
+  border: 1px solid #dfabb0;
+  border-radius: 13px;
+  background: linear-gradient(145deg, #fff4f4, #eed9dd);
+  box-shadow: inset 0 1px 0 #fff, 0 9px 15px rgb(118 43 52 / 15%);
+}
+
+.update-install-warning strong {
+  color: #852d38;
+}
+
+.update-install-warning span {
+  color: #6f4d52;
+  font-size: 0.78rem;
+  line-height: 1.55;
+}
+
 .update-release__title h3 {
   color: #203654;
   font-size: 1.28rem;
@@ -2535,6 +2623,11 @@ textarea {
 
   .update-toggle {
     align-items: flex-start;
+  }
+
+  .update-actions,
+  .update-actions > button {
+    width: 100%;
   }
 
   .side-navigation__items {
