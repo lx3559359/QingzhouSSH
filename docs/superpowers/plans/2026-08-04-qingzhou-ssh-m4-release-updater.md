@@ -59,9 +59,9 @@
 
 ## Task 10：配置无管理员安装与便携包
 
-- [ ] 配置 NSIS 当前用户安装、多语言、更新 artifacts 和编译时公钥。
-- [ ] 添加 `portable.flag`、便携说明和项目内打包脚本测试。
-- [ ] 提交：`build: package installer and portable release`
+- [x] 配置 NSIS 当前用户安装、多语言、更新 artifacts 和编译时公钥。
+- [x] 添加 `portable.flag`、便携说明和项目内打包脚本测试。
+- [x] 提交：`build: package installer and portable release`
 
 ## Task 11：生成并验证发布清单
 
