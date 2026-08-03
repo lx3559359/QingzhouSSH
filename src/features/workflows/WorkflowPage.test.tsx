@@ -8,6 +8,7 @@ const apiMocks = vi.hoisted(() => ({
   getWorkflow: vi.fn(),
   saveWorkflow: vi.fn(),
   deleteWorkflow: vi.fn(),
+  validateWorkflow: vi.fn(),
 }));
 
 vi.mock('../../api/tauri', () => ({ api: apiMocks }));
@@ -40,6 +41,7 @@ describe('WorkflowPage canvas', () => {
     apiMocks.getWorkflow.mockResolvedValue(definition);
     apiMocks.saveWorkflow.mockResolvedValue({ ...definition, version: 2 });
     apiMocks.deleteWorkflow.mockResolvedValue(true);
+    apiMocks.validateWorkflow.mockResolvedValue({ valid: true, startNodeId: definition.nodes[0].id, diagnostics: [] });
   });
 
   it('shows workflow records, eight step types, selectable nodes and SVG connections', async () => {

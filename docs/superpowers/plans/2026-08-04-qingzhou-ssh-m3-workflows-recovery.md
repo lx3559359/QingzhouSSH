@@ -210,11 +210,11 @@
 - Modify: `src/features/workflows/WorkflowPage.tsx`
 - Test: `src/features/workflows/WorkflowInspector.test.tsx`
 
-- [ ] 写失败测试：各节点表单、普通 next、条件 true/false、删除节点、缺失参数、环/不可达/不兼容诊断定位。
-- [ ] 写安全测试：脚本文本不进 localStorage/sessionStorage，确认区只显示摘要，危险节点聚合显示。
-- [ ] 实现 inspector、连接选择器、保存增版和 Rust 校验结果定位。
-- [ ] 运行 workflow UI 全套测试和构建。
-- [ ] 提交：`feat: edit and validate workflow nodes`
+- [x] 写失败测试：各节点表单、普通 next、条件 true/false、删除节点、缺失参数、环/不可达/不兼容诊断定位。
+- [x] 写安全测试：脚本文本不进 localStorage/sessionStorage，确认区只显示摘要，危险节点聚合显示。
+- [x] 实现 inspector、连接选择器、保存增版和 Rust 校验结果定位。
+- [x] 运行 workflow UI 全套测试和构建。
+- [x] 提交：`feat: edit and validate workflow nodes`
 
 ## Task 14：运行确认、时间线、重试与回滚 UI
 

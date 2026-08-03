@@ -1,10 +1,12 @@
-import { FloppyDisk, FlowArrow, Plus, Trash } from '@phosphor-icons/react';
+import { CheckCircle, FloppyDisk, FlowArrow, Plus, Trash } from '@phosphor-icons/react';
 import { useEffect, useState } from 'react';
 
 import { asAppError, api } from '../../api/tauri';
-import type { WorkflowDefinition, WorkflowDraft, WorkflowNode, WorkflowNodeConfig, WorkflowSummary } from '../../api/contracts';
+import type { WorkflowDefinition, WorkflowDraft, WorkflowNode, WorkflowNodeConfig, WorkflowSummary, WorkflowValidationReport } from '../../api/contracts';
 import { WorkflowCanvas } from './WorkflowCanvas';
+import { WorkflowInspector } from './WorkflowInspector';
 import { WorkflowLibrary, type WorkflowStepType } from './WorkflowLibrary';
+import { WorkflowValidationPanel } from './WorkflowValidationPanel';
 import { createReferenceWorkflowDraft } from './fixtures';
 import './workflow.css';
 
@@ -56,6 +58,7 @@ export function WorkflowPage() {
   const [zoom, setZoom] = useState(1);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
+  const [validation, setValidation] = useState<WorkflowValidationReport | null>(null);
 
   const loadList = async () => {
     const list = await api.listWorkflows();
@@ -70,6 +73,7 @@ export function WorkflowPage() {
       const definition = await api.getWorkflow(workflowId, null);
       if (definition) {
         setDraft(toDraft(definition));
+        setValidation(null);
         setSelectedNodeId(definition.nodes[0]?.id ?? null);
       }
     } catch (error) {
@@ -90,6 +94,7 @@ export function WorkflowPage() {
     reference.name = '新建部署工作流';
     reference.description = '基于参考流程创建；保存后生成第一个不可变版本。';
     setDraft(reference);
+    setValidation(null);
     setSelectedNodeId(reference.nodes[0]?.id ?? null);
     setZoom(1);
     setMessage('已创建未保存的参考工作流。');
@@ -98,6 +103,7 @@ export function WorkflowPage() {
   const addNode = (type: WorkflowStepType) => {
     const node = nextNode(type, draft.nodes.length + 1);
     setDraft((current) => ({ ...current, nodes: [...current.nodes, node] }));
+    setValidation(null);
     setSelectedNodeId(node.id);
   };
 
@@ -106,6 +112,36 @@ export function WorkflowPage() {
       ...current,
       nodes: current.nodes.map((node) => node.id === nodeId ? { ...node, position } : node),
     }));
+    setValidation(null);
+  };
+
+  const changeDraft = (next: WorkflowDraft) => {
+    setDraft(next);
+    setValidation(null);
+  };
+
+  const deleteNode = (nodeId: string) => {
+    const nodes = draft.nodes.filter((node) => node.id !== nodeId);
+    changeDraft({
+      ...draft,
+      nodes,
+      edges: draft.edges.filter((edge) => edge.from !== nodeId && edge.to !== nodeId),
+    });
+    setSelectedNodeId(nodes[0]?.id ?? null);
+  };
+
+  const validate = async () => {
+    setBusy(true);
+    setMessage('');
+    try {
+      const report = await api.validateWorkflow(draft);
+      setValidation(report);
+      setMessage(report.valid ? '工作流校验通过。' : `发现 ${report.diagnostics.length} 项问题。`);
+    } catch (error) {
+      setMessage(asAppError(error).message);
+    } finally {
+      setBusy(false);
+    }
   };
 
   const save = async () => {
@@ -151,6 +187,9 @@ export function WorkflowPage() {
           <button type="button" className="secondary-button" onClick={newWorkflow} disabled={busy}>
             <Plus aria-hidden="true" />新建工作流
           </button>
+          <button type="button" className="secondary-button" onClick={() => void validate()} disabled={busy}>
+            <CheckCircle aria-hidden="true" />校验工作流
+          </button>
           <button type="button" className="primary-button" onClick={save} disabled={busy}>
             <FloppyDisk aria-hidden="true" />保存工作流
           </button>
@@ -193,15 +232,15 @@ export function WorkflowPage() {
           onMove={moveNode}
           onZoom={(value) => setZoom(Number(value.toFixed(1)))}
         />
-        <aside className="silver-card workflow-selection" aria-label="当前节点概览">
-          <span className="workflow-panel-kicker">当前节点</span>
-          {selectedNodeId ? (
-            <>
-              <strong>{draft.nodes.find((node) => node.id === selectedNodeId)?.name}</strong>
-              <p>节点参数、连接与校验将在右侧持续显示，不会写入浏览器存储。</p>
-            </>
-          ) : <p>从画布选择一个节点。</p>}
-        </aside>
+        <div className="workflow-right-column">
+          <WorkflowInspector
+            draft={draft}
+            node={draft.nodes.find((node) => node.id === selectedNodeId) ?? null}
+            onChange={changeDraft}
+            onDelete={deleteNode}
+          />
+          <WorkflowValidationPanel report={validation} onLocate={setSelectedNodeId} />
+        </div>
       </div>
     </section>
   );
