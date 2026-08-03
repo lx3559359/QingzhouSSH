@@ -22,6 +22,10 @@ impl ExecutionNodeAdapter {
         Self { service }
     }
 
+    pub async fn cancel(&self, execution_id: uuid::Uuid) -> AppResult<()> {
+        self.service.cancel(execution_id).await
+    }
+
     pub async fn execute<E: EventSink>(
         &self,
         server_id: &str,

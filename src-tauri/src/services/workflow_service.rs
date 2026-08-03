@@ -8,16 +8,17 @@ use uuid::Uuid;
 use crate::{
     core::{
         redaction::Redactor,
-        ssh::executor::VecEventSink,
+        ssh::executor::{EventSink, VecEventSink},
         tasks::{built_in_catalog, select_implementation, RiskLevel},
         workflows::{evaluate_condition, require_valid_workflow, ConditionContext},
     },
     domain::{
+        events::{ExecutionEvent, ExecutionEventPayload},
         execution::now_millis,
         workflow::{
             FinishWorkflowNode, FinishWorkflowRun, NewWorkflowRun, WorkflowDefinition,
-            WorkflowDraft, WorkflowEdgeBranch, WorkflowNodeConfig, WorkflowNodeStatus,
-            WorkflowRunDetails, WorkflowRunStatus,
+            WorkflowDraft, WorkflowEdgeBranch, WorkflowNodeConfig, WorkflowNodeRun,
+            WorkflowNodeStatus, WorkflowRunDetails, WorkflowRunStatus,
         },
         workflow_events::{WorkflowEvent, WorkflowEventPayload, WorkflowEventSink},
     },
@@ -71,6 +72,59 @@ struct NodeExecutionContext<'a, S> {
     contexts: &'a HashMap<Uuid, ConditionContext>,
     cancel: CancellationToken,
     events: &'a mut S,
+}
+
+struct RunContinuation<'a, S> {
+    definition: &'a WorkflowDefinition,
+    run_id: Uuid,
+    server_id: &'a str,
+    dangerous_confirmed: bool,
+    current: Uuid,
+    contexts: HashMap<Uuid, ConditionContext>,
+    visited: HashSet<Uuid>,
+    cancel: CancellationToken,
+    events: &'a mut S,
+}
+
+struct ChildTrackingSink {
+    inner: VecEventSink,
+    registry: WorkflowRunRegistry,
+    run_id: Uuid,
+    child: Option<Uuid>,
+}
+
+impl ChildTrackingSink {
+    fn new(registry: WorkflowRunRegistry, run_id: Uuid) -> Self {
+        Self {
+            inner: VecEventSink::default(),
+            registry,
+            run_id,
+            child: None,
+        }
+    }
+
+    fn finish(&mut self) -> AppResult<()> {
+        if let Some(child) = self.child.take() {
+            self.registry.clear_child_now(self.run_id, child)?;
+        }
+        Ok(())
+    }
+}
+
+impl EventSink for ChildTrackingSink {
+    fn send(&mut self, event: ExecutionEvent) -> AppResult<()> {
+        match &event.payload {
+            ExecutionEventPayload::Started { execution_id, .. } => {
+                self.registry.set_child_now(self.run_id, *execution_id)?;
+                self.child = Some(*execution_id);
+            }
+            ExecutionEventPayload::Finished { .. } | ExecutionEventPayload::Failed { .. } => {
+                self.finish()?;
+            }
+            _ => {}
+        }
+        self.inner.send(event)
+    }
 }
 
 impl StepOutcome {
@@ -228,6 +282,7 @@ impl WorkflowService {
                     status: outcome.status,
                     finished_at: now_millis(),
                     exit_code: outcome.exit_code,
+                    result: outcome.result.clone(),
                     output_summary: outcome.output_summary.clone(),
                     error_message: outcome.error_message.clone(),
                     retryable: outcome.retryable,
@@ -261,7 +316,7 @@ impl WorkflowService {
                     run_status,
                     outcome.error_category,
                     outcome.error_message,
-                    outcome.retryable || run_status == WorkflowRunStatus::Paused,
+                    outcome.retryable,
                 )
                 .await?;
                 self.registry.remove(run.id).await;
@@ -303,6 +358,238 @@ impl WorkflowService {
                 .await?;
                 self.registry.remove(run.id).await;
                 return self.require_run(run.id).await;
+            };
+            current = next;
+        }
+    }
+
+    pub async fn cancel(&self, run_id: Uuid) -> AppResult<()> {
+        let child = self.registry.cancel(run_id).await?;
+        if let Some(execution_id) = child {
+            self.execution_nodes.cancel(execution_id).await?;
+        }
+        Ok(())
+    }
+
+    pub async fn current_child(&self, run_id: Uuid) -> Option<Uuid> {
+        self.registry.current_child(run_id).await
+    }
+
+    pub async fn retry_failed_node<S: WorkflowEventSink>(
+        &self,
+        run_id: Uuid,
+        dangerous_confirmed: bool,
+        events: &mut S,
+    ) -> AppResult<WorkflowRunDetails> {
+        let details = self.require_run(run_id).await?;
+        if details.run.status != WorkflowRunStatus::Paused || !details.run.retryable {
+            return Err(AppError::Validation(
+                "只有可重试的暂停工作流才能重试".into(),
+            ));
+        }
+        let current = details
+            .run
+            .current_node_id
+            .ok_or_else(|| AppError::Validation("暂停工作流缺少失败节点".into()))?;
+        let latest = latest_node_runs(&details);
+        let failed = latest
+            .get(&current)
+            .ok_or_else(|| AppError::Validation("暂停工作流缺少失败节点记录".into()))?;
+        if failed.status != WorkflowNodeStatus::Failed || !failed.retryable {
+            return Err(AppError::Validation("当前失败节点不可重试".into()));
+        }
+        let request = StartWorkflowRunRequest {
+            workflow_id: details.run.workflow_id,
+            workflow_version: Some(details.run.workflow_version),
+            server_id: details.run.server_id.clone(),
+            dangerous_confirmed,
+        };
+        let definition = self.preflight(&request).await?;
+        let mut contexts = HashMap::new();
+        let mut visited = HashSet::new();
+        for (node_id, node_run) in latest {
+            if node_run.status == WorkflowNodeStatus::Succeeded {
+                contexts.insert(
+                    node_id,
+                    ConditionContext {
+                        exit_code: node_run.exit_code,
+                        result: node_run.result.clone(),
+                        output_summary: node_run.output_summary.clone(),
+                    },
+                );
+                visited.insert(node_id);
+            } else if node_run.status == WorkflowNodeStatus::Skipped {
+                visited.insert(node_id);
+            }
+        }
+        self.workflows
+            .resume_paused_run(run_id, now_millis())
+            .await?;
+        let cancel = self.registry.register(run_id).await?;
+        self.emit(
+            events,
+            run_id,
+            WorkflowEventPayload::RunStatusChanged {
+                run_id,
+                status: WorkflowRunStatus::Running,
+                message: Some("正在重试失败节点".into()),
+            },
+        )
+        .await?;
+        let result = self
+            .continue_retry(RunContinuation {
+                definition: &definition,
+                run_id,
+                server_id: &request.server_id,
+                dangerous_confirmed,
+                current,
+                contexts,
+                visited,
+                cancel,
+                events,
+            })
+            .await;
+        self.registry.remove(run_id).await;
+        result
+    }
+
+    async fn continue_retry<S: WorkflowEventSink>(
+        &self,
+        continuation: RunContinuation<'_, S>,
+    ) -> AppResult<WorkflowRunDetails> {
+        let RunContinuation {
+            definition,
+            run_id,
+            server_id,
+            dangerous_confirmed,
+            mut current,
+            mut contexts,
+            mut visited,
+            cancel,
+            events,
+        } = continuation;
+        loop {
+            self.workflows.set_current_node(run_id, current).await?;
+            let node = definition
+                .nodes
+                .iter()
+                .find(|node| node.id == current)
+                .ok_or_else(|| AppError::Validation("工作流节点不存在".into()))?;
+            let attempt = self
+                .workflows
+                .start_node_attempt(run_id, current, now_millis())
+                .await?;
+            self.emit(
+                events,
+                run_id,
+                WorkflowEventPayload::NodeStarted {
+                    run_id,
+                    node_id: current,
+                    attempt: attempt.attempt,
+                },
+            )
+            .await?;
+            let outcome = if cancel.is_cancelled() {
+                cancelled_outcome()
+            } else {
+                self.execute_node(
+                    &node.config,
+                    NodeExecutionContext {
+                        run_id,
+                        node_id: node.id,
+                        server_id,
+                        dangerous_confirmed,
+                        contexts: &contexts,
+                        cancel: cancel.clone(),
+                        events,
+                    },
+                )
+                .await
+            };
+            if let Some(execution_id) = outcome.execution_id {
+                self.workflows
+                    .link_node_execution(run_id, current, attempt.attempt, execution_id)
+                    .await?;
+            }
+            self.workflows
+                .finish_node(FinishWorkflowNode {
+                    run_id,
+                    node_id: current,
+                    attempt: attempt.attempt,
+                    status: outcome.status,
+                    finished_at: now_millis(),
+                    exit_code: outcome.exit_code,
+                    result: outcome.result.clone(),
+                    output_summary: outcome.output_summary.clone(),
+                    error_message: outcome.error_message.clone(),
+                    retryable: outcome.retryable,
+                })
+                .await?;
+            self.emit(
+                events,
+                run_id,
+                WorkflowEventPayload::NodeStatusChanged {
+                    run_id,
+                    node_id: current,
+                    attempt: attempt.attempt,
+                    status: outcome.status,
+                    execution_id: outcome.execution_id,
+                    message: outcome.error_message.clone(),
+                },
+            )
+            .await?;
+            visited.insert(current);
+            if outcome.status != WorkflowNodeStatus::Succeeded {
+                let status = match outcome.status {
+                    WorkflowNodeStatus::Failed => WorkflowRunStatus::Paused,
+                    WorkflowNodeStatus::Cancelled => WorkflowRunStatus::Cancelled,
+                    WorkflowNodeStatus::Uncertain => WorkflowRunStatus::Uncertain,
+                    _ => WorkflowRunStatus::Paused,
+                };
+                self.finish_run(
+                    events,
+                    run_id,
+                    status,
+                    outcome.error_category,
+                    outcome.error_message,
+                    outcome.retryable,
+                )
+                .await?;
+                return self.require_run(run_id).await;
+            }
+            contexts.insert(
+                current,
+                ConditionContext {
+                    exit_code: outcome.exit_code,
+                    result: outcome.result,
+                    output_summary: outcome.output_summary,
+                },
+            );
+            if let Some(result) = outcome.condition_result {
+                self.emit(
+                    events,
+                    run_id,
+                    WorkflowEventPayload::ConditionEvaluated {
+                        run_id,
+                        node_id: current,
+                        result,
+                    },
+                )
+                .await?;
+            }
+            let Some(next) = next_node(definition, current, outcome.condition_result)? else {
+                self.record_skipped(definition, run_id, &visited, events)
+                    .await?;
+                self.finish_run(
+                    events,
+                    run_id,
+                    WorkflowRunStatus::Succeeded,
+                    None,
+                    None,
+                    false,
+                )
+                .await?;
+                return self.require_run(run_id).await;
             };
             current = next;
         }
@@ -385,8 +672,9 @@ impl WorkflowService {
                 Err(error) => StepOutcome::failed(error),
             },
             WorkflowNodeConfig::Task { .. } | WorkflowNodeConfig::Custom { .. } => {
-                let mut child_events = VecEventSink::default();
-                match self
+                let mut child_events =
+                    ChildTrackingSink::new(self.registry.clone(), context.run_id);
+                let result = self
                     .execution_nodes
                     .execute(
                         context.server_id,
@@ -394,8 +682,11 @@ impl WorkflowService {
                         context.dangerous_confirmed,
                         &mut child_events,
                     )
-                    .await
-                {
+                    .await;
+                if let Err(error) = child_events.finish() {
+                    return StepOutcome::failed(error);
+                }
+                match result {
                     Ok(outcome) => outcome.into(),
                     Err(error) => StepOutcome::failed(error),
                 }
@@ -444,23 +735,31 @@ impl WorkflowService {
                     overwrite: *overwrite,
                     create_restore_point: false,
                 };
-                let mut child_events = VecEventSink::default();
-                match self
+                let mut child_events =
+                    ChildTrackingSink::new(self.registry.clone(), context.run_id);
+                let result = self
                     .io_nodes
                     .execute(context.server_id, &upload, &mut child_events)
-                    .await
-                {
+                    .await;
+                if let Err(error) = child_events.finish() {
+                    return StepOutcome::failed(error);
+                }
+                match result {
                     Ok(outcome) => outcome.into(),
                     Err(error) => StepOutcome::failed(error),
                 }
             }
             WorkflowNodeConfig::Download { .. } | WorkflowNodeConfig::LogSearch { .. } => {
-                let mut child_events = VecEventSink::default();
-                match self
+                let mut child_events =
+                    ChildTrackingSink::new(self.registry.clone(), context.run_id);
+                let result = self
                     .io_nodes
                     .execute(context.server_id, config, &mut child_events)
-                    .await
-                {
+                    .await;
+                if let Err(error) = child_events.finish() {
+                    return StepOutcome::failed(error);
+                }
+                match result {
                     Ok(outcome) => outcome.into(),
                     Err(error) => StepOutcome::failed(error),
                 }
@@ -592,6 +891,19 @@ fn cancelled_outcome() -> StepOutcome {
         retryable: false,
         condition_result: None,
     }
+}
+
+fn latest_node_runs(details: &WorkflowRunDetails) -> HashMap<Uuid, &WorkflowNodeRun> {
+    let mut latest = HashMap::new();
+    for node_run in &details.node_runs {
+        let replace = latest
+            .get(&node_run.node_id)
+            .is_none_or(|current: &&WorkflowNodeRun| current.attempt < node_run.attempt);
+        if replace {
+            latest.insert(node_run.node_id, node_run);
+        }
+    }
+    latest
 }
 
 fn next_node(

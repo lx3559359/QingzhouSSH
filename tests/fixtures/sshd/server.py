@@ -81,8 +81,13 @@ def command_result(command: str) -> tuple[str, str, int]:
     return "fixture command completed\n", "", 0
 
 
-def handle_process(process: asyncssh.SSHServerProcess[str]) -> None:
+async def handle_process(process: asyncssh.SSHServerProcess[str]) -> None:
     if process.command:
+        if "workflow-cancel-delay" in process.command:
+            await asyncio.sleep(10)
+            process.stdout.write("workflow-cancel-delay completed\n")
+            process.exit(0)
+            return
         stdout, stderr, status = command_result(process.command)
         if stdout:
             process.stdout.write(stdout)

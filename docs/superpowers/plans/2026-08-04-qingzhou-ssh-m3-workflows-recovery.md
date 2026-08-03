@@ -131,11 +131,11 @@
 - Modify: `src-tauri/src/repositories/workflow_repository.rs`
 - Test: `src-tauri/tests/workflow_recovery.rs`
 
-- [ ] 写失败测试：取消当前 child execution；确认停止为 cancelled，未确认远端为 uncertain；registry 完成后清理。
-- [ ] 写重试失败测试：仅 paused 的 failed 节点可重试，attempt 递增、新建 M2 execution，成功后继续；不可重试错误被拒绝。
-- [ ] 写启动恢复测试：running run/node → uncertain，不自动继续，不伪造 cancelled/succeeded。
-- [ ] 实现并运行 recovery 全套测试。
-- [ ] 提交：`feat: retry and recover interrupted workflows`
+- [x] 写失败测试：取消当前 child execution；确认停止为 cancelled，未确认远端为 uncertain；registry 完成后清理。
+- [x] 写重试失败测试：仅 paused 的 failed 节点可重试，attempt 递增、新建 M2 execution，成功后继续；不可重试错误被拒绝。
+- [x] 写启动恢复测试：running run/node → uncertain，不自动继续，不伪造 cancelled/succeeded。
+- [x] 实现并运行 recovery 全套测试。
+- [x] 提交：`feat: retry and recover interrupted workflows`
 
 ## Task 9：逆序回滚、清理与诊断包
 

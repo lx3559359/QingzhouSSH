@@ -1,6 +1,7 @@
-use std::{collections::HashMap, sync::Arc};
-
-use tokio::sync::Mutex;
+use std::{
+    collections::HashMap,
+    sync::{Arc, Mutex},
+};
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
@@ -19,7 +20,7 @@ pub struct WorkflowRunRegistry {
 
 impl WorkflowRunRegistry {
     pub async fn register(&self, run_id: Uuid) -> AppResult<CancellationToken> {
-        let mut active = self.active.lock().await;
+        let mut active = self.lock()?;
         if active.contains_key(&run_id) {
             return Err(AppError::Validation("工作流运行已经注册".into()));
         }
@@ -35,7 +36,11 @@ impl WorkflowRunRegistry {
     }
 
     pub async fn set_child(&self, run_id: Uuid, execution_id: Uuid) -> AppResult<()> {
-        let mut active = self.active.lock().await;
+        self.set_child_now(run_id, execution_id)
+    }
+
+    pub fn set_child_now(&self, run_id: Uuid, execution_id: Uuid) -> AppResult<()> {
+        let mut active = self.lock()?;
         let run = active
             .get_mut(&run_id)
             .ok_or_else(|| AppError::Validation("工作流运行不存在或已经结束".into()))?;
@@ -47,7 +52,11 @@ impl WorkflowRunRegistry {
     }
 
     pub async fn clear_child(&self, run_id: Uuid, execution_id: Uuid) -> AppResult<()> {
-        let mut active = self.active.lock().await;
+        self.clear_child_now(run_id, execution_id)
+    }
+
+    pub fn clear_child_now(&self, run_id: Uuid, execution_id: Uuid) -> AppResult<()> {
+        let mut active = self.lock()?;
         let run = active
             .get_mut(&run_id)
             .ok_or_else(|| AppError::Validation("工作流运行不存在或已经结束".into()))?;
@@ -61,13 +70,13 @@ impl WorkflowRunRegistry {
     pub async fn current_child(&self, run_id: Uuid) -> Option<Uuid> {
         self.active
             .lock()
-            .await
+            .ok()?
             .get(&run_id)
             .and_then(|run| run.child_execution_id)
     }
 
     pub async fn cancel(&self, run_id: Uuid) -> AppResult<Option<Uuid>> {
-        let active = self.active.lock().await;
+        let active = self.lock()?;
         let run = active
             .get(&run_id)
             .ok_or_else(|| AppError::Validation("工作流运行不存在或已经结束".into()))?;
@@ -76,10 +85,20 @@ impl WorkflowRunRegistry {
     }
 
     pub async fn remove(&self, run_id: Uuid) {
-        self.active.lock().await.remove(&run_id);
+        if let Ok(mut active) = self.active.lock() {
+            active.remove(&run_id);
+        }
     }
 
     pub async fn contains(&self, run_id: Uuid) -> bool {
-        self.active.lock().await.contains_key(&run_id)
+        self.active
+            .lock()
+            .is_ok_and(|active| active.contains_key(&run_id))
+    }
+
+    fn lock(&self) -> AppResult<std::sync::MutexGuard<'_, HashMap<Uuid, ActiveWorkflowRun>>> {
+        self.active
+            .lock()
+            .map_err(|_| AppError::RemoteStateUncertain("工作流运行注册表状态不可用".into()))
     }
 }

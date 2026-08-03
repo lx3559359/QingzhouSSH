@@ -305,6 +305,17 @@ impl WorkflowRepository {
         ensure_one(result.rows_affected(), "工作流不处于可结束状态")
     }
 
+    pub async fn resume_paused_run(&self, run_id: Uuid, started_at: i64) -> AppResult<()> {
+        let result = sqlx::query(
+            "UPDATE workflow_runs SET status='running',started_at=?,finished_at=NULL,duration_ms=NULL,error_category=NULL,error_message=NULL,retryable=0 WHERE id=? AND status='paused' AND retryable=1",
+        )
+        .bind(started_at)
+        .bind(run_id.to_string())
+        .execute(&self.pool)
+        .await?;
+        ensure_one(result.rows_affected(), "只有可重试的暂停工作流才能恢复")
+    }
+
     pub async fn link_node_execution(
         &self,
         run_id: Uuid,
@@ -328,13 +339,25 @@ impl WorkflowRepository {
         if !finish.status.is_terminal() {
             return Err(AppError::Validation("工作流节点终态无效".into()));
         }
+        let result_json = finish
+            .result
+            .map(|result| serde_json::to_string(&result))
+            .transpose()
+            .map_err(|_| AppError::Validation("节点结构化结果无法序列化".into()))?;
+        if result_json
+            .as_ref()
+            .is_some_and(|result| result.len() > 32 * 1024)
+        {
+            return Err(AppError::Validation("节点结构化结果超过 32 KiB".into()));
+        }
         let result = sqlx::query(
-            "UPDATE workflow_node_runs SET status=?,finished_at=?,duration_ms=CASE WHEN started_at IS NULL THEN 0 ELSE MAX(0,?-started_at) END,exit_code=?,output_summary=?,error_message=?,retryable=? WHERE run_id=? AND node_id=? AND attempt=? AND status='running'",
+            "UPDATE workflow_node_runs SET status=?,finished_at=?,duration_ms=CASE WHEN started_at IS NULL THEN 0 ELSE MAX(0,?-started_at) END,exit_code=?,result_json=?,output_summary=?,error_message=?,retryable=? WHERE run_id=? AND node_id=? AND attempt=? AND status='running'",
         )
         .bind(finish.status.as_str())
         .bind(finish.finished_at)
         .bind(finish.finished_at)
         .bind(finish.exit_code)
+        .bind(result_json)
         .bind(cap_utf8(finish.output_summary, 8 * 1024))
         .bind(cap_utf8(finish.error_message, 8 * 1024))
         .bind(finish.retryable)
@@ -504,7 +527,7 @@ impl WorkflowRepository {
             return Ok(None);
         };
         let node_runs = sqlx::query(
-            "SELECT run_id,node_id,attempt,status,execution_id,started_at,finished_at,duration_ms,exit_code,output_summary,error_message,retryable FROM workflow_node_runs WHERE run_id=? ORDER BY started_at,node_id,attempt",
+            "SELECT run_id,node_id,attempt,status,execution_id,started_at,finished_at,duration_ms,exit_code,result_json,output_summary,error_message,retryable FROM workflow_node_runs WHERE run_id=? ORDER BY started_at,node_id,attempt",
         )
         .bind(run_id.to_string())
         .fetch_all(&self.pool)
@@ -594,7 +617,7 @@ impl WorkflowRepository {
         attempt: i32,
     ) -> AppResult<Option<WorkflowNodeRun>> {
         sqlx::query(
-            "SELECT run_id,node_id,attempt,status,execution_id,started_at,finished_at,duration_ms,exit_code,output_summary,error_message,retryable FROM workflow_node_runs WHERE run_id=? AND node_id=? AND attempt=?",
+            "SELECT run_id,node_id,attempt,status,execution_id,started_at,finished_at,duration_ms,exit_code,result_json,output_summary,error_message,retryable FROM workflow_node_runs WHERE run_id=? AND node_id=? AND attempt=?",
         )
         .bind(run_id.to_string())
         .bind(node_id.to_string())
@@ -670,6 +693,7 @@ fn map_node_run(row: &SqliteRow) -> AppResult<WorkflowNodeRun> {
     let status: String = row.try_get("status")?;
     let execution_id: Option<String> = row.try_get("execution_id")?;
     let duration_ms: Option<i64> = row.try_get("duration_ms")?;
+    let result_json: Option<String> = row.try_get("result_json")?;
     Ok(WorkflowNodeRun {
         run_id: parse_uuid(row.try_get("run_id")?)?,
         node_id: parse_uuid(row.try_get("node_id")?)?,
@@ -680,6 +704,12 @@ fn map_node_run(row: &SqliteRow) -> AppResult<WorkflowNodeRun> {
         finished_at: row.try_get("finished_at")?,
         duration_ms: duration_ms.map(parse_u64).transpose()?,
         exit_code: row.try_get("exit_code")?,
+        result: result_json
+            .map(|result| {
+                serde_json::from_str(&result)
+                    .map_err(|_| AppError::Validation("数据库中的节点结构化结果损坏".into()))
+            })
+            .transpose()?,
         output_summary: row.try_get("output_summary")?,
         error_message: row.try_get("error_message")?,
         retryable: row.try_get("retryable")?,

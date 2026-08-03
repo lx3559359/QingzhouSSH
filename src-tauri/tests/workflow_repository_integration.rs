@@ -200,6 +200,7 @@ async fn persists_run_node_attempts_monotonic_events_and_filters() {
             status: WorkflowNodeStatus::Succeeded,
             finished_at: 120,
             exit_code: Some(0),
+            result: None,
             output_summary: Some("ok".into()),
             error_message: None,
             retryable: false,

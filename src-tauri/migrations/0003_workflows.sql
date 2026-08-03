@@ -45,6 +45,7 @@ CREATE TABLE workflow_node_runs (
   finished_at INTEGER,
   duration_ms INTEGER CHECK (duration_ms IS NULL OR duration_ms >= 0),
   exit_code INTEGER,
+  result_json TEXT CHECK (result_json IS NULL OR length(CAST(result_json AS BLOB)) <= 32768),
   output_summary TEXT CHECK (output_summary IS NULL OR length(CAST(output_summary AS BLOB)) <= 8192),
   error_message TEXT CHECK (error_message IS NULL OR length(CAST(error_message AS BLOB)) <= 8192),
   retryable INTEGER NOT NULL DEFAULT 0 CHECK (retryable IN (0,1)),

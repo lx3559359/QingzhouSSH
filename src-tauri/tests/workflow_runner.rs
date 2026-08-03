@@ -226,7 +226,7 @@ async fn pauses_when_condition_evaluation_fails_and_leaves_following_nodes_unrun
         .node_runs
         .iter()
         .all(|node| node.node_id != ids.true_stop && node.node_id != ids.false_stop));
-    assert!(details.run.retryable);
+    assert!(!details.run.retryable);
 }
 
 #[tokio::test]
