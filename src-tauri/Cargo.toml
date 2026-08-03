@@ -20,7 +20,7 @@ sqlx = { version = "0.9", features = ["runtime-tokio", "sqlite", "migrate", "mac
 tauri = { version = "2", features = [] }
 tauri-plugin-dialog = "2.7"
 thiserror = "2"
-tokio = { version = "1", features = ["rt-multi-thread", "sync"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync"] }
 tracing = "0.1"
 uuid = { version = "1", features = ["v4", "serde"] }
 windows-dpapi = "0.2"

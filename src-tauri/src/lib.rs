@@ -1,21 +1,42 @@
 #![allow(linker_messages)]
 
+mod commands;
 pub mod core;
 pub mod domain;
 pub mod error;
 pub mod repositories;
+pub mod services;
+mod state;
 pub mod window;
 
 use core::data_root::{initialize_data_root, resolve_runtime_data_root};
+use services::app_services::AppServices;
+use state::AppState;
+use tauri::Manager;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .manage(AppState::default())
+        .invoke_handler(tauri::generate_handler![
+            commands::bootstrap::bootstrap_status,
+            commands::bootstrap::initialize_data_root,
+            commands::servers::list_servers,
+            commands::servers::create_server,
+            commands::servers::inspect_server_host_key,
+            commands::servers::trust_server_host_key,
+            commands::servers::test_server_connection,
+        ])
         .setup(|app| {
             let resolution = resolve_runtime_data_root()?;
             if let Some(root) = resolution.path.as_deref() {
                 initialize_data_root(root)?;
+                let services = tauri::async_runtime::block_on(AppServices::open(root))?;
+                let state = app.state::<AppState>();
+                tauri::async_runtime::block_on(async {
+                    *state.services.write().await = Some(services);
+                });
             }
             window::build_main_window(app.handle(), resolution.path.as_deref())?;
             Ok(())

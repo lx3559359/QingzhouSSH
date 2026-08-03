@@ -9,7 +9,7 @@ use base64::{
     engine::general_purpose::{STANDARD, STANDARD_NO_PAD},
     Engine,
 };
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use ssh2::{Channel, Session};
 
 use crate::{
@@ -30,7 +30,7 @@ pub struct SshEndpoint {
     pub timeout: Duration,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct HostKeyObservation {
     pub algorithm: String,
