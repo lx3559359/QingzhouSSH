@@ -57,11 +57,11 @@
 - Modify: `src-tauri/src/domain/mod.rs`
 - Test: `src-tauri/tests/workflow_state_machine.rs`
 
-- [ ] 写失败测试：合法/非法运行和节点转换、事件序号、32 KiB 上限、Redactor、取消 token、当前 child execution 注册与清理。
-- [ ] 实现 run/node 状态机与 `WorkflowEventEmitter`；状态先持久化再发事件。
-- [ ] 实现 registry 的 run cancellation token 与 child execution 映射，不向前端暴露句柄。
-- [ ] 运行状态机和 redaction 回归测试。
-- [ ] 提交：`feat: add workflow state and event contracts`
+- [x] 写失败测试：合法/非法运行和节点转换、事件序号、32 KiB 上限、Redactor、取消 token、当前 child execution 注册与清理。
+- [x] 实现 run/node 状态机与 `WorkflowEventEmitter`；状态先持久化再发事件。
+- [x] 实现 registry 的 run cancellation token 与 child execution 映射，不向前端暴露句柄。
+- [x] 运行状态机和 redaction 回归测试。
+- [x] 提交：`feat: add workflow state and event contracts`
 
 ## Task 4：任务与高级执行节点适配器
 
