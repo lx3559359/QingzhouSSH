@@ -6,36 +6,9 @@ $localRoot = Join-Path $projectRoot '.local'
 $physicalCargoTarget = Join-Path $projectRoot 'target'
 
 New-Item -ItemType Directory -Force -Path $physicalCargoTarget | Out-Null
-$asciiProjectAncestor = $projectRoot
-while ($asciiProjectAncestor -match '[^\x00-\x7F]') {
-  $parent = Split-Path -Parent $asciiProjectAncestor
-  if ([string]::IsNullOrWhiteSpace($parent) -or $parent -eq $asciiProjectAncestor) {
-    throw "Unable to find an ASCII-only project ancestor for Cargo: $projectRoot"
-  }
-  $asciiProjectAncestor = $parent
-}
-$aliasRoot = Join-Path $asciiProjectAncestor '.qingzhou-ssh-build'
-New-Item -ItemType Directory -Force -Path $aliasRoot | Out-Null
-$sha256 = [Security.Cryptography.SHA256]::Create()
-try {
-  $hashBytes = $sha256.ComputeHash([Text.Encoding]::UTF8.GetBytes($projectRoot))
-  $hash = [BitConverter]::ToString($hashBytes).Replace('-', '').Substring(0, 16).ToLowerInvariant()
-} finally {
-  $sha256.Dispose()
-}
-$cargoTargetAlias = Join-Path $aliasRoot $hash
-if (Test-Path -LiteralPath $cargoTargetAlias) {
-  $existingAlias = Get-Item -LiteralPath $cargoTargetAlias
-  if (-not ($existingAlias.Attributes -band [IO.FileAttributes]::ReparsePoint) -or
-      [IO.Path]::GetFullPath([string]$existingAlias.Target) -ne [IO.Path]::GetFullPath($physicalCargoTarget)) {
-    throw "Cargo target alias points to an unexpected location: $cargoTargetAlias"
-  }
-} else {
-  New-Item -ItemType Junction -Path $cargoTargetAlias -Target $physicalCargoTarget | Out-Null
-}
 
 $env:CARGO_HOME = Join-Path $localRoot 'cargo-home'
-$env:CARGO_TARGET_DIR = $cargoTargetAlias
+$env:CARGO_TARGET_DIR = $physicalCargoTarget
 $env:RUSTUP_HOME = Join-Path $localRoot 'rustup-home'
 $env:QINGZHOU_PERL_HOME = Join-Path $localRoot 'strawberry-perl'
 $env:PERL_BADLANG = '0'

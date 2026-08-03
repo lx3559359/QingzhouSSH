@@ -27,16 +27,17 @@ function Assert-UnderRepo([string]$name, [string]$path) {
   }
 }
 
-function Assert-TargetJunction([string]$path) {
+function Assert-PhysicalCargoTarget([string]$path) {
   $full = [IO.Path]::GetFullPath($path)
-  if ((Split-Path -Qualifier $full) -ne $repoDrive) {
-    throw "Cargo target alias escaped the project drive: $full"
+  Assert-UnderRepo 'Cargo target directory' $full
+  $expected = [IO.Path]::GetFullPath((Join-Path $repoRoot 'target'))
+  if ($full -ne $expected) {
+    throw "Cargo target directory must be the repository target folder: $full"
   }
   $item = Get-Item -LiteralPath $full
-  if (-not ($item.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
-    throw "Cargo target alias is not a junction: $full"
+  if ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) {
+    throw "Cargo target directory must be physical project storage: $full"
   }
-  Assert-UnderRepo 'Cargo target junction destination' ([string]$item.Target)
 }
 
 $metadata = cargo metadata --manifest-path (Join-Path $repoRoot 'src-tauri\Cargo.toml') --no-deps --format-version 1 | ConvertFrom-Json
@@ -48,7 +49,7 @@ if ($LASTEXITCODE -ne 0) {
   throw 'pnpm store path failed'
 }
 
-Assert-TargetJunction $metadata.target_directory
+Assert-PhysicalCargoTarget $metadata.target_directory
 Assert-UnderRepo 'Cargo home' $env:CARGO_HOME
 Assert-UnderRepo 'Rustup home' $env:RUSTUP_HOME
 Assert-UnderRepo 'npm cache' $env:NPM_CONFIG_CACHE

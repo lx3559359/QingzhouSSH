@@ -14,7 +14,7 @@
 . .\scripts\dev-env.ps1
 ```
 
-该脚本把 Cargo、Rustup、pnpm、npm、Corepack、临时目录、测试数据、运行数据和构建产物指向仓库 `.local`、`target` 或 `artifacts`。由于 Windows 原生构建工具不能稳定处理中文目标路径，`CARGO_TARGET_DIR` 使用 D 盘项目父目录下的 ASCII junction；junction 的实际目标仍是当前仓库的 `target`。
+该脚本把 Cargo、Rustup、pnpm、npm、Corepack、临时目录、测试数据、运行数据和构建产物全部指向仓库内的 `.local`、`target` 或 `artifacts`。`CARGO_TARGET_DIR` 直接使用当前仓库的物理 `target` 目录，不会在项目父目录或其他盘符创建兼容目录与 junction。
 
 ## 安装依赖与运行界面
 

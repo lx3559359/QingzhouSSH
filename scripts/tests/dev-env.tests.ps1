@@ -26,25 +26,14 @@ foreach ($path in $paths) {
   }
 }
 
-if ($env:CARGO_TARGET_DIR -match '[^\x00-\x7F]') {
-  throw "Cargo target alias must be ASCII-only for vendored OpenSSL: $env:CARGO_TARGET_DIR"
+$expectedTarget = [IO.Path]::GetFullPath((Join-Path $repoRoot 'target'))
+$actualTarget = [IO.Path]::GetFullPath($env:CARGO_TARGET_DIR)
+if ($actualTarget -ne $expectedTarget) {
+  throw "Cargo target directory escaped repository: $actualTarget"
 }
-$asciiProjectAncestor = $repoRoot
-while ($asciiProjectAncestor -match '[^\x00-\x7F]') {
-  $asciiProjectAncestor = Split-Path -Parent $asciiProjectAncestor
-}
-$expectedAliasRoot = Join-Path $asciiProjectAncestor '.qingzhou-ssh-build'
-if (-not $env:CARGO_TARGET_DIR.StartsWith("$expectedAliasRoot\", [StringComparison]::OrdinalIgnoreCase)) {
-  throw "Cargo target alias escaped the D-drive project folder: $env:CARGO_TARGET_DIR"
-}
-$targetAlias = Get-Item -LiteralPath $env:CARGO_TARGET_DIR
-$expectedTarget = Join-Path $repoRoot 'target'
-if (-not ($targetAlias.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
-  throw "Cargo target path is not a junction: $env:CARGO_TARGET_DIR"
-}
-$linkedTarget = [IO.Path]::GetFullPath([string]$targetAlias.Target)
-if ($linkedTarget -ne [IO.Path]::GetFullPath($expectedTarget)) {
-  throw "Cargo target junction escaped repository: $linkedTarget"
+$targetItem = Get-Item -LiteralPath $actualTarget
+if ($targetItem.Attributes -band [IO.FileAttributes]::ReparsePoint) {
+  throw "Cargo target directory must be physical project storage: $actualTarget"
 }
 
 $cargoBin = Join-Path $env:CARGO_HOME 'bin'
