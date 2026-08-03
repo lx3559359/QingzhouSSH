@@ -91,9 +91,9 @@
 
 ## Task 15：M4 全量验收
 
-- [ ] 前端全量测试/构建、Rust fmt/Clippy/全量测试、Tauri NSIS 签名构建全部通过。
-- [ ] 内置浏览器验收设置页、主源、镜像回退、进度、拒绝和确认，截图保存在项目。
-- [ ] 运行发布物、密钥 canary、占位、C/D 路径和两源一致性审计。
-- [ ] 记录命令、测试数、包大小、哈希、项目 URL 和受信任签名边界。
+- [x] 前端全量测试/构建、Rust fmt/Clippy/全量测试、Tauri NSIS 签名构建全部通过。
+- [x] 内置浏览器验收设置页、主源、镜像回退、进度、拒绝和确认，截图保存在项目。
+- [x] 运行发布物、密钥 canary、占位、C/D 路径和两源一致性审计。
+- [x] 记录命令、测试数、包大小、哈希、项目 URL 和受信任签名边界。
 - [ ] 把本计划全部完成项改为 `[x]`。
-- [ ] 提交：`docs: record milestone four acceptance`
+- [x] 提交：`docs: record milestone four acceptance`
