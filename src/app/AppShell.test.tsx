@@ -24,13 +24,16 @@ vi.mock('../features/history/ExecutionHistoryPage', () => ({
 vi.mock('../features/workflows/WorkflowPage', () => ({
   WorkflowPage: () => <section aria-label="工作流内容">工作流内容</section>,
 }));
+vi.mock('../features/settings/SettingsPage', () => ({
+  SettingsPage: () => <section aria-label="设置内容">设置内容</section>,
+}));
 
 import { AppShell } from './AppShell';
 
 describe('AppShell', () => {
   it('offers the complete navigation and opens the workflow builder', async () => {
     const user = userEvent.setup();
-    render(<AppShell />);
+    render(<AppShell dataRoot="D:\\Codex Project\\轻量化SSH快捷工具\\data" />);
 
     for (const name of ['首页', '服务器', '快捷任务', '日志检索', '文件传输', '工作流', '执行记录', '下载文件', '设置']) {
       expect(screen.getByRole('button', { name })).toBeVisible();
@@ -45,5 +48,8 @@ describe('AppShell', () => {
     await user.click(screen.getByRole('button', { name: '工作流' }));
     expect(screen.getByLabelText('工作流内容')).toBeVisible();
     expect(screen.queryByText('工作流将在下一里程碑开放')).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: '设置' }));
+    expect(screen.getByLabelText('设置内容')).toBeVisible();
   });
 });

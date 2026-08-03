@@ -18,6 +18,7 @@ import { FileTransferPage } from '../features/transfers/FileTransferPage';
 import { DownloadsPage } from '../features/downloads/DownloadsPage';
 import { ExecutionHistoryPage } from '../features/history/ExecutionHistoryPage';
 import { WorkflowPage } from '../features/workflows/WorkflowPage';
+import { SettingsPage } from '../features/settings/SettingsPage';
 
 type PageKey =
   | 'home'
@@ -42,7 +43,7 @@ const navigation = [
   { key: 'settings' as const, label: '设置', icon: GearSix },
 ];
 
-export function AppShell() {
+export function AppShell({ dataRoot }: { dataRoot: string }) {
   const [page, setPage] = useState<PageKey>('home');
 
   return (
@@ -87,7 +88,7 @@ export function AppShell() {
         {page === 'workflows' && <WorkflowPage />}
         {page === 'history' && <ExecutionHistoryPage />}
         {page === 'downloads' && <DownloadsPage />}
-        {page === 'settings' && <SectionNotice title="设置" description="数据目录、安全策略与更新设置集中在这里。" />}
+        {page === 'settings' && <SettingsPage dataRoot={dataRoot} />}
       </section>
     </div>
   );
@@ -122,14 +123,5 @@ function HomePage({ onNavigate }: { onNavigate: (page: PageKey) => void }) {
         </ol>
       </article>
     </section>
-  );
-}
-
-function SectionNotice({ title, description }: { title: string; description: string }) {
-  return (
-    <article className="silver-card milestone-notice">
-      <span className="feature-icon feature-icon--green"><GearSix weight="duotone" /></span>
-      <div><h1>{title}</h1><p>{description}</p></div>
-    </article>
   );
 }

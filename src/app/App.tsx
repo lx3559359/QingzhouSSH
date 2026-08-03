@@ -71,7 +71,7 @@ export function App() {
           ) : bootstrap.state === 'needs_selection' ? (
             <DataRootGate status={bootstrap} onReady={setBootstrap} />
           ) : (
-            <AppShell />
+            <AppShell dataRoot={bootstrap.dataRoot} />
           )}
         </div>
       </section>
