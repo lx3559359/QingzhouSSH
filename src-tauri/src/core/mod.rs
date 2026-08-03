@@ -3,6 +3,7 @@ pub mod database;
 pub mod redaction;
 pub mod root_registry;
 pub mod secret_protector;
+pub mod sftp;
 pub mod ssh;
 pub mod system_probe;
 pub mod tasks;
