@@ -19,6 +19,7 @@ $env:PNPM_STORE_DIR = Join-Path $localRoot 'pnpm-store'
 $env:TEMP = Join-Path $localRoot 'tmp'
 $env:TMP = $env:TEMP
 $env:QINGZHOU_DATA_ROOT = Join-Path $localRoot 'dev-data'
+$env:VITE_QINGZHOU_DATA_ROOT = $env:QINGZHOU_DATA_ROOT
 $env:QINGZHOU_ARTIFACTS_DIR = Join-Path $projectRoot 'artifacts'
 
 @(

@@ -27,6 +27,8 @@ const previewServer: ServerProfile = {
 
 let previewServers = [previewServer];
 let previewExecutions: ExecutionDetails[] = [];
+const previewDataRoot =
+  import.meta.env.VITE_QINGZHOU_DATA_ROOT ?? '.local\\dev-data（项目目录内）';
 
 const previewTasks: TaskAvailability[] = [
   {
@@ -148,7 +150,7 @@ function emitPreview(onEvent: (event: ExecutionEvent) => void, details: Executio
 export const previewApi = {
   bootstrapStatus: async () => ({
     state: 'ready' as const,
-    dataRoot: 'D:\\QingzhouSSH\\data',
+    dataRoot: previewDataRoot,
   }),
   initializeDataRoot: async (path: string) => ({ state: 'ready' as const, dataRoot: path }),
   listServers: async () => previewServers,
