@@ -22,9 +22,9 @@
 
 ## Task 4：持久化更新设置与清理
 
-- [ ] 先写 `state.json` 原子保存、限频、相对路径和遗留 `.partial` 清理测试。
-- [ ] 实现 `<data-root>/updates` 状态存储，拒绝路径逃逸和绝对路径。
-- [ ] 提交：`feat: persist project-local update state`
+- [x] 先写 `state.json` 原子保存、限频、相对路径和遗留 `.partial` 清理测试。
+- [x] 实现 `<data-root>/updates` 状态存储，拒绝路径逃逸和绝对路径。
+- [x] 提交：`feat: persist project-local update state`
 
 ## Task 5：集成 Tauri 签名下载与 SHA-256
 

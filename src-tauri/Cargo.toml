@@ -11,6 +11,7 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
+atomicwrites = "0.4"
 base64 = "0.22"
 russh = { version = "0.62.4", default-features = false, features = ["ring", "rsa"] }
 russh-sftp = "=2.4.0"

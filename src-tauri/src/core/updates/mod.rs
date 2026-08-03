@@ -8,6 +8,12 @@ use crate::domain::update::{
     UpdateRelease, UpdateReleaseInput, UpdateSource, UpdateValidationError,
 };
 
+mod state_store;
+pub use state_store::{
+    StoredCheckResult, StoredCheckStatus, UpdatePersistentState, UpdateStateStore,
+    UpdateStateStoreError,
+};
+
 const PROJECT_NAME: &str = "QingzhouSSH";
 const PLATFORM: &str = "windows-x86_64";
 
