@@ -5,7 +5,7 @@ import appIcon from '../../assets/app-icon.svg';
 import type { BootstrapStatus } from '../api/contracts';
 import { api } from '../api/tauri';
 import { DataRootGate } from '../features/bootstrap/DataRootGate';
-import { ServerListPage } from '../features/servers/ServerListPage';
+import { AppShell } from './AppShell';
 import '../styles/theme.css';
 
 function displayError(cause: unknown) {
@@ -71,7 +71,7 @@ export function App() {
           ) : bootstrap.state === 'needs_selection' ? (
             <DataRootGate status={bootstrap} onReady={setBootstrap} />
           ) : (
-            <ServerListPage />
+            <AppShell />
           )}
         </div>
       </section>

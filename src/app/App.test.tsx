@@ -8,8 +8,8 @@ const apiMocks = vi.hoisted(() => ({
 }));
 
 vi.mock('../api/tauri', () => ({ api: apiMocks }));
-vi.mock('../features/servers/ServerListPage', () => ({
-  ServerListPage: () => <section aria-label="服务器主页">服务器主页</section>,
+vi.mock('./AppShell', () => ({
+  AppShell: () => <section aria-label="操作中心">操作中心</section>,
 }));
 
 import { App } from './App';
@@ -43,7 +43,7 @@ describe('App', () => {
     });
     render(<App />);
 
-    expect(await screen.findByLabelText('服务器主页')).toBeVisible();
+    expect(await screen.findByLabelText('操作中心')).toBeVisible();
     expect(screen.getByText('D:\\QingzhouSSH')).toBeVisible();
   });
 });
