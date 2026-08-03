@@ -7,14 +7,14 @@ use uuid::Uuid;
 use crate::error::{AppError, AppResult};
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct NodePosition {
     pub x: f64,
     pub y: f64,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct WorkflowNode {
     pub id: Uuid,
     pub name: String,
@@ -23,9 +23,9 @@ pub struct WorkflowNode {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "camelCase")]
+#[serde(tag = "type", rename_all = "camelCase", deny_unknown_fields)]
 pub enum WorkflowNodeConfig {
-    Start,
+    Start {},
     Task {
         task_id: String,
         task_version: i32,
@@ -73,7 +73,7 @@ pub enum WorkflowCustomMode {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "camelCase")]
+#[serde(tag = "kind", rename_all = "camelCase", deny_unknown_fields)]
 pub enum WorkflowCondition {
     ExitCode {
         operator: NumericOperator,
@@ -90,7 +90,7 @@ pub enum WorkflowCondition {
     },
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum NumericOperator {
     Equal,
@@ -108,7 +108,7 @@ pub enum EqualityOperator {
     NotEqual,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum WorkflowEdgeBranch {
     Success,
@@ -117,7 +117,7 @@ pub enum WorkflowEdgeBranch {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct WorkflowEdge {
     pub from: Uuid,
     pub to: Uuid,
@@ -125,7 +125,7 @@ pub struct WorkflowEdge {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct WorkflowDraft {
     pub id: Option<Uuid>,
     pub name: String,
@@ -135,7 +135,7 @@ pub struct WorkflowDraft {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct WorkflowDefinition {
     pub id: Uuid,
     pub name: String,

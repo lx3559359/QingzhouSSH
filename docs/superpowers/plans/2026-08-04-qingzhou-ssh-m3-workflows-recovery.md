@@ -40,12 +40,12 @@
 - Modify: `src-tauri/src/core/mod.rs`
 - Test: `src-tauri/tests/workflow_graph.rs`
 
-- [ ] 写表驱动失败测试：开始/终止约束、缺失引用、自环、重复边、环、不可达节点、分支标签、100/200 上限和无终止路径。
-- [ ] 写节点参数失败测试：任务 ID/版本、日志、上传/下载、自定义超时和脚本长度复用 M2 校验；拒绝秘密字段和未知 JSON 字段。
-- [ ] 写条件求值失败测试：退出码、受限 JSON 点路径、固定文本 contains/notContains；拒绝正则、shell、动态路径和 512 字节以上文本。
-- [ ] 实现确定性拓扑校验、诊断 DTO 和条件求值器。
-- [ ] 运行 `cargo test --locked --test workflow_graph -- --nocapture`。
-- [ ] 提交：`feat: validate bounded workflow graphs`
+- [x] 写表驱动失败测试：开始/终止约束、缺失引用、自环、重复边、环、不可达节点、分支标签、100/200 上限和无终止路径。
+- [x] 写节点参数失败测试：任务 ID/版本、日志、上传/下载、自定义超时和脚本长度复用 M2 校验；拒绝秘密字段和未知 JSON 字段。
+- [x] 写条件求值失败测试：退出码、受限 JSON 点路径、固定文本 contains/notContains；拒绝正则、shell、动态路径和 512 字节以上文本。
+- [x] 实现确定性拓扑校验、诊断 DTO 和条件求值器。
+- [x] 运行 `cargo test --locked --test workflow_graph -- --nocapture`。
+- [x] 提交：`feat: validate bounded workflow graphs`
 
 ## Task 3：工作流事件、状态机与运行注册表
 

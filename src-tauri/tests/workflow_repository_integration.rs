@@ -47,7 +47,7 @@ fn draft(id: Option<Uuid>, description: &str) -> WorkflowDraft {
                 id: start,
                 name: "开始".into(),
                 position: NodePosition { x: 80.0, y: 120.0 },
-                config: WorkflowNodeConfig::Start,
+                config: WorkflowNodeConfig::Start {},
             },
             WorkflowNode {
                 id: stop,
