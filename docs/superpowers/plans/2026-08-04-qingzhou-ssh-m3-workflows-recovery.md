@@ -146,12 +146,12 @@
 - Create: `src-tauri/src/services/workflow_diagnostics.rs`
 - Test: `src-tauri/tests/workflow_rollback.rs`
 
-- [ ] 写失败测试：无危险确认拒绝回滚；恢复点逆序；已有文件临时上传+校验+原子替换；新文件删除；部分失败为 rollback_failed。
-- [ ] 写清理失败测试：运行中拒绝、只删登记路径、成功后 expired、重复清理幂等。
-- [ ] 写诊断失败测试：输出位于 downloads、只含相对路径、时间线/错误/校验和完整且 canary 被脱敏。
-- [ ] 实现回滚、cleanup 和 diagnostics export。
-- [ ] 运行 rollback、SFTP、redaction 与路径测试。
-- [ ] 提交：`feat: rollback workflows and export diagnostics`
+- [x] 写失败测试：无危险确认拒绝回滚；恢复点逆序；已有文件临时上传+校验+原子替换；新文件删除；部分失败为 rollback_failed。
+- [x] 写清理失败测试：运行中拒绝、只删登记路径、成功后 expired、重复清理幂等。
+- [x] 写诊断失败测试：输出位于 downloads、只含相对路径、时间线/错误/校验和完整且 canary 被脱敏。
+- [x] 实现回滚、cleanup 和 diagnostics export。
+- [x] 运行 rollback、SFTP、redaction 与路径测试。
+- [x] 提交：`feat: rollback workflows and export diagnostics`
 
 ## Task 10：Tauri 与 TypeScript 工作流契约
 

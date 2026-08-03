@@ -96,8 +96,10 @@ fn restore_paths_are_scoped_and_untrusted_paths_are_rejected() {
     let run_id = Uuid::new_v4();
     let node_id = Uuid::new_v4();
     let relative = restore_point_relative_path(run_id, node_id, "/etc/my app.conf").unwrap();
+    let second = restore_point_relative_path(run_id, node_id, "/etc/my app.conf").unwrap();
 
     assert!(relative.starts_with(&format!("backups/workflows/{run_id}/{node_id}/")));
+    assert_ne!(relative, second);
     assert!(!relative.contains(' '));
     assert_eq!(
         resolve_restore_point_path(root, &relative).unwrap(),

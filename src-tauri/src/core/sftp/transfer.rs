@@ -335,6 +335,24 @@ pub(crate) async fn backup_remote_file(
     result.map(Some)
 }
 
+pub(crate) async fn delete_remote_file(
+    ssh: &AuthenticatedSshSession,
+    remote_path: &str,
+) -> AppResult<bool> {
+    validate_remote_path(remote_path)?;
+    let sftp = open_sftp(ssh).await?;
+    let result = async {
+        if !sftp_try_exists(&sftp, remote_path).await? {
+            return Ok(false);
+        }
+        sftp.remove_file(remote_path).await.map_err(sftp_error)?;
+        Ok(true)
+    }
+    .await;
+    let _ = sftp.close().await;
+    result
+}
+
 pub async fn hash_remote_file(
     ssh: &AuthenticatedSshSession,
     remote_path: &str,

@@ -5,6 +5,7 @@ pub mod log_service;
 pub mod restore_point_service;
 pub mod server_connector;
 pub mod transfer_service;
+pub mod workflow_diagnostics;
 pub mod workflow_nodes;
 pub mod workflow_registry;
 pub mod workflow_service;

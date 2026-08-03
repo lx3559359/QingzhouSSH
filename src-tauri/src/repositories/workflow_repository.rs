@@ -488,6 +488,72 @@ impl WorkflowRepository {
         .collect()
     }
 
+    pub async fn mark_restore_point_rolling_back(&self, id: Uuid) -> AppResult<()> {
+        let result = sqlx::query(
+            "UPDATE workflow_restore_points SET status='rolling_back',error_message=NULL,updated_at=? WHERE id=? AND status='available'",
+        )
+        .bind(now_millis())
+        .bind(id.to_string())
+        .execute(&self.pool)
+        .await?;
+        ensure_one(result.rows_affected(), "恢复点不处于可回滚状态")
+    }
+
+    pub async fn finish_restore_point_rollback(
+        &self,
+        id: Uuid,
+        succeeded: bool,
+        error_message: Option<String>,
+    ) -> AppResult<()> {
+        let status = if succeeded { "rolled_back" } else { "failed" };
+        let result = sqlx::query(
+            "UPDATE workflow_restore_points SET status=?,error_message=?,updated_at=? WHERE id=? AND status='rolling_back'",
+        )
+        .bind(status)
+        .bind(cap_utf8(error_message, 8 * 1024))
+        .bind(now_millis())
+        .bind(id.to_string())
+        .execute(&self.pool)
+        .await?;
+        ensure_one(result.rows_affected(), "恢复点不处于回滚执行状态")
+    }
+
+    pub async fn expire_restore_point(&self, id: Uuid) -> AppResult<bool> {
+        let result = sqlx::query(
+            "UPDATE workflow_restore_points SET status='expired',updated_at=? WHERE id=? AND status IN ('available','failed','rolled_back')",
+        )
+        .bind(now_millis())
+        .bind(id.to_string())
+        .execute(&self.pool)
+        .await?;
+        Ok(result.rows_affected() == 1)
+    }
+
+    pub async fn finish_rollback_run(
+        &self,
+        run_id: Uuid,
+        succeeded: bool,
+        error_message: Option<String>,
+    ) -> AppResult<()> {
+        let status = if succeeded {
+            WorkflowRunStatus::RolledBack
+        } else {
+            WorkflowRunStatus::RollbackFailed
+        };
+        let result = sqlx::query(
+            "UPDATE workflow_runs SET status=?,finished_at=?,error_category=?,error_message=?,retryable=? WHERE id=? AND status IN ('paused','succeeded','cancelled','uncertain','rollback_failed')",
+        )
+        .bind(status.as_str())
+        .bind(now_millis())
+        .bind((!succeeded).then_some("rollback"))
+        .bind(cap_utf8(error_message, 8 * 1024))
+        .bind(!succeeded)
+        .bind(run_id.to_string())
+        .execute(&self.pool)
+        .await?;
+        ensure_one(result.rows_affected(), "工作流当前状态不允许回滚")
+    }
+
     pub async fn append_event(
         &self,
         run_id: Uuid,

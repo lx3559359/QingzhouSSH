@@ -39,8 +39,9 @@ pub fn restore_point_relative_path(
     }
     let digest = format!("{:x}", Sha256::digest(remote_path.as_bytes()));
     let relative = format!(
-        "backups/workflows/{run_id}/{node_id}/{safe_name}.{}.backup",
-        &digest[..12]
+        "backups/workflows/{run_id}/{node_id}/{safe_name}.{}.{}.backup",
+        &digest[..12],
+        Uuid::new_v4().simple()
     );
     validate_restore_point_relative_path(&relative)?;
     Ok(relative)

@@ -38,6 +38,7 @@ use crate::{
         restore_point_service::RestorePointService,
         server_connector::ServerConnector,
         transfer_service::TransferService,
+        workflow_diagnostics::WorkflowDiagnosticsService,
         workflow_nodes::{execution::ExecutionNodeAdapter, io::IoNodeAdapter},
         workflow_registry::WorkflowRunRegistry,
         workflow_service::WorkflowService,
@@ -71,6 +72,7 @@ pub struct AppServices {
     workflows: WorkflowRepository,
     restore_points: RestorePointService,
     workflow_runner: WorkflowService,
+    workflow_diagnostics: WorkflowDiagnosticsService,
 }
 
 impl AppServices {
@@ -123,6 +125,11 @@ impl AppServices {
             connector,
             WorkflowRunRegistry::default(),
         );
+        let workflow_diagnostics = WorkflowDiagnosticsService::new(
+            root.to_path_buf(),
+            workflow_repository.clone(),
+            ServerConnector::new(servers.clone(), vault.clone()),
+        );
         Ok(Self {
             data_root: root.to_path_buf(),
             servers,
@@ -133,6 +140,7 @@ impl AppServices {
             workflows: workflow_repository,
             restore_points,
             workflow_runner,
+            workflow_diagnostics,
         })
     }
 
@@ -162,6 +170,10 @@ impl AppServices {
 
     pub fn workflow_service(&self) -> WorkflowService {
         self.workflow_runner.clone()
+    }
+
+    pub fn workflow_diagnostics_service(&self) -> WorkflowDiagnosticsService {
+        self.workflow_diagnostics.clone()
     }
 
     pub async fn create_server(&self, request: CreateServerRequest) -> AppResult<ServerProfile> {

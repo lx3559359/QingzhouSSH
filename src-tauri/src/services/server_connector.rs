@@ -90,6 +90,14 @@ impl ServerConnector {
             .ok_or_else(|| AppError::Security("尚未信任服务器主机密钥".into()))?;
         Ok(profile)
     }
+
+    pub async fn redactor_for_server(&self, server_id: &str) -> AppResult<Redactor> {
+        let profile = self.require_server(server_id).await?;
+        let encrypted_payload = self.vault.get(&profile.credential_id)?;
+        let credential: StoredCredential = serde_json::from_slice(&encrypted_payload)
+            .map_err(|_| AppError::Security("凭据密文损坏或格式无效".into()))?;
+        Ok(credential_redactor(&credential))
+    }
 }
 
 fn credential_redactor(credential: &StoredCredential) -> Redactor {
