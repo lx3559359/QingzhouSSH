@@ -8,5 +8,6 @@ pub mod sftp;
 pub mod ssh;
 pub mod system_probe;
 pub mod tasks;
+pub mod updates;
 pub mod vault;
 pub mod workflows;

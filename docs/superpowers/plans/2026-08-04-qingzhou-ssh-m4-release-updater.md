@@ -16,9 +16,9 @@
 
 ## Task 3：实现清单与固定来源策略
 
-- [ ] 先写 GitHub 主源、ModelScope 回退、HTTPS/主机/路径白名单和安全错误不回退测试。
-- [ ] 添加可注入 manifest transport 与来源选择器。
-- [ ] 提交：`feat: select trusted dual update sources`
+- [x] 先写 GitHub 主源、ModelScope 回退、HTTPS/主机/路径白名单和安全错误不回退测试。
+- [x] 添加可注入 manifest transport 与来源选择器。
+- [x] 提交：`feat: select trusted dual update sources`
 
 ## Task 4：持久化更新设置与清理
 

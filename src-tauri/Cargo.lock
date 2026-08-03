@@ -3251,6 +3251,7 @@ dependencies = [
  "tokio",
  "tokio-util",
  "tracing",
+ "url",
  "uuid",
  "windows-dpapi",
  "winreg 0.56.0",
