@@ -27,6 +27,17 @@ pub fn run() {
             commands::servers::inspect_server_host_key,
             commands::servers::trust_server_host_key,
             commands::servers::test_server_connection,
+            commands::executions::list_task_definitions,
+            commands::executions::start_task_execution,
+            commands::executions::start_custom_execution,
+            commands::executions::cancel_execution,
+            commands::logs::search_logs,
+            commands::logs::read_log_result_page,
+            commands::logs::download_log_result,
+            commands::transfers::upload_file,
+            commands::transfers::download_file,
+            commands::executions::list_executions,
+            commands::executions::get_execution,
         ])
         .setup(|app| {
             let resolution = resolve_runtime_data_root()?;

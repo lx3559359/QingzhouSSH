@@ -1,21 +1,13 @@
 use tauri::State;
 
+use super::services;
 use crate::{
     core::{ssh::transport::HostKeyObservation, system_probe::SystemCapabilities},
     domain::server::{CreateServerRequest, ServerProfile},
-    error::{AppError, AppResult},
-    services::app_services::{AppServices, HostKeyCheck},
+    error::AppResult,
+    services::app_services::HostKeyCheck,
     state::AppState,
 };
-
-async fn services(state: &State<'_, AppState>) -> AppResult<AppServices> {
-    state
-        .services
-        .read()
-        .await
-        .clone()
-        .ok_or(AppError::NotReady)
-}
 
 #[tauri::command]
 pub async fn list_servers(state: State<'_, AppState>) -> AppResult<Vec<ServerProfile>> {

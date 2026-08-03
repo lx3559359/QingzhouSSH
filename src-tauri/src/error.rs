@@ -9,6 +9,8 @@ pub enum AppError {
     Compatibility(String),
     #[error("数据序列化失败：{0}")]
     Serialization(String),
+    #[error("桌面事件通道失败：{0}")]
+    Ipc(String),
     #[error("输出超过 {limit} 字节上限")]
     OutputLimitExceeded { limit: u64 },
     #[error("文件传输失败：{0}")]
@@ -47,6 +49,7 @@ impl AppError {
             Self::Validation(_) => "validation",
             Self::Compatibility(_) => "compatibility",
             Self::Serialization(_) => "serialization",
+            Self::Ipc(_) => "ipc",
             Self::OutputLimitExceeded { .. } => "output_limit_exceeded",
             Self::Transfer(_) => "transfer",
             Self::Integrity(_) => "integrity",

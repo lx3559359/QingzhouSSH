@@ -48,6 +48,7 @@ const capabilities: SystemCapabilities = {
   serviceManager: 'systemd',
   architecture: 'x86_64',
   shell: '/bin/bash',
+  commands: ['grep', 'gzip', 'awk', 'systemctl'],
 };
 
 async function submitServer(user: ReturnType<typeof userEvent.setup>) {
