@@ -5,8 +5,8 @@ $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 
 $paths = @(
   $env:CARGO_HOME,
-  $env:CARGO_TARGET_DIR,
   $env:RUSTUP_HOME,
+  $env:QINGZHOU_PERL_HOME,
   $env:NPM_CONFIG_CACHE,
   $env:COREPACK_HOME,
   $env:PNPM_HOME,
@@ -26,9 +26,33 @@ foreach ($path in $paths) {
   }
 }
 
+if ($env:CARGO_TARGET_DIR -match '[^\x00-\x7F]') {
+  throw "Cargo target alias must be ASCII-only for vendored OpenSSL: $env:CARGO_TARGET_DIR"
+}
+$targetAlias = Get-Item -LiteralPath $env:CARGO_TARGET_DIR
+$expectedTarget = Join-Path $repoRoot 'target'
+if (-not ($targetAlias.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+  throw "Cargo target path is not a junction: $env:CARGO_TARGET_DIR"
+}
+$linkedTarget = [IO.Path]::GetFullPath([string]$targetAlias.Target)
+if ($linkedTarget -ne [IO.Path]::GetFullPath($expectedTarget)) {
+  throw "Cargo target junction escaped repository: $linkedTarget"
+}
+
 $cargoBin = Join-Path $env:CARGO_HOME 'bin'
 if (($env:Path -split ';') -notcontains $cargoBin) {
   throw "Cargo bin is missing from PATH: $cargoBin"
+}
+
+if (-not (Get-Command perl -ErrorAction SilentlyContinue)) {
+  throw 'Perl is unavailable for the vendored OpenSSL build'
+}
+perl -MLocale::Maketext::Simple -e 1
+if ($LASTEXITCODE -ne 0) {
+  throw 'Perl lacks modules required by the vendored OpenSSL build'
+}
+if (-not (Get-Command nasm -ErrorAction SilentlyContinue)) {
+  throw 'NASM is unavailable for the vendored OpenSSL build'
 }
 
 Write-Host 'PASS: all controllable development paths are project-local'
