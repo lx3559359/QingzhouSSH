@@ -164,11 +164,11 @@
 - Modify: `src/api/tauri.ts`
 - Modify: `src/api/tauri.test.ts`
 
-- [ ] 写前端 API 失败测试，覆盖 13 个命令名、camelCase 参数、Channel 单调事件和错误 DTO。
-- [ ] 写 Rust DTO 序列化测试，确保节点、边、条件、状态和事件 discriminant 与 TypeScript 一致。
-- [ ] 注册并实现设计中的全部 workflow commands。
-- [ ] 运行前后端契约测试和 `pnpm build`。
-- [ ] 提交：`feat: expose typed workflow commands`
+- [x] 写前端 API 失败测试，覆盖 13 个命令名、camelCase 参数、Channel 单调事件和错误 DTO。
+- [x] 写 Rust DTO 序列化测试，确保节点、边、条件、状态和事件 discriminant 与 TypeScript 一致。
+- [x] 注册并实现设计中的全部 workflow commands。
+- [x] 运行前后端契约测试和 `pnpm build`。
+- [x] 提交：`feat: expose typed workflow commands`
 
 ## Task 11：预览 API 与可复现示例工作流
 

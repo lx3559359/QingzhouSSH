@@ -14,7 +14,7 @@ const { invoke, channels, MockChannel } = vi.hoisted(() => {
 
 vi.mock('@tauri-apps/api/core', () => ({ Channel: MockChannel, invoke }));
 
-import { api } from './tauri';
+import { api, asAppError, tauriApi } from './tauri';
 
 describe('Tauri API wrapper', () => {
   beforeEach(() => {
@@ -122,5 +122,83 @@ describe('Tauri API wrapper', () => {
     channels[0].onmessage?.({ sequence: 3 });
     channels[0].onmessage?.({ sequence: 2 });
     expect(received).toEqual([1, 3]);
+  });
+
+  it('uses all workflow command names, camelCase arguments and monotonic channels', async () => {
+    const draft = {
+      id: null,
+      name: 'deploy',
+      description: 'reference',
+      nodes: [
+        {
+          id: '11111111-1111-4111-8111-111111111111',
+          name: 'start',
+          position: { x: 20, y: 40 },
+          config: { type: 'start' as const },
+        },
+      ],
+      edges: [],
+    };
+    const received: number[] = [];
+    const onEvent = (event: { sequence: number }) => received.push(event.sequence);
+
+    await tauriApi.listWorkflows();
+    await tauriApi.getWorkflow('workflow-1', 2);
+    await tauriApi.saveWorkflow(draft);
+    await tauriApi.deleteWorkflow('workflow-1');
+    await tauriApi.validateWorkflow(draft);
+    await tauriApi.startWorkflowRun(
+      {
+        workflowId: 'workflow-1',
+        workflowVersion: 2,
+        serverId: 'server-1',
+        dangerousConfirmed: true,
+      },
+      onEvent,
+    );
+    await tauriApi.cancelWorkflowRun('run-1');
+    await tauriApi.retryWorkflowNode('run-1', true, onEvent);
+    await tauriApi.listWorkflowRuns({ serverId: 'server-1', status: 'paused' });
+    await tauriApi.getWorkflowRun('run-1');
+    await tauriApi.rollbackWorkflowRun('run-1', true);
+    await tauriApi.cleanupWorkflowRestorePoints('run-1');
+    await tauriApi.exportWorkflowDiagnostics('run-1');
+
+    expect(invoke.mock.calls.map(([command, args]) => [command, args && Object.keys(args)])).toEqual([
+      ['list_workflows', undefined],
+      ['get_workflow', ['workflowId', 'version']],
+      ['save_workflow', ['draft']],
+      ['delete_workflow', ['workflowId']],
+      ['validate_workflow', ['draft']],
+      ['start_workflow_run', ['request', 'onEvent']],
+      ['cancel_workflow_run', ['runId']],
+      ['retry_workflow_node', ['runId', 'dangerousConfirmed', 'onEvent']],
+      ['list_workflow_runs', ['filter']],
+      ['get_workflow_run', ['runId']],
+      ['rollback_workflow_run', ['runId', 'dangerousConfirmed']],
+      ['cleanup_workflow_restore_points', ['runId']],
+      ['export_workflow_diagnostics', ['runId']],
+    ]);
+
+    channels[0].onmessage?.({ sequence: 1 });
+    channels[0].onmessage?.({ sequence: 1 });
+    channels[0].onmessage?.({ sequence: 4 });
+    channels[0].onmessage?.({ sequence: 3 });
+    expect(received).toEqual([1, 4]);
+  });
+
+  it('normalizes backend error DTOs without exposing arbitrary values', () => {
+    expect(asAppError({ code: 'validation', message: 'invalid workflow' })).toEqual({
+      code: 'validation',
+      message: 'invalid workflow',
+    });
+    expect(asAppError(new Error('transport failed'))).toEqual({
+      code: 'unknown',
+      message: 'transport failed',
+    });
+    expect(asAppError({ secret: 'do-not-render' })).toEqual({
+      code: 'unknown',
+      message: '操作失败',
+    });
   });
 });

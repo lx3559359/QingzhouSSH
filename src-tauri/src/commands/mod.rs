@@ -3,12 +3,14 @@ pub mod executions;
 pub mod logs;
 pub mod servers;
 pub mod transfers;
+pub mod workflows;
 
 use tauri::{ipc::Channel, State};
 
 use crate::{
     core::ssh::executor::EventSink,
     domain::events::ExecutionEvent,
+    domain::workflow_events::{WorkflowEvent, WorkflowEventSink},
     error::{AppError, AppResult},
     services::app_services::AppServices,
     state::AppState,
@@ -27,6 +29,16 @@ pub(crate) struct ChannelEventSink(pub Channel<ExecutionEvent>);
 
 impl EventSink for ChannelEventSink {
     fn send(&mut self, event: ExecutionEvent) -> AppResult<()> {
+        self.0
+            .send(event)
+            .map_err(|error| AppError::Ipc(error.to_string()))
+    }
+}
+
+pub(crate) struct WorkflowChannelEventSink(pub Channel<WorkflowEvent>);
+
+impl WorkflowEventSink for WorkflowChannelEventSink {
+    fn send(&mut self, event: WorkflowEvent) -> AppResult<()> {
         self.0
             .send(event)
             .map_err(|error| AppError::Ipc(error.to_string()))

@@ -18,13 +18,24 @@ import type {
   TaskAvailability,
   TaskExecutionRequest,
   UploadRequest,
+  AppErrorDto,
+  ExecutionFile,
+  StartWorkflowRunRequest,
+  WorkflowDefinition,
+  WorkflowDraft,
+  WorkflowEvent,
+  WorkflowRunDetails,
+  WorkflowRunFilter,
+  WorkflowRunRecord,
+  WorkflowSummary,
+  WorkflowValidationReport,
 } from './contracts';
 import { dataRootPreviewApi, previewApi } from './preview';
 
 export type ExecutionEventHandler = (event: ExecutionEvent) => void;
 
-function createEventChannel(onEvent: ExecutionEventHandler) {
-  const channel = new Channel<ExecutionEvent>();
+function createMonotonicChannel<T extends { sequence: number }>(onEvent: (event: T) => void) {
+  const channel = new Channel<T>();
   let lastSequence = 0;
   channel.onmessage = (event) => {
     if (event.sequence <= lastSequence) return;
@@ -32,6 +43,25 @@ function createEventChannel(onEvent: ExecutionEventHandler) {
     onEvent(event);
   };
   return channel;
+}
+
+function createEventChannel(onEvent: ExecutionEventHandler) {
+  return createMonotonicChannel(onEvent);
+}
+
+export function asAppError(error: unknown): AppErrorDto {
+  if (
+    typeof error === 'object' &&
+    error !== null &&
+    'code' in error &&
+    'message' in error &&
+    typeof error.code === 'string' &&
+    typeof error.message === 'string'
+  ) {
+    return { code: error.code, message: error.message };
+  }
+  if (error instanceof Error) return { code: 'unknown', message: error.message };
+  return { code: 'unknown', message: '操作失败' };
 }
 
 export const tauriApi = {
@@ -109,6 +139,45 @@ export const tauriApi = {
     invoke<ExecutionRecord[]>('list_executions', { filter }),
   getExecution: (executionId: string) =>
     invoke<ExecutionDetails | null>('get_execution', { executionId }),
+  listWorkflows: () => invoke<WorkflowSummary[]>('list_workflows'),
+  getWorkflow: (workflowId: string, version: number | null) =>
+    invoke<WorkflowDefinition | null>('get_workflow', { workflowId, version }),
+  saveWorkflow: (draft: WorkflowDraft) =>
+    invoke<WorkflowDefinition>('save_workflow', { draft }),
+  deleteWorkflow: (workflowId: string) =>
+    invoke<boolean>('delete_workflow', { workflowId }),
+  validateWorkflow: (draft: WorkflowDraft) =>
+    invoke<WorkflowValidationReport>('validate_workflow', { draft }),
+  startWorkflowRun: (
+    request: StartWorkflowRunRequest,
+    onEvent: (event: WorkflowEvent) => void,
+  ) =>
+    invoke<WorkflowRunDetails>('start_workflow_run', {
+      request,
+      onEvent: createMonotonicChannel(onEvent),
+    }),
+  cancelWorkflowRun: (runId: string) =>
+    invoke<void>('cancel_workflow_run', { runId }),
+  retryWorkflowNode: (
+    runId: string,
+    dangerousConfirmed: boolean,
+    onEvent: (event: WorkflowEvent) => void,
+  ) =>
+    invoke<WorkflowRunDetails>('retry_workflow_node', {
+      runId,
+      dangerousConfirmed,
+      onEvent: createMonotonicChannel(onEvent),
+    }),
+  listWorkflowRuns: (filter: WorkflowRunFilter) =>
+    invoke<WorkflowRunRecord[]>('list_workflow_runs', { filter }),
+  getWorkflowRun: (runId: string) =>
+    invoke<WorkflowRunDetails | null>('get_workflow_run', { runId }),
+  rollbackWorkflowRun: (runId: string, dangerousConfirmed: boolean) =>
+    invoke<WorkflowRunDetails>('rollback_workflow_run', { runId, dangerousConfirmed }),
+  cleanupWorkflowRestorePoints: (runId: string) =>
+    invoke<number>('cleanup_workflow_restore_points', { runId }),
+  exportWorkflowDiagnostics: (runId: string) =>
+    invoke<ExecutionFile>('export_workflow_diagnostics', { runId }),
 };
 
 const previewRequested =

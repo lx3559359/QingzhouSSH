@@ -165,6 +165,20 @@ impl WorkflowRepository {
         row.map(|row| map_definition(&row)).transpose()
     }
 
+    pub async fn delete(&self, id: Uuid) -> AppResult<bool> {
+        let result = sqlx::query("DELETE FROM workflows WHERE id=?")
+            .bind(id.to_string())
+            .execute(&self.pool)
+            .await
+            .map_err(|error| match &error {
+                sqlx::Error::Database(database) if database.is_foreign_key_violation() => {
+                    AppError::Validation("已有运行记录的工作流不能删除".into())
+                }
+                _ => AppError::Database(error),
+            })?;
+        Ok(result.rows_affected() == 1)
+    }
+
     pub async fn create_run(&self, draft: NewWorkflowRun) -> AppResult<WorkflowRunRecord> {
         if draft.server_id.trim().is_empty() || draft.workflow_version <= 0 {
             return Err(AppError::Validation("工作流运行参数不完整".into()));

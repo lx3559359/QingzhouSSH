@@ -38,6 +38,19 @@ pub fn run() {
             commands::transfers::download_file,
             commands::executions::list_executions,
             commands::executions::get_execution,
+            commands::workflows::list_workflows,
+            commands::workflows::get_workflow,
+            commands::workflows::save_workflow,
+            commands::workflows::delete_workflow,
+            commands::workflows::validate_workflow,
+            commands::workflows::start_workflow_run,
+            commands::workflows::cancel_workflow_run,
+            commands::workflows::retry_workflow_node,
+            commands::workflows::list_workflow_runs,
+            commands::workflows::get_workflow_run,
+            commands::workflows::rollback_workflow_run,
+            commands::workflows::cleanup_workflow_restore_points,
+            commands::workflows::export_workflow_diagnostics,
         ])
         .setup(|app| {
             let resolution = resolve_runtime_data_root()?;

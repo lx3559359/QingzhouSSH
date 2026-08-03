@@ -226,3 +226,256 @@ export interface ExecutionFilter {
   createdFrom?: number;
   createdTo?: number;
 }
+
+export interface NodePosition {
+  x: number;
+  y: number;
+}
+
+export type NumericOperator =
+  | 'equal'
+  | 'not_equal'
+  | 'less_than'
+  | 'less_than_or_equal'
+  | 'greater_than'
+  | 'greater_than_or_equal';
+
+export type EqualityOperator = 'equal' | 'not_equal';
+
+export type WorkflowCondition =
+  | { kind: 'exitCode'; operator: NumericOperator; value: number }
+  | { kind: 'resultField'; path: string; operator: EqualityOperator; value: string | number | boolean }
+  | { kind: 'outputContains'; text: string; negated: boolean };
+
+export type WorkflowNodeConfig =
+  | { type: 'start' }
+  | {
+      type: 'task';
+      taskId: string;
+      taskVersion: number;
+      parameters: Record<string, unknown>;
+    }
+  | { type: 'custom'; mode: 'command' | 'script'; content: string; timeoutSeconds: number }
+  | {
+      type: 'upload';
+      localPath: string;
+      remotePath: string;
+      overwrite: boolean;
+      createRestorePoint: boolean;
+    }
+  | { type: 'download'; remotePath: string; suggestedName: string; overwrite: boolean }
+  | {
+      type: 'logSearch';
+      path: string;
+      keyword: string;
+      caseSensitive: boolean;
+      contextLines: number;
+      limit: number;
+      startTime: string | null;
+      endTime: string | null;
+    }
+  | { type: 'condition'; sourceNodeId: string; predicate: WorkflowCondition }
+  | { type: 'stop'; message: string };
+
+export interface WorkflowNode {
+  id: string;
+  name: string;
+  position: NodePosition;
+  config: WorkflowNodeConfig;
+}
+
+export type WorkflowEdgeBranch = 'success' | 'true' | 'false';
+
+export interface WorkflowEdge {
+  from: string;
+  to: string;
+  branch: WorkflowEdgeBranch;
+}
+
+export interface WorkflowDraft {
+  id: string | null;
+  name: string;
+  description: string;
+  nodes: WorkflowNode[];
+  edges: WorkflowEdge[];
+}
+
+export interface WorkflowDefinition extends Omit<WorkflowDraft, 'id'> {
+  id: string;
+  version: number;
+  checksumSha256: string;
+}
+
+export interface WorkflowSummary {
+  id: string;
+  name: string;
+  description: string;
+  currentVersion: number;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export type WorkflowRunStatus =
+  | 'queued'
+  | 'running'
+  | 'paused'
+  | 'succeeded'
+  | 'cancelled'
+  | 'uncertain'
+  | 'rolled_back'
+  | 'rollback_failed';
+
+export type WorkflowNodeStatus =
+  | 'pending'
+  | 'running'
+  | 'succeeded'
+  | 'failed'
+  | 'cancelled'
+  | 'uncertain'
+  | 'skipped';
+
+export type WorkflowRestorePointStatus =
+  | 'creating'
+  | 'available'
+  | 'failed'
+  | 'rolling_back'
+  | 'rolled_back'
+  | 'expired';
+
+export interface WorkflowRunRecord {
+  id: string;
+  workflowId: string;
+  workflowVersion: number;
+  serverId: string;
+  status: WorkflowRunStatus;
+  currentNodeId: string | null;
+  createdAt: number;
+  startedAt: number | null;
+  finishedAt: number | null;
+  durationMs: number | null;
+  errorCategory: string | null;
+  errorMessage: string | null;
+  retryable: boolean;
+}
+
+export interface WorkflowNodeRun {
+  runId: string;
+  nodeId: string;
+  attempt: number;
+  status: WorkflowNodeStatus;
+  executionId: string | null;
+  startedAt: number | null;
+  finishedAt: number | null;
+  durationMs: number | null;
+  exitCode: number | null;
+  result: unknown | null;
+  outputSummary: string | null;
+  errorMessage: string | null;
+  retryable: boolean;
+}
+
+export interface WorkflowRestorePoint {
+  id: string;
+  runId: string;
+  nodeId: string;
+  remotePath: string;
+  relativePath: string | null;
+  originalExisted: boolean;
+  sizeBytes: number | null;
+  sha256: string | null;
+  status: WorkflowRestorePointStatus;
+  applicability: Record<string, unknown>;
+  errorMessage: string | null;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface WorkflowRunEventRecord {
+  runId: string;
+  sequence: number;
+  eventType: string;
+  payload: Record<string, unknown>;
+  emittedAt: number;
+}
+
+export interface WorkflowRunDetails {
+  run: WorkflowRunRecord;
+  nodeRuns: WorkflowNodeRun[];
+  restorePoints: WorkflowRestorePoint[];
+  events: WorkflowRunEventRecord[];
+}
+
+export interface StartWorkflowRunRequest {
+  workflowId: string;
+  workflowVersion: number | null;
+  serverId: string;
+  dangerousConfirmed: boolean;
+}
+
+export interface WorkflowRunFilter {
+  workflowId?: string;
+  serverId?: string;
+  status?: WorkflowRunStatus;
+  createdFrom?: number;
+  createdTo?: number;
+}
+
+export type WorkflowDiagnosticCode =
+  | 'graph_limit'
+  | 'duplicate_node'
+  | 'start_count'
+  | 'start_edges'
+  | 'stop_edges'
+  | 'missing_node'
+  | 'self_edge'
+  | 'duplicate_edge'
+  | 'invalid_branch'
+  | 'condition_branches'
+  | 'cycle'
+  | 'unreachable_node'
+  | 'no_terminal_path'
+  | 'invalid_parameters';
+
+export interface WorkflowDiagnostic {
+  code: WorkflowDiagnosticCode;
+  nodeId: string | null;
+  message: string;
+}
+
+export interface WorkflowValidationReport {
+  valid: boolean;
+  startNodeId: string | null;
+  diagnostics: WorkflowDiagnostic[];
+}
+
+type WorkflowEventBase = { sequence: number; emittedAt: number };
+
+export type WorkflowEvent = WorkflowEventBase &
+  (
+    | { type: 'runStarted'; runId: string; workflowId: string; serverId: string }
+    | { type: 'runStatusChanged'; runId: string; status: WorkflowRunStatus; message: string | null }
+    | { type: 'nodeStarted'; runId: string; nodeId: string; attempt: number }
+    | {
+        type: 'nodeStatusChanged';
+        runId: string;
+        nodeId: string;
+        attempt: number;
+        status: WorkflowNodeStatus;
+        executionId: string | null;
+        message: string | null;
+      }
+    | { type: 'conditionEvaluated'; runId: string; nodeId: string; result: boolean }
+    | {
+        type: 'restorePointChanged';
+        runId: string;
+        nodeId: string;
+        restorePointId: string;
+        status: string;
+      }
+    | { type: 'finished'; runId: string; status: WorkflowRunStatus; durationMs: number }
+  );
+
+export interface AppErrorDto {
+  code: string;
+  message: string;
+}
