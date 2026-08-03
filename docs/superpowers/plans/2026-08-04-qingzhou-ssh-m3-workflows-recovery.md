@@ -21,13 +21,13 @@
 - Modify: `src-tauri/src/repositories/mod.rs`
 - Test: `src-tauri/tests/workflow_repository_integration.rs`
 
-- [ ] 写迁移失败测试：从 M2 数据库升级后保留服务器/执行记录，并生成 workflows、versions、runs、node_runs、restore_points、run_events；非法状态触发 CHECK。
-- [ ] 写 repository 失败测试：保存定义生成不可变版本、相同定义不重复增版、列表/详情、创建运行、节点 attempt、事件序号和运行筛选。
-- [ ] 写恢复失败测试：遗留 running workflow/node 启动后转为 uncertain，并保留 current node 与错误说明。
-- [ ] 运行 `cargo test --locked --test workflow_repository_integration -- --nocapture`，确认缺少实现。
-- [ ] 实现强类型状态、记录与 repository；JSON 必须规范化并计算 SHA-256，所有相对文件路径通过数据根约束。
-- [ ] 运行 repository 与 M1/M2 migration 回归测试。
-- [ ] 提交：`feat: persist versioned workflows and runs`
+- [x] 写迁移失败测试：从 M2 数据库升级后保留服务器/执行记录，并生成 workflows、versions、runs、node_runs、restore_points、run_events；非法状态触发 CHECK。
+- [x] 写 repository 失败测试：保存定义生成不可变版本、相同定义不重复增版、列表/详情、创建运行、节点 attempt、事件序号和运行筛选。
+- [x] 写恢复失败测试：遗留 running workflow/node 启动后转为 uncertain，并保留 current node 与错误说明。
+- [x] 运行 `cargo test --locked --test workflow_repository_integration -- --nocapture`，确认缺少实现。
+- [x] 实现强类型状态、记录与 repository；JSON 必须规范化并计算 SHA-256，所有相对文件路径通过数据根约束。
+- [x] 运行 repository 与 M1/M2 migration 回归测试。
+- [x] 提交：`feat: persist versioned workflows and runs`
 
 ## Task 2：图校验与受限条件求值
 
