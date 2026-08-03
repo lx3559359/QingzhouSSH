@@ -72,11 +72,11 @@
 - Modify: `src-tauri/src/services/mod.rs`
 - Test: `src-tauri/tests/workflow_execution_nodes.rs`
 
-- [ ] 写失败测试：内置任务和自定义命令/脚本节点调用现有 ExecutionService，关联 M2 execution ID，映射退出码/摘要/结果，敏感内容不进入 workflow event。
-- [ ] 为 M2 服务增加最小内部 trait/facade 以便工作流复用，不复制 SSH 执行逻辑。
-- [ ] 实现 task/custom 节点适配器和统一 `NodeOutcome`。
-- [ ] 运行节点测试及 M2 execution service 回归。
-- [ ] 提交：`feat: execute task nodes in workflows`
+- [x] 写失败测试：内置任务和自定义命令/脚本节点调用现有 ExecutionService，关联 M2 execution ID，映射退出码/摘要/结果，敏感内容不进入 workflow event。
+- [x] 为 M2 服务增加最小内部 trait/facade 以便工作流复用，不复制 SSH 执行逻辑。
+- [x] 实现 task/custom 节点适配器和统一 `NodeOutcome`。
+- [x] 运行节点测试及 M2 execution service 回归。
+- [x] 提交：`feat: execute task nodes in workflows`
 
 ## Task 5：日志与 SFTP 节点适配器
 

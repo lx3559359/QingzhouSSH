@@ -111,6 +111,10 @@ impl AppServices {
         &self.data_root
     }
 
+    pub fn execution_service(&self) -> ExecutionService {
+        self.executions.clone()
+    }
+
     pub async fn create_server(&self, request: CreateServerRequest) -> AppResult<ServerProfile> {
         request.validate()?;
         let CreateServerRequest {
