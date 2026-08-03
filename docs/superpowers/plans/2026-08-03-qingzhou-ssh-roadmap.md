@@ -6,7 +6,7 @@
 
 **Architecture:** Keep React/TypeScript in an untrusted presentation layer and route all filesystem, credential, SSH/SFTP, workflow, and updater actions through typed Tauri commands into focused Rust services. Each milestone must leave a runnable application and stable interfaces for the next milestone.
 
-**Tech Stack:** Tauri 2, React, TypeScript, Rust, SQLite via SQLx, `ssh2`/libssh2 with vendored OpenSSL, Windows DPAPI, Vitest, Rust tests, Docker-based SSH integration fixtures.
+**Tech Stack:** Tauri 2, React, TypeScript, Rust, SQLite via SQLx, pure-Rust `russh`, Windows DPAPI, Vitest, Rust tests, and controlled SSH integration fixtures.
 
 ---
 

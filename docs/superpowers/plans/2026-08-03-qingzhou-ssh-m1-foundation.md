@@ -6,13 +6,15 @@
 
 **Architecture:** React is a presentation-only WebView. Typed Tauri commands call focused Rust services for data-root resolution, SQLite, DPAPI, SSH, and system probing. Development commands run through a project-local PowerShell environment so caches, targets, test data, and artifacts remain under the D-drive workspace.
 
-**Tech Stack:** Tauri 2, React 19, TypeScript, Rust, SQLx SQLite, `ssh2` 0.9.6 with vendored OpenSSL, `windows-dpapi` 0.2, `winreg` 0.56, Vitest, Testing Library, Docker Ubuntu SSH fixture.
+**Tech Stack:** Tauri 2, React 19, TypeScript, Rust, SQLx SQLite, pure-Rust `russh`, `windows-dpapi` 0.2, `winreg` 0.56, Vitest, Testing Library, and controlled SSH fixtures.
 
 ---
 
 ## Scope and execution preconditions
 
 This plan implements only Milestone 1 from `docs/superpowers/plans/2026-08-03-qingzhou-ssh-roadmap.md`. Do not add quick-task templates, log search, SFTP UI, workflow nodes, updater code, GitHub releases, or ModelScope synchronization in this milestone.
+
+> Implementation note (Task 10): forced live testing on Windows exposed reproducible heap corruption in the planned `libssh2_userauth_publickey_frommemory` path. The completed implementation therefore replaced `ssh2`/libssh2 with pure-Rust `russh`; the earlier code snippets below remain as historical TDD steps, not the current transport contract.
 
 At execution time:
 
