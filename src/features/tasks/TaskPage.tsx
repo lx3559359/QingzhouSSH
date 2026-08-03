@@ -10,12 +10,14 @@ import type {
 import { api } from '../../api/tauri';
 import { ExecutionDrawer } from './ExecutionDrawer';
 import { ParameterForm } from './ParameterForm';
+import { AdvancedExecutionPanel } from './AdvancedExecutionPanel';
 
 function displayError(cause: unknown) {
   return cause instanceof Error ? cause.message : String(cause);
 }
 
 export function TaskPage() {
+  const [view, setView] = useState<'catalog' | 'advanced'>('catalog');
   const [servers, setServers] = useState<ServerProfile[]>([]);
   const [serverId, setServerId] = useState('');
   const [tasks, setTasks] = useState<TaskAvailability[]>([]);
@@ -123,8 +125,15 @@ export function TaskPage() {
         </label>
       </header>
 
+      <div className="task-view-switch" aria-label="任务模式">
+        <button type="button" className={view === 'catalog' ? 'is-active' : ''} onClick={() => setView('catalog')}>内置任务</button>
+        <button type="button" className={view === 'advanced' ? 'is-active' : ''} onClick={() => setView('advanced')}>高级执行</button>
+      </div>
+
       {error && <p className="inline-message inline-message--error page-alert" role="alert">{error}</p>}
-      {loading ? (
+      {view === 'advanced' ? (
+        <AdvancedExecutionPanel servers={servers} serverId={serverId} />
+      ) : loading ? (
         <div className="silver-card loading-card" role="status"><SpinnerGap className="spin" />正在匹配任务…</div>
       ) : servers.length === 0 ? (
         <article className="silver-card milestone-notice"><Lightning weight="duotone" /><div><h2>请先添加服务器</h2><p>快捷任务需要目标服务器和已信任的 SSH 主机身份。</p></div></article>
