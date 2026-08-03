@@ -29,6 +29,14 @@ foreach ($path in $paths) {
 if ($env:CARGO_TARGET_DIR -match '[^\x00-\x7F]') {
   throw "Cargo target alias must be ASCII-only for vendored OpenSSL: $env:CARGO_TARGET_DIR"
 }
+$asciiProjectAncestor = $repoRoot
+while ($asciiProjectAncestor -match '[^\x00-\x7F]') {
+  $asciiProjectAncestor = Split-Path -Parent $asciiProjectAncestor
+}
+$expectedAliasRoot = Join-Path $asciiProjectAncestor '.qingzhou-ssh-build'
+if (-not $env:CARGO_TARGET_DIR.StartsWith("$expectedAliasRoot\", [StringComparison]::OrdinalIgnoreCase)) {
+  throw "Cargo target alias escaped the D-drive project folder: $env:CARGO_TARGET_DIR"
+}
 $targetAlias = Get-Item -LiteralPath $env:CARGO_TARGET_DIR
 $expectedTarget = Join-Path $repoRoot 'target'
 if (-not ($targetAlias.Attributes -band [IO.FileAttributes]::ReparsePoint)) {

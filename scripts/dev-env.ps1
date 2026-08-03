@@ -6,7 +6,15 @@ $localRoot = Join-Path $projectRoot '.local'
 $physicalCargoTarget = Join-Path $projectRoot 'target'
 
 New-Item -ItemType Directory -Force -Path $physicalCargoTarget | Out-Null
-$aliasRoot = Join-Path (Split-Path -Qualifier $projectRoot) '.qingzhou-ssh-build'
+$asciiProjectAncestor = $projectRoot
+while ($asciiProjectAncestor -match '[^\x00-\x7F]') {
+  $parent = Split-Path -Parent $asciiProjectAncestor
+  if ([string]::IsNullOrWhiteSpace($parent) -or $parent -eq $asciiProjectAncestor) {
+    throw "Unable to find an ASCII-only project ancestor for Cargo: $projectRoot"
+  }
+  $asciiProjectAncestor = $parent
+}
+$aliasRoot = Join-Path $asciiProjectAncestor '.qingzhou-ssh-build'
 New-Item -ItemType Directory -Force -Path $aliasRoot | Out-Null
 $sha256 = [Security.Cryptography.SHA256]::Create()
 try {
