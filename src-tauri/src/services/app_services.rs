@@ -115,6 +115,14 @@ impl AppServices {
         self.executions.clone()
     }
 
+    pub fn log_service(&self) -> LogService {
+        self.logs.clone()
+    }
+
+    pub fn transfer_service(&self) -> TransferService {
+        self.transfers.clone()
+    }
+
     pub async fn create_server(&self, request: CreateServerRequest) -> AppResult<ServerProfile> {
         request.validate()?;
         let CreateServerRequest {

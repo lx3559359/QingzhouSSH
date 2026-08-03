@@ -87,10 +87,10 @@
 - Modify: `src-tauri/src/services/workflow_nodes/mod.rs`
 - Test: `src-tauri/tests/workflow_io_nodes.rs`
 
-- [ ] 写失败测试：日志、上传、下载节点复用 M2 服务，关联 execution/file，校验失败准确映射，取消和哈希失败不显示成功。
-- [ ] 实现适配器；工作流只保存 data-root 相对文件引用。
-- [ ] 运行节点测试、日志和 SFTP 回归测试。
-- [ ] 提交：`feat: execute log and transfer workflow nodes`
+- [x] 写失败测试：日志、上传、下载节点复用 M2 服务，关联 execution/file，校验失败准确映射，取消和哈希失败不显示成功。
+- [x] 实现适配器；工作流只保存 data-root 相对文件引用。
+- [x] 运行节点测试、日志和 SFTP 回归测试。
+- [x] 提交：`feat: execute log and transfer workflow nodes`
 
 ## Task 6：恢复点创建与安全路径
 

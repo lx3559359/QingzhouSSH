@@ -2,17 +2,13 @@ use serde_json::{Map, Value};
 
 use crate::{
     core::{ssh::executor::EventSink, tasks::built_in_catalog},
-    domain::{
-        events::{ExecutionEvent, ExecutionEventPayload},
-        execution::{ExecutionDetails, ExecutionStatus},
-        workflow::{WorkflowCustomMode, WorkflowNodeConfig, WorkflowNodeStatus},
-    },
+    domain::workflow::{WorkflowCustomMode, WorkflowNodeConfig},
     error::{AppError, AppResult},
     services::{
         execution_service::{
             CustomExecutionMode, CustomExecutionRequest, ExecutionService, TaskExecutionRequest,
         },
-        workflow_nodes::NodeOutcome,
+        workflow_nodes::{map_execution_details, NodeOutcome, ResultCapture},
     },
 };
 
@@ -86,55 +82,6 @@ impl ExecutionNodeAdapter {
                 ));
             }
         };
-        map_details(details, capture.result)
-    }
-}
-
-fn map_details(details: ExecutionDetails, result: Option<Value>) -> AppResult<NodeOutcome> {
-    let status = match details.record.status {
-        ExecutionStatus::Succeeded => WorkflowNodeStatus::Succeeded,
-        ExecutionStatus::Failed => WorkflowNodeStatus::Failed,
-        ExecutionStatus::Cancelled => WorkflowNodeStatus::Cancelled,
-        ExecutionStatus::Uncertain => WorkflowNodeStatus::Uncertain,
-        ExecutionStatus::Queued | ExecutionStatus::Running => {
-            return Err(AppError::RemoteStateUncertain(
-                "M2 子执行返回时仍未进入终态".into(),
-            ));
-        }
-    };
-    Ok(NodeOutcome {
-        execution_id: details.record.id,
-        task_id: details.record.task_id,
-        status,
-        exit_code: details.record.exit_code,
-        result,
-        output_summary: details.record.output_summary,
-        error_category: details.record.error_category,
-        error_message: details.record.error_message,
-        retryable: details.record.retryable,
-        files: details.files,
-    })
-}
-
-struct ResultCapture<'a, E: EventSink> {
-    inner: &'a mut E,
-    result: Option<Value>,
-}
-
-impl<'a, E: EventSink> ResultCapture<'a, E> {
-    fn new(inner: &'a mut E) -> Self {
-        Self {
-            inner,
-            result: None,
-        }
-    }
-}
-
-impl<E: EventSink> EventSink for ResultCapture<'_, E> {
-    fn send(&mut self, event: ExecutionEvent) -> AppResult<()> {
-        if let ExecutionEventPayload::Finished { result, .. } = &event.payload {
-            self.result = result.clone();
-        }
-        self.inner.send(event)
+        map_execution_details(details, capture.result())
     }
 }
