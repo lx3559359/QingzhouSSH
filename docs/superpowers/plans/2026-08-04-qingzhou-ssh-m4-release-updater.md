@@ -65,9 +65,9 @@
 
 ## Task 11：生成并验证发布清单
 
-- [ ] 先写版本同步、清单结构、签名、哈希、大小、文件集合和源 URL 生成测试。
-- [ ] 实现 `scripts/build-release.ps1`、`scripts/verify-release.ps1` 和 SHA256SUMS/SBOM。
-- [ ] 提交：`build: generate reproducible release manifests`
+- [x] 先写版本同步、清单结构、签名、哈希、大小、文件集合和源 URL 生成测试。
+- [x] 实现 `scripts/build-release.ps1`、`scripts/verify-release.ps1` 和 SHA256SUMS/SBOM。
+- [x] 提交：`build: generate reproducible release manifests`
 
 ## Task 12：添加双源发布流水线
 
