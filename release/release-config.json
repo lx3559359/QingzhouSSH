@@ -1,0 +1,15 @@
+{
+  "projectName": "QingzhouSSH",
+  "platform": "windows-x86_64",
+  "installer": "nsis",
+  "github": {
+    "repository": "lx3559359/QingzhouSSH",
+    "manifestAsset": "latest.json"
+  },
+  "modelscope": {
+    "repository": "QingzhouSSH",
+    "repositoryType": "studio",
+    "namespaceEnvironment": "QINGZHOU_MODELSCOPE_NAMESPACE",
+    "manifestPath": "releases/latest.json"
+  }
+}
