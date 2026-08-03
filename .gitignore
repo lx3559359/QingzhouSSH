@@ -1,0 +1,27 @@
+# Brainstorming previews and local design state
+.superpowers/
+
+# Project-local dependencies, caches, and build output
+.local/
+.cache/
+node_modules/
+target/
+dist/
+artifacts/
+coverage/
+
+# Runtime data belongs in the user-selected data root
+data/
+*.log
+
+# Local secrets
+.env
+.env.*
+!.env.example
+
+# Editor and operating-system files
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+Desktop.ini
