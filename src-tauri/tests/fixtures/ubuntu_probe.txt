@@ -1,0 +1,9 @@
+__QZ_OS_BEGIN__
+ID=ubuntu
+ID_LIKE=debian
+VERSION_ID="24.04"
+__QZ_OS_END__
+PKG=apt
+SERVICE=systemd
+ARCH=x86_64
+SHELL=/bin/bash

@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
+use zeroize::{Zeroize, ZeroizeOnDrop};
 
 use crate::error::{AppError, AppResult};
 
@@ -55,6 +56,33 @@ impl CredentialInput {
         match self {
             Self::Password { password } => password.is_empty(),
             Self::PrivateKey { private_key, .. } => private_key.is_empty(),
+        }
+    }
+}
+
+#[derive(Clone, Serialize, Deserialize, Zeroize, ZeroizeOnDrop)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum StoredCredential {
+    Password {
+        password: String,
+    },
+    PrivateKey {
+        private_key: String,
+        passphrase: Option<String>,
+    },
+}
+
+impl From<CredentialInput> for StoredCredential {
+    fn from(value: CredentialInput) -> Self {
+        match value {
+            CredentialInput::Password { password } => Self::Password { password },
+            CredentialInput::PrivateKey {
+                private_key,
+                passphrase,
+            } => Self::PrivateKey {
+                private_key,
+                passphrase,
+            },
         }
     }
 }

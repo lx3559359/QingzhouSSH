@@ -1,0 +1,9 @@
+__QZ_OS_BEGIN__
+ID=kylin
+ID_LIKE="debian ubuntu"
+VERSION_ID="V10"
+__QZ_OS_END__
+PKG=apt
+SERVICE=systemd
+ARCH=x86_64
+SHELL=/bin/bash

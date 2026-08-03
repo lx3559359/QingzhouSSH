@@ -1,0 +1,9 @@
+__QZ_OS_BEGIN__
+ID=openEuler
+ID_LIKE="rhel fedora"
+VERSION_ID="24.03"
+__QZ_OS_END__
+PKG=dnf
+SERVICE=systemd
+ARCH=x86_64
+SHELL=/bin/bash

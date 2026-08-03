@@ -1,0 +1,9 @@
+__QZ_OS_BEGIN__
+ID=rocky
+ID_LIKE="rhel centos fedora"
+VERSION_ID="9.6"
+__QZ_OS_END__
+PKG=dnf
+SERVICE=systemd
+ARCH=x86_64
+SHELL=/bin/bash
