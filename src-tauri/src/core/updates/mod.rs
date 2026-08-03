@@ -162,6 +162,13 @@ pub trait ManifestTransport: Send + Sync {
     ) -> Pin<Box<dyn Future<Output = Result<Vec<u8>, SourceCheckError>> + Send + 'a>>;
 }
 
+pub trait UpdateChecker: Send + Sync {
+    fn check<'a>(
+        &'a self,
+        current_version: &'a str,
+    ) -> Pin<Box<dyn Future<Output = Result<SourceSelection, SourceCheckError>> + Send + 'a>>;
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SourceSelection {
     pub source: UpdateSource,
@@ -212,6 +219,85 @@ impl<T: ManifestTransport> DualSourceChecker<T> {
         let endpoint = self.policy.manifest_endpoint(source);
         let bytes = self.transport.fetch(&endpoint).await?;
         parse_manifest(&self.policy, source, current_version, &bytes)
+    }
+}
+
+impl<T: ManifestTransport> UpdateChecker for DualSourceChecker<T> {
+    fn check<'a>(
+        &'a self,
+        current_version: &'a str,
+    ) -> Pin<Box<dyn Future<Output = Result<SourceSelection, SourceCheckError>> + Send + 'a>> {
+        Box::pin(async move { DualSourceChecker::check(self, current_version).await })
+    }
+}
+
+#[derive(Clone)]
+pub struct HttpManifestTransport {
+    client: reqwest::Client,
+}
+
+impl HttpManifestTransport {
+    pub fn new() -> Result<Self, SourceCheckError> {
+        let client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(20))
+            .redirect(reqwest::redirect::Policy::limited(5))
+            .build()
+            .map_err(|_| {
+                SourceCheckError::new(SourceFailureKind::Network, "无法初始化更新网络客户端")
+            })?;
+        Ok(Self { client })
+    }
+}
+
+impl ManifestTransport for HttpManifestTransport {
+    fn fetch<'a>(
+        &'a self,
+        endpoint: &'a str,
+    ) -> Pin<Box<dyn Future<Output = Result<Vec<u8>, SourceCheckError>> + Send + 'a>> {
+        Box::pin(async move {
+            const MAX_MANIFEST_BYTES: u64 = 128 * 1024;
+            let response = self
+                .client
+                .get(endpoint)
+                .header(reqwest::header::ACCEPT, "application/json")
+                .send()
+                .await
+                .map_err(|_| {
+                    SourceCheckError::new(SourceFailureKind::Network, "更新源网络请求失败")
+                })?;
+            let status = response.status();
+            if status == reqwest::StatusCode::NOT_FOUND {
+                return Err(SourceCheckError::new(
+                    SourceFailureKind::NotFound,
+                    "更新源尚未发布清单",
+                ));
+            }
+            if status.is_server_error() {
+                return Err(SourceCheckError::new(
+                    SourceFailureKind::Server,
+                    "更新源服务暂时不可用",
+                ));
+            }
+            if !status.is_success() {
+                return Err(SourceCheckError::new(
+                    SourceFailureKind::Security,
+                    "更新源拒绝访问",
+                ));
+            }
+            if response
+                .content_length()
+                .is_some_and(|length| length > MAX_MANIFEST_BYTES)
+            {
+                return Err(invalid_manifest("更新清单超过大小上限"));
+            }
+            let bytes = response.bytes().await.map_err(|_| {
+                SourceCheckError::new(SourceFailureKind::Network, "读取更新清单失败")
+            })?;
+            if bytes.len() as u64 > MAX_MANIFEST_BYTES {
+                return Err(invalid_manifest("更新清单超过大小上限"));
+            }
+            Ok(bytes.to_vec())
+        })
     }
 }
 

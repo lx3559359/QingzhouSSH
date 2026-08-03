@@ -3,6 +3,7 @@ pub mod executions;
 pub mod logs;
 pub mod servers;
 pub mod transfers;
+pub mod updates;
 pub mod workflows;
 
 use tauri::{ipc::Channel, State};
@@ -13,6 +14,7 @@ use crate::{
     domain::workflow_events::{WorkflowEvent, WorkflowEventSink},
     error::{AppError, AppResult},
     services::app_services::AppServices,
+    services::update_service::UpdateManager,
     state::AppState,
 };
 
@@ -23,6 +25,10 @@ pub(crate) async fn services(state: &State<'_, AppState>) -> AppResult<AppServic
         .await
         .clone()
         .ok_or(AppError::NotReady)
+}
+
+pub(crate) async fn updater(state: &State<'_, AppState>) -> AppResult<UpdateManager> {
+    state.updater.read().await.clone().ok_or(AppError::NotReady)
 }
 
 pub(crate) struct ChannelEventSink(pub Channel<ExecutionEvent>);

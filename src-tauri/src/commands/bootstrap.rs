@@ -1,12 +1,13 @@
 use std::path::PathBuf;
 
 use serde::Serialize;
-use tauri::State;
+use tauri::{AppHandle, State};
 
 use crate::{
     core::root_registry,
     error::{AppError, AppResult},
     services::app_services::AppServices,
+    services::update_service::UpdateManager,
     state::AppState,
 };
 
@@ -42,6 +43,7 @@ pub async fn bootstrap_status(state: State<'_, AppState>) -> AppResult<Bootstrap
 #[tauri::command]
 pub async fn initialize_data_root(
     path: String,
+    app: AppHandle,
     state: State<'_, AppState>,
 ) -> AppResult<BootstrapStatus> {
     if path.trim().is_empty() || path.contains('\0') {
@@ -54,9 +56,12 @@ pub async fn initialize_data_root(
     }
 
     let initialized = AppServices::open(&root).await?;
+    let updater = UpdateManager::new(app.package_info().version.to_string(), &root, app.clone())
+        .map_err(|_| AppError::Update("更新服务初始化失败".into()))?;
     root_registry::save_data_root(&root)?;
     let status = BootstrapStatus::ready(&initialized);
     *services = Some(initialized);
+    *state.updater.write().await = Some(updater);
     Ok(status)
 }
 

@@ -35,9 +35,9 @@
 
 ## Task 6：暴露强类型更新命令
 
-- [ ] 添加命令参数、状态冲突、进度单调和错误脱敏测试。
-- [ ] 实现获取状态、自动检查开关、检查、下载、安装和清理命令并注册。
-- [ ] 提交：`feat: expose typed updater commands`
+- [x] 添加命令参数、状态冲突、进度单调和错误脱敏测试。
+- [x] 实现获取状态、自动检查开关、检查、下载、安装和清理命令并注册。
+- [x] 提交：`feat: expose typed updater commands`
 
 ## Task 7：扩展前端 API 与 Preview
 

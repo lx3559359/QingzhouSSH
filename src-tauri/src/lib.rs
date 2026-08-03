@@ -11,6 +11,7 @@ pub mod window;
 
 use core::data_root::{initialize_data_root, resolve_runtime_data_root};
 use services::app_services::AppServices;
+use services::update_service::UpdateManager;
 use state::AppState;
 use tauri::Manager;
 
@@ -37,6 +38,12 @@ pub fn run() {
             commands::logs::download_log_result,
             commands::transfers::upload_file,
             commands::transfers::download_file,
+            commands::updates::get_update_status,
+            commands::updates::set_auto_update_check,
+            commands::updates::check_for_update,
+            commands::updates::download_update,
+            commands::updates::install_update,
+            commands::updates::clear_downloaded_update,
             commands::executions::list_executions,
             commands::executions::get_execution,
             commands::workflows::list_workflows,
@@ -58,9 +65,15 @@ pub fn run() {
             if let Some(root) = resolution.path.as_deref() {
                 initialize_data_root(root)?;
                 let services = tauri::async_runtime::block_on(AppServices::open(root))?;
+                let updater = UpdateManager::new(
+                    app.package_info().version.to_string(),
+                    root,
+                    app.handle().clone(),
+                )?;
                 let state = app.state::<AppState>();
                 tauri::async_runtime::block_on(async {
                     *state.services.write().await = Some(services);
+                    *state.updater.write().await = Some(updater);
                 });
             }
             window::build_main_window(app.handle(), resolution.path.as_deref())?;

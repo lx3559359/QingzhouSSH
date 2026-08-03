@@ -3367,8 +3367,10 @@ version = "0.1.0"
 dependencies = [
  "atomicwrites",
  "base64 0.22.1",
+ "reqwest",
  "russh",
  "russh-sftp",
+ "rustls",
  "semver",
  "serde",
  "serde_json",

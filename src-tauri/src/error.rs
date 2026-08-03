@@ -29,6 +29,8 @@ pub enum AppError {
     NotReady,
     #[error("安全检查失败：{0}")]
     Security(String),
+    #[error("更新操作失败：{0}")]
+    Update(String),
     #[error("I/O 操作失败：{0}")]
     Io(#[from] std::io::Error),
     #[error("数据库操作失败：{0}")]
@@ -59,6 +61,7 @@ impl AppError {
             Self::RemoteStateUncertain(_) => "remote_state_uncertain",
             Self::NotReady => "not_ready",
             Self::Security(_) => "security",
+            Self::Update(_) => "update",
             Self::Io(_) => "io",
             Self::Database(_) => "database",
             Self::Migration(_) => "migration",
