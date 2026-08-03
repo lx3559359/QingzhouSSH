@@ -1,5 +1,6 @@
 pub mod data_root;
 pub mod database;
+pub mod logs;
 pub mod redaction;
 pub mod root_registry;
 pub mod secret_protector;

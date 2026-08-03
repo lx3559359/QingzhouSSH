@@ -7,6 +7,8 @@ pub enum AppError {
     Validation(String),
     #[error("系统兼容性检查失败：{0}")]
     Compatibility(String),
+    #[error("数据序列化失败：{0}")]
+    Serialization(String),
     #[error("输出超过 {limit} 字节上限")]
     OutputLimitExceeded { limit: u64 },
     #[error("文件传输失败：{0}")]
@@ -70,6 +72,7 @@ impl Serialize for AppError {
         let code = match self {
             AppError::Validation(_) => "validation",
             AppError::Compatibility(_) => "compatibility",
+            AppError::Serialization(_) => "serialization",
             AppError::OutputLimitExceeded { .. } => "output_limit_exceeded",
             AppError::Transfer(_) => "transfer",
             AppError::Integrity(_) => "integrity",
