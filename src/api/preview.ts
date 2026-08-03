@@ -4,6 +4,7 @@ import type {
   DownloadRequest,
   ExecutionDetails,
   ExecutionEvent,
+  ExecutionFile,
   ExecutionFilter,
   LogSearchRequest,
   HostKeyCheck,
@@ -13,6 +14,19 @@ import type {
   TaskAvailability,
   TaskExecutionRequest,
   UploadRequest,
+  StartWorkflowRunRequest,
+  WorkflowDefinition,
+  WorkflowDiagnostic,
+  WorkflowDraft,
+  WorkflowEvent,
+  WorkflowNode,
+  WorkflowNodeRun,
+  WorkflowRunDetails,
+  WorkflowRunFilter,
+  WorkflowRunRecord,
+  WorkflowRunStatus,
+  WorkflowSummary,
+  WorkflowValidationReport,
 } from './contracts';
 
 const previewServer: ServerProfile = {
@@ -147,7 +161,504 @@ function emitPreview(onEvent: (event: ExecutionEvent) => void, details: Executio
   });
 }
 
+type StoredWorkflow = {
+  createdAt: number;
+  updatedAt: number;
+  versions: WorkflowDefinition[];
+};
+
+type WithoutEventTiming<T> = T extends unknown ? Omit<T, 'sequence' | 'emittedAt'> : never;
+type WorkflowEventInput = WithoutEventTiming<WorkflowEvent>;
+
+let previewWorkflowCounter = 0;
+let previewRunCounter = 0;
+let previewWorkflows = new Map<string, StoredWorkflow>();
+let previewWorkflowRuns = new Map<string, WorkflowRunDetails>();
+
+function clone<T>(value: T): T {
+  return JSON.parse(JSON.stringify(value)) as T;
+}
+
+function workflowPayload(draft: WorkflowDraft | WorkflowDefinition) {
+  return JSON.stringify({
+    name: draft.name.trim(),
+    description: draft.description,
+    nodes: draft.nodes,
+    edges: draft.edges,
+  });
+}
+
+function previewChecksum(payload: string) {
+  let hash = 2166136261;
+  for (let index = 0; index < payload.length; index += 1) {
+    hash ^= payload.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return Math.abs(hash >>> 0).toString(16).padStart(8, '0').repeat(8);
+}
+
+function workflowError(code: string, message: string) {
+  return Object.assign(new Error(message), { code });
+}
+
+function validatePreviewWorkflow(draft: WorkflowDraft): WorkflowValidationReport {
+  const diagnostics: WorkflowDiagnostic[] = [];
+  const nodeById = new Map<string, WorkflowNode>();
+  const duplicateIds = new Set<string>();
+
+  if (!draft.name.trim() || draft.nodes.length > 100 || draft.edges.length > 200) {
+    diagnostics.push({
+      code: draft.nodes.length > 100 || draft.edges.length > 200 ? 'graph_limit' : 'invalid_parameters',
+      nodeId: null,
+      message: !draft.name.trim() ? '工作流名称不能为空。' : '预览工作流最多包含 100 个节点和 200 条连接。',
+    });
+  }
+
+  for (const node of draft.nodes) {
+    if (nodeById.has(node.id)) duplicateIds.add(node.id);
+    nodeById.set(node.id, node);
+    if (!node.name.trim()) {
+      diagnostics.push({ code: 'invalid_parameters', nodeId: node.id, message: '节点名称不能为空。' });
+    }
+  }
+  for (const nodeId of duplicateIds) {
+    diagnostics.push({ code: 'duplicate_node', nodeId, message: '节点 ID 重复。' });
+  }
+
+  const starts = draft.nodes.filter((node) => node.config.type === 'start');
+  if (starts.length !== 1) {
+    diagnostics.push({ code: 'start_count', nodeId: null, message: '必须且只能有一个开始节点。' });
+  }
+
+  const outgoing = new Map<string, typeof draft.edges>();
+  const incomingCount = new Map<string, number>();
+  const edgeKeys = new Set<string>();
+  for (const edge of draft.edges) {
+    if (!nodeById.has(edge.from) || !nodeById.has(edge.to)) {
+      diagnostics.push({ code: 'missing_node', nodeId: null, message: '连接引用了不存在的节点。' });
+      continue;
+    }
+    if (edge.from === edge.to) {
+      diagnostics.push({ code: 'self_edge', nodeId: edge.from, message: '节点不能连接到自身。' });
+    }
+    const edgeKey = `${edge.from}:${edge.to}:${edge.branch}`;
+    if (edgeKeys.has(edgeKey)) {
+      diagnostics.push({ code: 'duplicate_edge', nodeId: edge.from, message: '存在重复连接。' });
+    }
+    edgeKeys.add(edgeKey);
+    outgoing.set(edge.from, [...(outgoing.get(edge.from) ?? []), edge]);
+    incomingCount.set(edge.to, (incomingCount.get(edge.to) ?? 0) + 1);
+  }
+
+  for (const node of draft.nodes) {
+    const edges = outgoing.get(node.id) ?? [];
+    if (node.config.type === 'start' && edges.length !== 1) {
+      diagnostics.push({ code: 'start_edges', nodeId: node.id, message: '开始节点必须有一条后续连接。' });
+    } else if (node.config.type === 'stop' && edges.length > 0) {
+      diagnostics.push({ code: 'stop_edges', nodeId: node.id, message: '停止节点不能有后续连接。' });
+    } else if (node.config.type === 'condition') {
+      const branches = new Set(edges.map((edge) => edge.branch));
+      if (edges.length !== 2 || !branches.has('true') || !branches.has('false')) {
+        diagnostics.push({
+          code: 'condition_branches',
+          nodeId: node.id,
+          message: '条件节点必须同时连接 true 和 false 分支。',
+        });
+      }
+    } else if (node.config.type !== 'stop' && edges.some((edge) => edge.branch !== 'success')) {
+      diagnostics.push({ code: 'invalid_branch', nodeId: node.id, message: '普通节点只能使用 success 连接。' });
+    }
+    if (node.config.type !== 'start' && (incomingCount.get(node.id) ?? 0) === 0) {
+      diagnostics.push({ code: 'unreachable_node', nodeId: node.id, message: '节点不可到达。' });
+    }
+  }
+
+  const startNodeId = starts.length === 1 ? starts[0].id : null;
+  if (startNodeId) {
+    const visiting = new Set<string>();
+    const visited = new Set<string>();
+    let hasCycle = false;
+    const visit = (nodeId: string) => {
+      if (visiting.has(nodeId)) {
+        hasCycle = true;
+        return;
+      }
+      if (visited.has(nodeId)) return;
+      visiting.add(nodeId);
+      for (const edge of outgoing.get(nodeId) ?? []) visit(edge.to);
+      visiting.delete(nodeId);
+      visited.add(nodeId);
+    };
+    visit(startNodeId);
+    if (hasCycle) diagnostics.push({ code: 'cycle', nodeId: null, message: '工作流不能包含环。' });
+    for (const node of draft.nodes) {
+      if (!visited.has(node.id)) {
+        diagnostics.push({ code: 'unreachable_node', nodeId: node.id, message: '节点无法从开始节点到达。' });
+      }
+    }
+  }
+
+  return { valid: diagnostics.length === 0, startNodeId, diagnostics };
+}
+
+function getStoredWorkflow(workflowId: string) {
+  const stored = previewWorkflows.get(workflowId);
+  if (!stored) throw workflowError('not_found', '找不到指定工作流。');
+  return stored;
+}
+
+function findWorkflow(workflowId: string, version: number | null) {
+  const stored = getStoredWorkflow(workflowId);
+  const definition = version === null
+    ? stored.versions.at(-1)
+    : stored.versions.find((candidate) => candidate.version === version);
+  if (!definition) throw workflowError('not_found', '找不到指定工作流版本。');
+  return definition;
+}
+
+function createNodeRun(runId: string, nodeId: string, attempt: number): WorkflowNodeRun {
+  return {
+    runId,
+    nodeId,
+    attempt,
+    status: 'pending',
+    executionId: null,
+    startedAt: null,
+    finishedAt: null,
+    durationMs: null,
+    exitCode: null,
+    result: null,
+    outputSummary: null,
+    errorMessage: null,
+    retryable: false,
+  };
+}
+
+function appendWorkflowEvent(
+  details: WorkflowRunDetails,
+  event: WorkflowEventInput,
+  onEvent?: (event: WorkflowEvent) => void,
+) {
+  const fullEvent = {
+    ...event,
+    sequence: details.events.length + 1,
+    emittedAt: Date.now() + details.events.length,
+  } as WorkflowEvent;
+  details.events.push({
+    runId: details.run.id,
+    sequence: fullEvent.sequence,
+    eventType: fullEvent.type,
+    payload: clone(fullEvent) as unknown as Record<string, unknown>,
+    emittedAt: fullEvent.emittedAt,
+  });
+  onEvent?.(clone(fullEvent));
+}
+
+function updateRunStatus(
+  details: WorkflowRunDetails,
+  status: WorkflowRunStatus,
+  message: string | null,
+  onEvent?: (event: WorkflowEvent) => void,
+) {
+  details.run.status = status;
+  details.run.errorMessage = message;
+  appendWorkflowEvent(details, {
+    type: 'runStatusChanged',
+    runId: details.run.id,
+    status,
+    message,
+  }, onEvent);
+}
+
+function finishNode(
+  details: WorkflowRunDetails,
+  nodeRun: WorkflowNodeRun,
+  status: WorkflowNodeRun['status'],
+  onEvent?: (event: WorkflowEvent) => void,
+  message: string | null = null,
+) {
+  const now = Date.now();
+  nodeRun.status = status;
+  nodeRun.finishedAt = now;
+  nodeRun.durationMs = nodeRun.startedAt === null ? 0 : Math.max(1, now - nodeRun.startedAt);
+  nodeRun.errorMessage = message;
+  appendWorkflowEvent(details, {
+    type: 'nodeStatusChanged',
+    runId: details.run.id,
+    nodeId: nodeRun.nodeId,
+    attempt: nodeRun.attempt,
+    status,
+    executionId: nodeRun.executionId,
+    message,
+  }, onEvent);
+}
+
+function completePreviewWorkflow(
+  details: WorkflowRunDetails,
+  definition: WorkflowDefinition,
+  onEvent: (event: WorkflowEvent) => void,
+  options: { retrying?: boolean } = {},
+) {
+  const outgoing = new Map<string, typeof definition.edges>();
+  for (const edge of definition.edges) {
+    outgoing.set(edge.from, [...(outgoing.get(edge.from) ?? []), edge]);
+  }
+
+  const existingDone = new Set(
+    details.nodeRuns.filter((run) => run.status === 'succeeded').map((run) => run.nodeId),
+  );
+  let currentId = options.retrying
+    ? details.run.currentNodeId
+    : definition.nodes.find((node) => node.config.type === 'start')?.id ?? null;
+  let guard = 0;
+  while (currentId && guard < definition.nodes.length + 2) {
+    guard += 1;
+    const node = definition.nodes.find((candidate) => candidate.id === currentId);
+    if (!node) break;
+    let nodeRun = details.nodeRuns
+      .filter((candidate) => candidate.nodeId === node.id)
+      .sort((left, right) => right.attempt - left.attempt)[0];
+    if (!nodeRun || (options.retrying && nodeRun.status === 'failed')) {
+      nodeRun = createNodeRun(details.run.id, node.id, (nodeRun?.attempt ?? 0) + 1);
+      details.nodeRuns.push(nodeRun);
+    }
+    if (!existingDone.has(node.id) || options.retrying) {
+      nodeRun.status = 'running';
+      nodeRun.startedAt = Date.now();
+      nodeRun.executionId = ['task', 'custom', 'upload', 'download', 'logSearch'].includes(node.config.type)
+        ? `preview-execution-${details.nodeRuns.length}`
+        : null;
+      details.run.currentNodeId = node.id;
+      appendWorkflowEvent(details, {
+        type: 'nodeStarted', runId: details.run.id, nodeId: node.id, attempt: nodeRun.attempt,
+      }, onEvent);
+
+      if (node.config.type === 'task' && node.config.taskId === 'preview.fail' && !options.retrying) {
+        nodeRun.retryable = true;
+        details.run.retryable = true;
+        details.run.errorCategory = 'preview_injected_failure';
+        finishNode(details, nodeRun, 'failed', onEvent, 'Preview 注入失败：可从此节点重试。');
+        updateRunStatus(details, 'paused', '节点失败，工作流已暂停。', onEvent);
+        return;
+      }
+
+      if (node.config.type === 'condition') {
+        const conditionConfig = node.config;
+        const source = definition.nodes.find((candidate) => candidate.id === conditionConfig.sourceNodeId);
+        const result = source?.config.type === 'task'
+          ? source.config.parameters.previewCondition !== false
+          : true;
+        nodeRun.result = { matched: result };
+        appendWorkflowEvent(details, {
+          type: 'conditionEvaluated', runId: details.run.id, nodeId: node.id, result,
+        }, onEvent);
+      } else {
+        nodeRun.result = { preview: true };
+      }
+      nodeRun.exitCode = 0;
+      nodeRun.outputSummary = 'Preview 内存执行成功';
+      finishNode(details, nodeRun, 'succeeded', onEvent);
+    }
+
+    const edges = outgoing.get(node.id) ?? [];
+    if (node.config.type === 'condition') {
+      const result = (nodeRun.result as { matched?: boolean } | null)?.matched ?? true;
+      const selected = edges.find((edge) => edge.branch === (result ? 'true' : 'false'));
+      const skipped = edges.find((edge) => edge.branch === (result ? 'false' : 'true'));
+      if (skipped && !details.nodeRuns.some((run) => run.nodeId === skipped.to)) {
+        const skippedRun = createNodeRun(details.run.id, skipped.to, 1);
+        details.nodeRuns.push(skippedRun);
+        finishNode(details, skippedRun, 'skipped', onEvent, '条件分支未选中。');
+      }
+      currentId = selected?.to ?? null;
+    } else {
+      currentId = edges.find((edge) => edge.branch === 'success')?.to ?? null;
+    }
+    options.retrying = false;
+  }
+
+  const finishedAt = Date.now();
+  details.run.currentNodeId = null;
+  details.run.finishedAt = finishedAt;
+  details.run.durationMs = Math.max(1, finishedAt - (details.run.startedAt ?? finishedAt));
+  details.run.retryable = false;
+  details.run.errorCategory = null;
+  updateRunStatus(details, 'succeeded', null, onEvent);
+  appendWorkflowEvent(details, {
+    type: 'finished', runId: details.run.id, status: 'succeeded', durationMs: details.run.durationMs,
+  }, onEvent);
+}
+
+export function resetWorkflowPreviewForTests() {
+  previewWorkflowCounter = 0;
+  previewRunCounter = 0;
+  previewWorkflows = new Map();
+  previewWorkflowRuns = new Map();
+}
+
+const workflowPreviewApi = {
+  listWorkflows: async (): Promise<WorkflowSummary[]> =>
+    [...previewWorkflows.entries()].map(([id, stored]) => {
+      const current = stored.versions.at(-1)!;
+      return {
+        id,
+        name: current.name,
+        description: current.description,
+        currentVersion: current.version,
+        createdAt: stored.createdAt,
+        updatedAt: stored.updatedAt,
+      };
+    }).sort((left, right) => right.updatedAt - left.updatedAt),
+  getWorkflow: async (workflowId: string, version: number | null): Promise<WorkflowDefinition | null> => {
+    const stored = previewWorkflows.get(workflowId);
+    if (!stored) return null;
+    const definition = version === null
+      ? stored.versions.at(-1)
+      : stored.versions.find((candidate) => candidate.version === version);
+    return definition ? clone(definition) : null;
+  },
+  saveWorkflow: async (draft: WorkflowDraft): Promise<WorkflowDefinition> => {
+    const report = validatePreviewWorkflow(draft);
+    if (!report.valid) throw workflowError('validation', report.diagnostics[0].message);
+    const now = Date.now();
+    const id = draft.id ?? `preview-workflow-${++previewWorkflowCounter}`;
+    const existing = previewWorkflows.get(id);
+    const payload = workflowPayload(draft);
+    const latest = existing?.versions.at(-1);
+    if (latest && workflowPayload(latest) === payload) return clone(latest);
+    const definition: WorkflowDefinition = {
+      id,
+      name: draft.name.trim(),
+      description: draft.description,
+      nodes: clone(draft.nodes),
+      edges: clone(draft.edges),
+      version: (latest?.version ?? 0) + 1,
+      checksumSha256: previewChecksum(payload),
+    };
+    previewWorkflows.set(id, {
+      createdAt: existing?.createdAt ?? now,
+      updatedAt: now,
+      versions: [...(existing?.versions ?? []), definition],
+    });
+    return clone(definition);
+  },
+  deleteWorkflow: async (workflowId: string) => previewWorkflows.delete(workflowId),
+  validateWorkflow: async (draft: WorkflowDraft) => validatePreviewWorkflow(draft),
+  startWorkflowRun: async (
+    request: StartWorkflowRunRequest,
+    onEvent: (event: WorkflowEvent) => void,
+  ): Promise<WorkflowRunDetails> => {
+    const definition = findWorkflow(request.workflowId, request.workflowVersion);
+    const now = Date.now();
+    const runId = `preview-run-${++previewRunCounter}`;
+    const run: WorkflowRunRecord = {
+      id: runId,
+      workflowId: definition.id,
+      workflowVersion: definition.version,
+      serverId: request.serverId,
+      status: 'running',
+      currentNodeId: null,
+      createdAt: now,
+      startedAt: now,
+      finishedAt: null,
+      durationMs: null,
+      errorCategory: null,
+      errorMessage: null,
+      retryable: false,
+    };
+    const details: WorkflowRunDetails = { run, nodeRuns: [], restorePoints: [], events: [] };
+    previewWorkflowRuns.set(runId, details);
+    appendWorkflowEvent(details, {
+      type: 'runStarted', runId, workflowId: definition.id, serverId: request.serverId,
+    }, onEvent);
+    if (definition.name.includes('取消演示')) {
+      updateRunStatus(details, 'running', 'Preview 长任务正在运行，可执行取消。', onEvent);
+      return clone(details);
+    }
+    completePreviewWorkflow(details, definition, onEvent);
+    return clone(details);
+  },
+  cancelWorkflowRun: async (runId: string) => {
+    const details = previewWorkflowRuns.get(runId);
+    if (!details) throw workflowError('not_found', '找不到指定运行。');
+    if (details.run.status !== 'running') throw workflowError('invalid_state', '只有运行中的工作流可以取消。');
+    details.run.finishedAt = Date.now();
+    details.run.durationMs = Math.max(1, details.run.finishedAt - (details.run.startedAt ?? details.run.finishedAt));
+    updateRunStatus(details, 'cancelled', 'Preview 运行已取消。');
+    appendWorkflowEvent(details, {
+      type: 'finished', runId, status: 'cancelled', durationMs: details.run.durationMs,
+    });
+  },
+  retryWorkflowNode: async (
+    runId: string,
+    _dangerousConfirmed: boolean,
+    onEvent: (event: WorkflowEvent) => void,
+  ): Promise<WorkflowRunDetails> => {
+    const details = previewWorkflowRuns.get(runId);
+    if (!details) throw workflowError('not_found', '找不到指定运行。');
+    if (details.run.status !== 'paused' || !details.run.currentNodeId) {
+      throw workflowError('invalid_state', '只有暂停且可重试的工作流可以重试。');
+    }
+    const definition = findWorkflow(details.run.workflowId, details.run.workflowVersion);
+    updateRunStatus(details, 'running', '正在从失败节点重试。', onEvent);
+    completePreviewWorkflow(details, definition, onEvent, { retrying: true });
+    return clone(details);
+  },
+  listWorkflowRuns: async (filter: WorkflowRunFilter): Promise<WorkflowRunRecord[]> =>
+    [...previewWorkflowRuns.values()]
+      .map((details) => details.run)
+      .filter((run) => !filter.workflowId || run.workflowId === filter.workflowId)
+      .filter((run) => !filter.serverId || run.serverId === filter.serverId)
+      .filter((run) => !filter.status || run.status === filter.status)
+      .filter((run) => !filter.createdFrom || run.createdAt >= filter.createdFrom)
+      .filter((run) => !filter.createdTo || run.createdAt <= filter.createdTo)
+      .sort((left, right) => right.createdAt - left.createdAt)
+      .map(clone),
+  getWorkflowRun: async (runId: string) => {
+    const details = previewWorkflowRuns.get(runId);
+    return details ? clone(details) : null;
+  },
+  rollbackWorkflowRun: async (runId: string, dangerousConfirmed: boolean) => {
+    if (!dangerousConfirmed) throw workflowError('confirmation_required', '回滚前必须确认。');
+    const details = previewWorkflowRuns.get(runId);
+    if (!details) throw workflowError('not_found', '找不到指定运行。');
+    for (const point of [...details.restorePoints].reverse()) {
+      if (point.status === 'available') point.status = 'rolled_back';
+    }
+    details.run.status = 'rolled_back';
+    details.run.finishedAt = Date.now();
+    details.run.errorMessage = null;
+    appendWorkflowEvent(details, {
+      type: 'runStatusChanged', runId, status: 'rolled_back', message: 'Preview 回滚完成。',
+    });
+    return clone(details);
+  },
+  cleanupWorkflowRestorePoints: async (runId: string) => {
+    const details = previewWorkflowRuns.get(runId);
+    if (!details) throw workflowError('not_found', '找不到指定运行。');
+    let cleaned = 0;
+    for (const point of details.restorePoints) {
+      if (point.status !== 'expired') {
+        point.status = 'expired';
+        cleaned += 1;
+      }
+    }
+    return cleaned;
+  },
+  exportWorkflowDiagnostics: async (runId: string): Promise<ExecutionFile> => {
+    if (!previewWorkflowRuns.has(runId)) throw workflowError('not_found', '找不到指定运行。');
+    return {
+      id: `preview-diagnostics-${runId}`,
+      relativePath: `downloads/${runId}-diagnostics.preview.json`,
+      purpose: 'workflow_diagnostics_preview',
+      sizeBytes: 0,
+      sha256: previewChecksum(runId),
+    };
+  },
+};
+
 export const previewApi = {
+  ...workflowPreviewApi,
   bootstrapStatus: async () => ({
     state: 'ready' as const,
     dataRoot: previewDataRoot,

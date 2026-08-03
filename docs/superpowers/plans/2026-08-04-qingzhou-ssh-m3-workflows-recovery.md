@@ -178,10 +178,10 @@
 - Create: `src/features/workflows/fixtures.ts`
 - Test: `src/api/preview.test.ts`
 
-- [ ] 写失败测试：预览保存/增版、校验诊断、成功运行、条件假分支、节点失败暂停、重试、取消、回滚和诊断下载均符合真实 DTO。
-- [ ] 实现只用于浏览器视觉验收的内存预览；明确标识 preview，不写磁盘、不伪装 Tauri 成功。
-- [ ] 运行 preview 和 API 测试。
-- [ ] 提交：`test: model workflow preview flows`
+- [x] 写失败测试：预览保存/增版、校验诊断、成功运行、条件假分支、节点失败暂停、重试、取消、回滚和诊断下载均符合真实 DTO。
+- [x] 实现只用于浏览器视觉验收的内存预览；明确标识 preview，不写磁盘、不伪装 Tauri 成功。
+- [x] 运行 preview 和 API 测试。
+- [x] 提交：`test: model workflow preview flows`
 
 ## Task 12：工作流列表、步骤库与立体画布
 
