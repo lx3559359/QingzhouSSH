@@ -1,0 +1,7 @@
+services:
+  sshd:
+    build: .
+    ports:
+      - "127.0.0.1:2222:22"
+    volumes:
+      - ../../../.local/test-keys/authorized_keys:/home/testuser/.ssh/authorized_keys:ro

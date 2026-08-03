@@ -149,11 +149,7 @@ impl AppServices {
         let username = server.username;
         let expected_fingerprint = trusted.fingerprint_sha256;
 
-        tokio::task::spawn_blocking(move || {
-            transport::probe_system(&endpoint, &username, &credential, &expected_fingerprint)
-        })
-        .await
-        .map_err(|_| AppError::Security("SSH 后台任务意外终止".into()))?
+        transport::probe_system(&endpoint, &username, &credential, &expected_fingerprint).await
     }
 
     async fn require_server(&self, server_id: &str) -> AppResult<ServerProfile> {
@@ -176,7 +172,5 @@ fn server_endpoint(server: &ServerProfile) -> SshEndpoint {
 }
 
 async fn inspect_endpoint(endpoint: SshEndpoint) -> AppResult<HostKeyObservation> {
-    tokio::task::spawn_blocking(move || transport::inspect_host_key(&endpoint))
-        .await
-        .map_err(|_| AppError::Security("SSH 后台任务意外终止".into()))?
+    transport::inspect_host_key(&endpoint).await
 }

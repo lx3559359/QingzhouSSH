@@ -16,7 +16,7 @@ pub enum AppError {
     #[error("数据库迁移失败：{0}")]
     Migration(#[from] sqlx::migrate::MigrateError),
     #[error("SSH 操作失败：{0}")]
-    Ssh(#[from] ssh2::Error),
+    Ssh(#[from] russh::Error),
     #[error("SSH 命令失败（退出码 {exit_status}）：{stderr}")]
     SshCommand { exit_status: i32, stderr: String },
     #[error("桌面窗口操作失败：{0}")]

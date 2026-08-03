@@ -1,16 +1,20 @@
 use std::{
-    io::{self, Read},
-    net::{TcpStream, ToSocketAddrs},
-    thread,
-    time::{Duration, Instant},
+    future::Future,
+    io,
+    sync::{Arc, Mutex},
+    time::Duration,
 };
 
 use base64::{
     engine::general_purpose::{STANDARD, STANDARD_NO_PAD},
     Engine,
 };
+use russh::{
+    client,
+    keys::{self, PrivateKeyWithHashAlg, PublicKeyBase64},
+    ChannelMsg, Disconnect,
+};
 use serde::{Deserialize, Serialize};
-use ssh2::{Channel, Session};
 
 use crate::{
     core::{
@@ -45,6 +49,37 @@ pub struct CommandOutput {
     pub exit_status: i32,
 }
 
+struct HostKeyVerifier {
+    expected_fingerprint: Option<String>,
+    observation: Arc<Mutex<Option<HostKeyObservation>>>,
+}
+
+impl client::Handler for HostKeyVerifier {
+    type Error = russh::Error;
+
+    async fn check_server_key(
+        &mut self,
+        server_public_key: &keys::PublicKey,
+    ) -> Result<bool, Self::Error> {
+        let raw_key = server_public_key.public_key_bytes();
+        let observed = HostKeyObservation {
+            algorithm: server_public_key.algorithm().to_string(),
+            fingerprint_sha256: sha256_fingerprint(&raw_key),
+            raw_key_base64: STANDARD.encode(raw_key),
+        };
+        let trusted = self
+            .expected_fingerprint
+            .as_deref()
+            .is_none_or(|expected| expected == observed.fingerprint_sha256);
+        if let Ok(mut slot) = self.observation.lock() {
+            *slot = Some(observed);
+        } else {
+            return Ok(false);
+        }
+        Ok(trusted)
+    }
+}
+
 fn validate_endpoint(endpoint: &SshEndpoint) -> AppResult<()> {
     if endpoint.host.trim().is_empty() || endpoint.host.contains('\0') {
         return Err(AppError::Validation(
@@ -56,48 +91,80 @@ fn validate_endpoint(endpoint: &SshEndpoint) -> AppResult<()> {
             "SSH 端口必须在 1 到 65535 之间".into(),
         ));
     }
-    timeout_millis(endpoint.timeout)?;
+    if endpoint.timeout.is_zero() {
+        return Err(AppError::Validation("SSH 超时时间必须大于零".into()));
+    }
     Ok(())
 }
 
-fn timeout_millis(timeout: Duration) -> AppResult<u32> {
-    if timeout.is_zero() {
-        return Err(AppError::Validation("SSH 超时时间必须大于零".into()));
-    }
-    Ok(timeout.as_millis().clamp(1, u128::from(u32::MAX)) as u32)
+fn timeout_error(context: &str) -> AppError {
+    io::Error::new(io::ErrorKind::TimedOut, format!("{context}超时")).into()
 }
 
-fn open_session(endpoint: &SshEndpoint) -> AppResult<Session> {
+async fn with_timeout<T>(
+    duration: Duration,
+    context: &str,
+    future: impl Future<Output = AppResult<T>>,
+) -> AppResult<T> {
+    tokio::time::timeout(duration, future)
+        .await
+        .map_err(|_| timeout_error(context))?
+}
+
+fn current_observation(
+    observation: &Arc<Mutex<Option<HostKeyObservation>>>,
+) -> AppResult<Option<HostKeyObservation>> {
+    observation
+        .lock()
+        .map(|value| value.clone())
+        .map_err(|_| AppError::Security("SSH 主机密钥检查状态异常".into()))
+}
+
+async fn connect_client(
+    endpoint: &SshEndpoint,
+    expected_fingerprint: Option<&str>,
+) -> AppResult<(client::Handle<HostKeyVerifier>, HostKeyObservation)> {
     validate_endpoint(endpoint)?;
-    let address = (endpoint.host.as_str(), endpoint.port)
-        .to_socket_addrs()?
-        .next()
-        .ok_or_else(|| AppError::Validation("服务器地址无法解析".into()))?;
-    let tcp = TcpStream::connect_timeout(&address, endpoint.timeout)?;
-    tcp.set_read_timeout(Some(endpoint.timeout))?;
-    tcp.set_write_timeout(Some(endpoint.timeout))?;
+    let observation = Arc::new(Mutex::new(None));
+    let handler = HostKeyVerifier {
+        expected_fingerprint: expected_fingerprint.map(str::to_owned),
+        observation: Arc::clone(&observation),
+    };
+    let config = Arc::new(client::Config {
+        inactivity_timeout: Some(endpoint.timeout),
+        ..Default::default()
+    });
+    let address = (endpoint.host.clone(), endpoint.port);
+    let connection =
+        tokio::time::timeout(endpoint.timeout, client::connect(config, address, handler))
+            .await
+            .map_err(|_| timeout_error("SSH 连接"))?;
 
-    let mut session = Session::new()?;
-    session.set_tcp_stream(tcp);
-    session.set_timeout(timeout_millis(endpoint.timeout)?);
-    session.handshake()?;
-    Ok(session)
+    let session = match connection {
+        Ok(session) => session,
+        Err(error) => {
+            if let (Some(expected), Some(observed)) =
+                (expected_fingerprint, current_observation(&observation)?)
+            {
+                if expected != observed.fingerprint_sha256 {
+                    return Err(AppError::Security(format!(
+                        "SSH 主机指纹已变化；期望 {expected}，实际 {}",
+                        observed.fingerprint_sha256
+                    )));
+                }
+            }
+            return Err(error.into());
+        }
+    };
+    let observed = current_observation(&observation)?
+        .ok_or_else(|| AppError::Security("服务器没有提供 SSH 主机密钥".into()))?;
+    Ok((session, observed))
 }
 
-fn observe_host_key(session: &Session) -> AppResult<HostKeyObservation> {
-    let (raw, algorithm) = session
-        .host_key()
-        .ok_or_else(|| AppError::Security("服务器没有提供主机密钥".into()))?;
-
-    Ok(HostKeyObservation {
-        algorithm: format!("{algorithm:?}"),
-        fingerprint_sha256: sha256_fingerprint(raw),
-        raw_key_base64: STANDARD.encode(raw),
-    })
-}
-
-pub fn inspect_host_key(endpoint: &SshEndpoint) -> AppResult<HostKeyObservation> {
-    observe_host_key(&open_session(endpoint)?)
+pub async fn inspect_host_key(endpoint: &SshEndpoint) -> AppResult<HostKeyObservation> {
+    let (session, observed) = connect_client(endpoint, None).await?;
+    let _ = session.disconnect(Disconnect::ByApplication, "", "").await;
+    Ok(observed)
 }
 
 fn validate_execution_input(
@@ -140,64 +207,77 @@ fn append_bounded(target: &mut Vec<u8>, other_len: usize, chunk: &[u8]) -> AppRe
     Ok(())
 }
 
-fn read_available<R: Read>(
-    reader: &mut R,
-    target: &mut Vec<u8>,
-    other_len: usize,
-) -> AppResult<bool> {
-    let mut made_progress = false;
-    let mut buffer = [0_u8; 16 * 1024];
-    loop {
-        match reader.read(&mut buffer) {
-            Ok(0) => return Ok(made_progress),
-            Ok(read) => {
-                append_bounded(target, other_len, &buffer[..read])?;
-                made_progress = true;
+async fn authenticate(
+    session: &mut client::Handle<HostKeyVerifier>,
+    username: &str,
+    credential: &StoredCredential,
+) -> AppResult<()> {
+    let result = match credential {
+        StoredCredential::Password { password } => {
+            session
+                .authenticate_password(username, password.as_str())
+                .await?
+        }
+        StoredCredential::PrivateKey {
+            private_key,
+            passphrase,
+        } => {
+            let key = keys::decode_secret_key(private_key, passphrase.as_deref())
+                .map_err(|_| AppError::Security("私钥格式或私钥口令无效".into()))?;
+            let hash_algorithm = if matches!(key.algorithm(), keys::Algorithm::Rsa { .. }) {
+                session.best_supported_rsa_hash().await?.flatten()
+            } else {
+                None
+            };
+            session
+                .authenticate_publickey(
+                    username,
+                    PrivateKeyWithHashAlg::new(Arc::new(key), hash_algorithm),
+                )
+                .await?
+        }
+    };
+    if !result.success() {
+        return Err(AppError::Security("SSH 认证未成功".into()));
+    }
+    Ok(())
+}
+
+async fn run_command(
+    session: &client::Handle<HostKeyVerifier>,
+    command: &str,
+) -> AppResult<CommandOutput> {
+    let mut channel = session.channel_open_session().await?;
+    channel.exec(true, command).await?;
+
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+    let mut exit_status = None;
+    while let Some(message) = channel.wait().await {
+        match message {
+            ChannelMsg::Data { data } => {
+                append_bounded(&mut stdout, stderr.len(), &data)?;
             }
-            Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
-                return Ok(made_progress);
+            ChannelMsg::ExtendedData { data, .. } => {
+                append_bounded(&mut stderr, stdout.len(), &data)?;
             }
-            Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
-            Err(error) => return Err(error.into()),
+            ChannelMsg::ExitStatus {
+                exit_status: status,
+            } => {
+                exit_status = Some(i32::try_from(status).unwrap_or(i32::MAX));
+            }
+            _ => {}
         }
     }
+
+    Ok(CommandOutput {
+        stdout: String::from_utf8_lossy(&stdout).into_owned(),
+        stderr: String::from_utf8_lossy(&stderr).into_owned(),
+        exit_status: exit_status.unwrap_or(-1),
+    })
 }
 
-fn read_channel_output(
-    session: &Session,
-    channel: &Channel,
-    timeout: Duration,
-) -> AppResult<(Vec<u8>, Vec<u8>)> {
-    session.set_blocking(false);
-    let result = (|| -> AppResult<(Vec<u8>, Vec<u8>)> {
-        let mut stdout_stream = channel.stream(0);
-        let mut stderr_stream = channel.stderr();
-        let mut stdout = Vec::new();
-        let mut stderr = Vec::new();
-        let deadline = Instant::now() + Duration::from_millis(u64::from(timeout_millis(timeout)?));
-
-        loop {
-            let stdout_progress = read_available(&mut stdout_stream, &mut stdout, stderr.len())?;
-            let stderr_progress = read_available(&mut stderr_stream, &mut stderr, stdout.len())?;
-            if channel.eof() {
-                break;
-            }
-            if Instant::now() >= deadline {
-                return Err(
-                    io::Error::new(io::ErrorKind::TimedOut, "SSH 命令执行或输出读取超时").into(),
-                );
-            }
-            if !stdout_progress && !stderr_progress {
-                thread::sleep(Duration::from_millis(2));
-            }
-        }
-        Ok((stdout, stderr))
-    })();
-    session.set_blocking(true);
-    result
-}
-
-pub fn execute(
+pub async fn execute(
     endpoint: &SshEndpoint,
     username: &str,
     credential: &StoredCredential,
@@ -205,8 +285,7 @@ pub fn execute(
     command: &str,
 ) -> AppResult<CommandOutput> {
     validate_execution_input(username, expected_fingerprint, command)?;
-    let session = open_session(endpoint)?;
-    let observed = observe_host_key(&session)?;
+    let (mut session, observed) = connect_client(endpoint, Some(expected_fingerprint)).await?;
     if observed.fingerprint_sha256 != expected_fingerprint {
         return Err(AppError::Security(format!(
             "SSH 主机指纹已变化；期望 {expected_fingerprint}，实际 {}",
@@ -214,35 +293,19 @@ pub fn execute(
         )));
     }
 
-    match credential {
-        StoredCredential::Password { password } => {
-            session.userauth_password(username, password)?;
-        }
-        StoredCredential::PrivateKey {
-            private_key,
-            passphrase,
-        } => {
-            session.userauth_pubkey_memory(username, None, private_key, passphrase.as_deref())?;
-        }
-    }
-    if !session.authenticated() {
-        return Err(AppError::Security("SSH 认证未成功".into()));
-    }
-
-    let mut channel = session.channel_session()?;
-    channel.exec(command)?;
-    let (stdout, stderr) = read_channel_output(&session, &channel, endpoint.timeout)?;
-    channel.wait_close()?;
-    let exit_status = channel.exit_status()?;
-
-    Ok(CommandOutput {
-        stdout: String::from_utf8_lossy(&stdout).into_owned(),
-        stderr: String::from_utf8_lossy(&stderr).into_owned(),
-        exit_status,
+    with_timeout(endpoint.timeout, "SSH 认证", async {
+        authenticate(&mut session, username, credential).await
     })
+    .await?;
+    let output = with_timeout(endpoint.timeout, "SSH 命令执行或输出读取", async {
+        run_command(&session, command).await
+    })
+    .await;
+    let _ = session.disconnect(Disconnect::ByApplication, "", "").await;
+    output
 }
 
-pub fn probe_system(
+pub async fn probe_system(
     endpoint: &SshEndpoint,
     username: &str,
     credential: &StoredCredential,
@@ -254,7 +317,8 @@ pub fn probe_system(
         credential,
         expected_fingerprint,
         PROBE_COMMAND,
-    )?;
+    )
+    .await?;
     if output.exit_status != 0 {
         return Err(AppError::ssh_command(output.exit_status, output.stderr));
     }
@@ -286,11 +350,6 @@ mod tests {
         ] {
             assert!(validate_endpoint(&endpoint).is_err());
         }
-    }
-
-    #[test]
-    fn nonzero_submillisecond_timeout_never_becomes_infinite() {
-        assert_eq!(timeout_millis(Duration::from_nanos(1)).unwrap(), 1);
     }
 
     #[test]
