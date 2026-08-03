@@ -7,18 +7,23 @@ import {
   House,
   Lightning,
   FileMagnifyingGlass,
+  UploadSimple,
 } from '@phosphor-icons/react';
 import { useState } from 'react';
 
 import { ServerListPage } from '../features/servers/ServerListPage';
 import { TaskPage } from '../features/tasks/TaskPage';
 import { LogSearchPage } from '../features/logs/LogSearchPage';
+import { FileTransferPage } from '../features/transfers/FileTransferPage';
+import { DownloadsPage } from '../features/downloads/DownloadsPage';
+import { ExecutionHistoryPage } from '../features/history/ExecutionHistoryPage';
 
 type PageKey =
   | 'home'
   | 'servers'
   | 'tasks'
   | 'logs'
+  | 'transfers'
   | 'workflows'
   | 'history'
   | 'downloads'
@@ -29,6 +34,7 @@ const navigation = [
   { key: 'servers' as const, label: '服务器', icon: HardDrives },
   { key: 'tasks' as const, label: '快捷任务', icon: Lightning },
   { key: 'logs' as const, label: '日志检索', icon: FileMagnifyingGlass },
+  { key: 'transfers' as const, label: '文件传输', icon: UploadSimple },
   { key: 'workflows' as const, label: '工作流', icon: FlowArrow },
   { key: 'history' as const, label: '执行记录', icon: ClockCounterClockwise },
   { key: 'downloads' as const, label: '下载文件', icon: DownloadSimple },
@@ -76,9 +82,10 @@ export function AppShell() {
         {page === 'servers' && <ServerListPage />}
         {page === 'tasks' && <TaskPage />}
         {page === 'logs' && <LogSearchPage />}
+        {page === 'transfers' && <FileTransferPage />}
         {page === 'workflows' && <WorkflowNotice />}
-        {page === 'history' && <SectionNotice title="执行记录" description="执行记录页面正在接入已落库的任务历史。" />}
-        {page === 'downloads' && <SectionNotice title="下载文件" description="下载文件页面将只展示数据目录内由轻舟产生的文件。" />}
+        {page === 'history' && <ExecutionHistoryPage />}
+        {page === 'downloads' && <DownloadsPage />}
         {page === 'settings' && <SectionNotice title="设置" description="数据目录、安全策略与更新设置集中在这里。" />}
       </section>
     </div>

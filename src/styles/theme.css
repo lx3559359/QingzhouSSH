@@ -895,7 +895,10 @@ select {
 
 .dashboard-page,
 .task-page,
-.log-search-page {
+.log-search-page,
+.transfer-page,
+.downloads-page,
+.history-page {
   width: min(1100px, 100%);
   margin: 0 auto;
 }
@@ -1448,6 +1451,387 @@ select {
   gap: 9px;
 }
 
+.transfer-layout {
+  display: grid;
+  grid-template-columns: minmax(300px, 0.8fr) minmax(0, 1.2fr);
+  gap: 26px;
+  align-items: start;
+}
+
+.transfer-form,
+.transfer-status-card {
+  padding: 25px;
+}
+
+.transfer-form {
+  display: grid;
+  gap: 16px;
+}
+
+.transfer-form > label {
+  display: grid;
+  gap: 6px;
+  color: #34435b;
+  font-size: 0.76rem;
+  font-weight: 780;
+}
+
+.transfer-form .checkbox-field {
+  display: flex;
+}
+
+.transfer-status-card {
+  min-width: 0;
+  box-shadow:
+    inset 0 1px 0 #fff,
+    0 32px 52px rgb(31 44 67 / 31%),
+    0 14px 23px rgb(39 52 75 / 25%),
+    0 4px 8px rgb(41 54 76 / 18%);
+}
+
+.transfer-status-card > header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  margin-bottom: 20px;
+}
+
+.transfer-status-card > header svg {
+  width: 34px;
+  height: 34px;
+  color: var(--green);
+}
+
+.transfer-paths {
+  display: grid;
+  gap: 10px;
+  margin: 0 0 20px;
+}
+
+.transfer-paths > div {
+  padding: 12px 14px;
+  border: 1px solid #adb9c9;
+  border-radius: 11px;
+  background: linear-gradient(145deg, rgb(255 255 255 / 82%), rgb(218 225 234 / 75%));
+  box-shadow: inset 0 1px 0 #fff, 0 7px 13px rgb(40 54 78 / 13%);
+}
+
+.transfer-paths dt {
+  color: var(--muted);
+  font-size: 0.66rem;
+  font-weight: 780;
+}
+
+.transfer-paths dd {
+  margin: 4px 0 0;
+  overflow-wrap: anywhere;
+  color: #26364c;
+  font: 0.76rem/1.45 Consolas, "Cascadia Mono", monospace;
+}
+
+.transfer-progress {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 17px;
+}
+
+.transfer-progress > div {
+  height: 13px;
+  overflow: hidden;
+  border: 1px solid #8997ab;
+  border-radius: 999px;
+  background: #d7dee8;
+  box-shadow: inset 0 2px 5px rgb(40 52 72 / 30%), 0 1px 0 #fff;
+}
+
+.transfer-progress > div span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #4f72d4, #56c8a0);
+  box-shadow: 0 0 10px rgb(74 116 218 / 40%);
+  transition: width 180ms ease;
+}
+
+.transfer-progress strong {
+  min-width: 45px;
+  color: #38549b;
+}
+
+.transfer-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.transfer-metrics span {
+  display: grid;
+  gap: 5px;
+  padding: 11px;
+  border: 1px solid rgb(169 181 197 / 82%);
+  border-radius: 10px;
+  background: rgb(255 255 255 / 48%);
+}
+
+.transfer-metrics small { color: var(--muted); font-size: 0.65rem; }
+.transfer-metrics strong { color: #293a53; font-size: 0.76rem; }
+
+.transfer-hash {
+  display: block;
+  margin-bottom: 14px;
+  padding: 10px;
+  overflow-wrap: anywhere;
+  border-radius: 9px;
+  background: #263347;
+  color: #dff4ea;
+  font-size: 0.7rem;
+}
+
+.download-file-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 23px;
+}
+
+.download-file-card {
+  min-width: 0;
+  display: flex;
+  gap: 15px;
+  padding: 21px;
+}
+
+.download-file-card > div:last-child {
+  min-width: 0;
+  display: grid;
+  gap: 5px;
+}
+
+.download-file-card strong {
+  overflow-wrap: anywhere;
+  color: #2c3d55;
+}
+
+.download-file-card small { color: var(--muted); }
+
+.download-file-card code {
+  overflow: hidden;
+  color: #51617a;
+  font-size: 0.67rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.page-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  min-height: 120px;
+  color: var(--muted);
+}
+
+.history-filters {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 13px;
+  margin-bottom: 24px;
+  padding: 18px;
+}
+
+.history-filters label {
+  min-width: 0;
+  display: grid;
+  gap: 6px;
+  color: #43516a;
+  font-size: 0.7rem;
+  font-weight: 780;
+}
+
+.history-layout {
+  display: grid;
+  grid-template-columns: minmax(360px, 0.9fr) minmax(0, 1.1fr);
+  gap: 25px;
+  align-items: start;
+}
+
+.history-list,
+.history-details {
+  min-width: 0;
+  padding: 20px;
+}
+
+.history-list {
+  display: grid;
+  gap: 10px;
+}
+
+.history-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(90px, 0.8fr) auto;
+  align-items: center;
+  gap: 10px;
+  padding: 13px;
+  border: 1px solid #acb8c8;
+  border-radius: 11px;
+  background: linear-gradient(145deg, #fff, #dce3eb);
+  box-shadow: inset 0 1px 0 #fff, 0 7px 13px rgb(39 53 76 / 15%);
+  color: #35455d;
+  text-align: left;
+}
+
+.history-row:hover,
+.history-row.is-selected {
+  border-color: #7792d8;
+  box-shadow: inset 0 0 0 1px rgb(91 124 214 / 20%), 0 11px 18px rgb(42 58 86 / 22%);
+}
+
+.history-row > span:first-child {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.history-row small { color: var(--muted); }
+
+.history-status {
+  width: fit-content;
+  padding: 5px 8px;
+  border-radius: 999px;
+  background: #dfe5ee;
+  color: #526078;
+  font-size: 0.66rem;
+  font-weight: 850;
+}
+
+.history-status--succeeded { background: #d7eee3; color: #267254; }
+.history-status--failed { background: #f2d7da; color: #963845; }
+.history-status--running { background: #dce4fa; color: #3b5da9; }
+.history-status--cancelled,
+.history-status--uncertain { background: #f3e6cc; color: #8a601d; }
+
+.history-details {
+  display: grid;
+  gap: 19px;
+  box-shadow:
+    inset 0 1px 0 #fff,
+    0 31px 49px rgb(31 44 67 / 30%),
+    0 13px 22px rgb(39 52 76 / 24%),
+    0 4px 8px rgb(40 53 75 / 18%);
+}
+
+.history-details > header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+}
+
+.history-detail-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.history-detail-summary > * {
+  padding: 7px 9px;
+  border: 1px solid #b3bdca;
+  border-radius: 8px;
+  background: rgb(255 255 255 / 51%);
+  font-size: 0.72rem;
+}
+
+.execution-timeline {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 9px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.execution-timeline li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid #b5bfcc;
+  border-radius: 9px;
+  background: linear-gradient(145deg, #fdfefe, #dfe5ec);
+}
+
+.execution-timeline svg { width: 21px; height: 21px; color: #5373c3; }
+.execution-timeline span { display: grid; gap: 2px; }
+.execution-timeline small { color: var(--muted); font-size: 0.62rem; }
+
+.history-details section h3 {
+  margin-bottom: 9px;
+  color: #34445c;
+  font-size: 0.78rem;
+}
+
+.detail-parameters {
+  display: grid;
+  gap: 7px;
+  margin: 0;
+}
+
+.detail-parameters > div {
+  display: grid;
+  grid-template-columns: 110px 1fr;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: rgb(255 255 255 / 48%);
+  font-size: 0.72rem;
+}
+
+.detail-parameters dt { color: var(--muted); }
+.detail-parameters dd { margin: 0; overflow-wrap: anywhere; font-weight: 750; }
+
+.history-output {
+  margin: 0;
+  padding: 12px;
+  border-radius: 9px;
+  background: #263347;
+  color: #dfeee9;
+  font: 0.7rem/1.5 Consolas, "Cascadia Mono", monospace;
+  white-space: pre-wrap;
+}
+
+.detail-files {
+  display: grid;
+  gap: 7px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.detail-files li {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 9px;
+  border: 1px solid #b5bfcc;
+  border-radius: 8px;
+  background: rgb(255 255 255 / 47%);
+}
+
+.detail-files li span { min-width: 0; display: grid; gap: 2px; }
+.detail-files strong { overflow-wrap: anywhere; font-size: 0.72rem; }
+.detail-files small { color: var(--muted); font-size: 0.64rem; }
+
+.history-details--empty {
+  min-height: 250px;
+  place-content: center;
+  justify-items: center;
+  text-align: center;
+  color: var(--muted);
+}
+
+.history-details--empty svg { width: 42px; height: 42px; color: #6681c7; }
+
 input {
   height: 42px;
   padding: 0 12px;
@@ -1644,6 +2028,15 @@ textarea {
     grid-template-columns: 1fr;
   }
 
+  .transfer-layout,
+  .history-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .history-filters {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .empty-state {
     grid-template-columns: auto 1fr;
   }
@@ -1719,6 +2112,13 @@ textarea {
   }
 
   .log-form-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .download-file-grid,
+  .transfer-metrics,
+  .execution-timeline,
+  .history-filters {
     grid-template-columns: 1fr;
   }
 

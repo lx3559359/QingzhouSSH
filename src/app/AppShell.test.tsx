@@ -12,6 +12,15 @@ vi.mock('../features/tasks/TaskPage', () => ({
 vi.mock('../features/logs/LogSearchPage', () => ({
   LogSearchPage: () => <section aria-label="日志检索内容">日志检索内容</section>,
 }));
+vi.mock('../features/transfers/FileTransferPage', () => ({
+  FileTransferPage: () => <section aria-label="文件传输内容">文件传输内容</section>,
+}));
+vi.mock('../features/downloads/DownloadsPage', () => ({
+  DownloadsPage: () => <section aria-label="下载文件内容">下载文件内容</section>,
+}));
+vi.mock('../features/history/ExecutionHistoryPage', () => ({
+  ExecutionHistoryPage: () => <section aria-label="执行记录内容">执行记录内容</section>,
+}));
 
 import { AppShell } from './AppShell';
 
@@ -20,7 +29,7 @@ describe('AppShell', () => {
     const user = userEvent.setup();
     render(<AppShell />);
 
-    for (const name of ['首页', '服务器', '快捷任务', '日志检索', '工作流', '执行记录', '下载文件', '设置']) {
+    for (const name of ['首页', '服务器', '快捷任务', '日志检索', '文件传输', '工作流', '执行记录', '下载文件', '设置']) {
       expect(screen.getByRole('button', { name })).toBeVisible();
     }
 
