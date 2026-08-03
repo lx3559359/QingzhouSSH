@@ -54,6 +54,23 @@ struct HostKeyVerifier {
     observation: Arc<Mutex<Option<HostKeyObservation>>>,
 }
 
+pub struct AuthenticatedSshSession {
+    handle: client::Handle<HostKeyVerifier>,
+}
+
+impl AuthenticatedSshSession {
+    pub async fn open_session_channel(&self) -> AppResult<russh::Channel<client::Msg>> {
+        Ok(self.handle.channel_open_session().await?)
+    }
+
+    pub async fn disconnect(self) {
+        let _ = self
+            .handle
+            .disconnect(Disconnect::ByApplication, "", "")
+            .await;
+    }
+}
+
 impl client::Handler for HostKeyVerifier {
     type Error = russh::Error;
 
@@ -285,6 +302,23 @@ pub async fn execute(
     command: &str,
 ) -> AppResult<CommandOutput> {
     validate_execution_input(username, expected_fingerprint, command)?;
+    let session =
+        connect_authenticated(endpoint, username, credential, expected_fingerprint).await?;
+    let output = with_timeout(endpoint.timeout, "SSH 命令执行或输出读取", async {
+        run_command(&session.handle, command).await
+    })
+    .await;
+    session.disconnect().await;
+    output
+}
+
+pub async fn connect_authenticated(
+    endpoint: &SshEndpoint,
+    username: &str,
+    credential: &StoredCredential,
+    expected_fingerprint: &str,
+) -> AppResult<AuthenticatedSshSession> {
+    validate_execution_input(username, expected_fingerprint, "authenticated-session")?;
     let (mut session, observed) = connect_client(endpoint, Some(expected_fingerprint)).await?;
     if observed.fingerprint_sha256 != expected_fingerprint {
         return Err(AppError::Security(format!(
@@ -297,12 +331,7 @@ pub async fn execute(
         authenticate(&mut session, username, credential).await
     })
     .await?;
-    let output = with_timeout(endpoint.timeout, "SSH 命令执行或输出读取", async {
-        run_command(&session, command).await
-    })
-    .await;
-    let _ = session.disconnect(Disconnect::ByApplication, "", "").await;
-    output
+    Ok(AuthenticatedSshSession { handle: session })
 }
 
 pub async fn probe_system(
