@@ -1,0 +1,64 @@
+:root {
+  font-family: "Segoe UI", "Microsoft YaHei UI", sans-serif;
+  color: #18243a;
+  background: radial-gradient(circle at 10% 5%, #d8edff, transparent 32%), #e7edf4;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-width: 960px;
+  min-height: 100vh;
+}
+
+.app-shell {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 32px;
+}
+
+.silver-card {
+  overflow: hidden;
+  border: 1px solid #fff;
+  border-right-color: #b7bec8;
+  border-bottom-color: #aeb6c1;
+  border-radius: 18px;
+  background: linear-gradient(138deg, #fff 0%, #f8f9fa 25%, #e5e8ed 58%, #ccd2da 82%, #fafafa 100%);
+  box-shadow:
+    0 28px 44px rgb(36 51 79 / 30%),
+    0 10px 15px rgb(38 54 83 / 24%),
+    0 3px 5px rgb(39 53 78 / 20%);
+}
+
+.welcome-card {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  min-width: 420px;
+  padding: 28px;
+}
+
+.app-mark {
+  width: 52px;
+  height: 52px;
+  display: grid;
+  place-items: center;
+  border-radius: 15px;
+  color: #fff;
+  font-weight: 800;
+  background: linear-gradient(145deg, #72c4ff, #4a62dc);
+}
+
+h1,
+p {
+  margin: 0;
+}
+
+p {
+  margin-top: 6px;
+  color: #607188;
+}

@@ -7,7 +7,9 @@
 .cache/
 node_modules/
 target/
+*.tsbuildinfo
 dist/
+src-tauri/gen/
 artifacts/
 coverage/
 
