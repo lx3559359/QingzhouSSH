@@ -1,0 +1,178 @@
+name: QingzhouSSH release
+
+on:
+  push:
+    branches: [master]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  verify-build-publish:
+    runs-on: windows-2025
+    env:
+      CARGO_HOME: ${{ github.workspace }}\.local\cargo-home
+      CARGO_TARGET_DIR: ${{ github.workspace }}\target
+      RUSTUP_HOME: ${{ github.workspace }}\.local\rustup-home
+      NPM_CONFIG_CACHE: ${{ github.workspace }}\.local\npm-cache
+      PNPM_HOME: ${{ github.workspace }}\.local\pnpm-home
+      PNPM_STORE_DIR: ${{ github.workspace }}\.local\pnpm-store
+      QINGZHOU_DATA_ROOT: ${{ github.workspace }}\.local\ci-data
+      QINGZHOU_ARTIFACTS_DIR: ${{ github.workspace }}\artifacts
+      MODELSCOPE_HOME: ${{ github.workspace }}\.local\modelscope-home
+      MODELSCOPE_CACHE: ${{ github.workspace }}\.local\modelscope-cache
+      PYTHONPYCACHEPREFIX: ${{ github.workspace }}\.local\python-cache
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Install pnpm 10
+        uses: pnpm/action-setup@v6
+
+      - name: Install Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: pnpm
+
+      - name: Prepare project-local toolchain
+        shell: powershell
+        run: |
+          & .\scripts\dev-env.ps1 -Quiet
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+          rustup component add rustfmt clippy
+          pnpm install --frozen-lockfile
+
+      - name: Project-local path audit
+        shell: powershell
+        run: |
+          & .\scripts\dev-env.ps1 -Quiet
+          & .\scripts\verify-d-drive.ps1
+
+      - name: Frontend checks
+        shell: powershell
+        run: |
+          & .\scripts\dev-env.ps1 -Quiet
+          pnpm test
+          pnpm build
+
+      - name: Packaging and release script checks
+        shell: powershell
+        run: |
+          & .\scripts\tests\dev-env.tests.ps1
+          & .\scripts\tests\package-config.tests.ps1
+          & .\scripts\tests\release-config.tests.ps1
+          & .\scripts\tests\release-artifacts.tests.ps1
+          & .\scripts\tests\release-pipeline.tests.ps1
+
+      - name: Rust checks
+        shell: powershell
+        run: |
+          & .\scripts\dev-env.ps1 -Quiet
+          cargo fmt --manifest-path .\src-tauri\Cargo.toml -- --check
+          cargo clippy --locked --manifest-path .\src-tauri\Cargo.toml --all-targets -- -D warnings
+          cargo test --locked --manifest-path .\src-tauri\Cargo.toml --all-targets -- --nocapture
+
+      - name: Unsigned branch build
+        if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
+        shell: powershell
+        run: |
+          & .\scripts\dev-env.ps1 -Quiet
+          pnpm tauri build --debug --no-bundle
+
+      - name: Build signed NSIS bundle once
+        if: ${{ startsWith(github.ref, 'refs/tags/v') }}
+        shell: powershell
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          & .\scripts\dev-env.ps1 -Quiet
+          pnpm tauri build --bundles nsis
+
+      - name: Assemble signed release
+        if: ${{ startsWith(github.ref, 'refs/tags/v') }}
+        shell: powershell
+        env:
+          QINGZHOU_MODELSCOPE_NAMESPACE: ${{ vars.QINGZHOU_MODELSCOPE_NAMESPACE }}
+        run: |
+          & .\scripts\dev-env.ps1 -Quiet
+          $version = (Get-Content -Raw -Encoding utf8 .\package.json | ConvertFrom-Json).version
+          if ($env:GITHUB_REF_NAME -ne "v$version") { throw "Tag must equal v$version" }
+          if ([string]::IsNullOrWhiteSpace($env:QINGZHOU_MODELSCOPE_NAMESPACE)) { throw 'QINGZHOU_MODELSCOPE_NAMESPACE is not configured' }
+          $nsis = Join-Path $env:CARGO_TARGET_DIR 'release\bundle\nsis'
+          $installer = Get-ChildItem -LiteralPath $nsis -Filter '*-setup.exe' -File | Select-Object -First 1
+          $updater = Get-ChildItem -LiteralPath $nsis -Filter '*.nsis.zip' -File | Select-Object -First 1
+          $signature = Get-ChildItem -LiteralPath $nsis -Filter '*.nsis.zip.sig' -File | Select-Object -First 1
+          if ($null -in @($installer, $updater, $signature)) { throw 'Tauri NSIS updater artifacts are incomplete' }
+          $portable = & .\scripts\package-portable.ps1 -ExecutablePath (Join-Path $env:CARGO_TARGET_DIR 'release\qingzhou-ssh.exe') -Version $version
+          $releaseDir = Join-Path $env:QINGZHOU_ARTIFACTS_DIR "release\v$version"
+          $publishedAt = [DateTimeOffset]::Parse((git show -s --format=%cI HEAD)).UtcDateTime.ToString('yyyy-MM-ddTHH:mm:ssZ')
+          & .\scripts\build-release.ps1 -InstallerPath $installer.FullName -UpdaterArchivePath $updater.FullName -UpdaterSignaturePath $signature.FullName -PortableArchivePath $portable -OutputDirectory $releaseDir -ModelScopeNamespace $env:QINGZHOU_MODELSCOPE_NAMESPACE -PublishedAt $publishedAt
+          & .\scripts\verify-release.ps1 -ReleaseDirectory $releaseDir
+          "QINGZHOU_VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "QINGZHOU_RELEASE_DIR=$releaseDir" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Install, update and portable smoke
+        if: ${{ startsWith(github.ref, 'refs/tags/v') }}
+        shell: powershell
+        run: |
+          & .\scripts\smoke-release.ps1 -ReleaseDirectory $env:QINGZHOU_RELEASE_DIR -AllowLocalMachineMutation
+
+      - name: Upload workflow artifact
+        if: ${{ startsWith(github.ref, 'refs/tags/v') }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: QingzhouSSH-v${{ github.ref_name }}-verified
+          path: ${{ env.QINGZHOU_RELEASE_DIR }}
+          if-no-files-found: error
+
+      - name: Publish GitHub Release
+        if: ${{ startsWith(github.ref, 'refs/tags/v') }}
+        shell: powershell
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = $env:GITHUB_REF_NAME
+          if (-not (gh release view $tag 2>$null)) { gh release create $tag --verify-tag --title "QingzhouSSH $tag" --generate-notes }
+          $metadata = Get-Content -Raw -Encoding utf8 (Join-Path $env:QINGZHOU_RELEASE_DIR 'release-metadata.json') | ConvertFrom-Json
+          $files = @($metadata.files | ForEach-Object { Join-Path $env:QINGZHOU_RELEASE_DIR $_.name })
+          $files += @('SHA256SUMS', 'SBOM.spdx.json', 'release-metadata.json') | ForEach-Object { Join-Path $env:QINGZHOU_RELEASE_DIR $_ }
+          $files += Join-Path $env:QINGZHOU_RELEASE_DIR 'github\latest.json'
+          foreach ($file in $files) { gh release upload $tag $file --clobber }
+
+      - name: Publish identical bytes to ModelScope
+        if: ${{ startsWith(github.ref, 'refs/tags/v') }}
+        shell: powershell
+        env:
+          MODELSCOPE_API_TOKEN: ${{ secrets.MODELSCOPE_API_TOKEN }}
+          QINGZHOU_MODELSCOPE_NAMESPACE: ${{ vars.QINGZHOU_MODELSCOPE_NAMESPACE }}
+        run: |
+          $pythonTarget = Join-Path $env:GITHUB_WORKSPACE '.local\python-modelscope'
+          python -m pip install --disable-pip-version-check --target $pythonTarget 'modelscope-hub==0.1.8'
+          $env:PYTHONPATH = $pythonTarget
+          python .\scripts\modelscope-release.py upload --repo-id "$env:QINGZHOU_MODELSCOPE_NAMESPACE/QingzhouSSH" --release-directory $env:QINGZHOU_RELEASE_DIR
+
+      - name: Read back and compare both public sources
+        if: ${{ startsWith(github.ref, 'refs/tags/v') }}
+        shell: powershell
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MODELSCOPE_API_TOKEN: ${{ secrets.MODELSCOPE_API_TOKEN }}
+          QINGZHOU_MODELSCOPE_NAMESPACE: ${{ vars.QINGZHOU_MODELSCOPE_NAMESPACE }}
+        run: |
+          $githubReadback = Join-Path $env:QINGZHOU_ARTIFACTS_DIR 'readback\github'
+          $modelscopeReadback = Join-Path $env:QINGZHOU_ARTIFACTS_DIR 'readback\modelscope'
+          New-Item -ItemType Directory -Force -Path $githubReadback, $modelscopeReadback | Out-Null
+          gh release download $env:GITHUB_REF_NAME --dir $githubReadback
+          $env:PYTHONPATH = Join-Path $env:GITHUB_WORKSPACE '.local\python-modelscope'
+          python .\scripts\modelscope-release.py download --repo-id "$env:QINGZHOU_MODELSCOPE_NAMESPACE/QingzhouSSH" --release-directory $env:QINGZHOU_RELEASE_DIR --output-directory $modelscopeReadback
+          & .\scripts\compare-release-sources.ps1 -ReleaseDirectory $env:QINGZHOU_RELEASE_DIR -GitHubDirectory $githubReadback -ModelScopeDirectory $modelscopeReadback

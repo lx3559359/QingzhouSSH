@@ -71,10 +71,10 @@
 
 ## Task 12：添加双源发布流水线
 
-- [ ] GitHub Actions 只构建一次，然后上传 GitHub 与 ModelScope。
-- [ ] 在一次性 Windows runner 执行安装、启动、更新/卸载和便携冒烟。
-- [ ] 发布前回读两源并比较版本、构建 ID、签名、SHA-256、大小和文件集合。
-- [ ] 提交：`ci: publish identical dual-source releases`
+- [x] GitHub Actions 只构建一次，然后上传 GitHub 与 ModelScope。
+- [x] 在一次性 Windows runner 执行安装、启动、更新/卸载和便携冒烟。
+- [x] 发布前回读两源并比较版本、构建 ID、签名、SHA-256、大小和文件集合。
+- [x] 提交：`ci: publish identical dual-source releases`
 
 ## Task 13：补齐公开项目文档
 
