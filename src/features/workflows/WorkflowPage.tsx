@@ -6,6 +6,7 @@ import type { WorkflowDefinition, WorkflowDraft, WorkflowNode, WorkflowNodeConfi
 import { WorkflowCanvas } from './WorkflowCanvas';
 import { WorkflowInspector } from './WorkflowInspector';
 import { WorkflowLibrary, type WorkflowStepType } from './WorkflowLibrary';
+import { WorkflowRunPanel } from './WorkflowRunPanel';
 import { WorkflowValidationPanel } from './WorkflowValidationPanel';
 import { createReferenceWorkflowDraft } from './fixtures';
 import './workflow.css';
@@ -59,6 +60,8 @@ export function WorkflowPage() {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
   const [validation, setValidation] = useState<WorkflowValidationReport | null>(null);
+  const [workflowVersion, setWorkflowVersion] = useState<number | null>(null);
+  const [dirty, setDirty] = useState(false);
 
   const loadList = async () => {
     const list = await api.listWorkflows();
@@ -74,6 +77,8 @@ export function WorkflowPage() {
       if (definition) {
         setDraft(toDraft(definition));
         setValidation(null);
+        setWorkflowVersion(definition.version);
+        setDirty(false);
         setSelectedNodeId(definition.nodes[0]?.id ?? null);
       }
     } catch (error) {
@@ -95,6 +100,8 @@ export function WorkflowPage() {
     reference.description = '基于参考流程创建；保存后生成第一个不可变版本。';
     setDraft(reference);
     setValidation(null);
+    setWorkflowVersion(null);
+    setDirty(true);
     setSelectedNodeId(reference.nodes[0]?.id ?? null);
     setZoom(1);
     setMessage('已创建未保存的参考工作流。');
@@ -104,6 +111,7 @@ export function WorkflowPage() {
     const node = nextNode(type, draft.nodes.length + 1);
     setDraft((current) => ({ ...current, nodes: [...current.nodes, node] }));
     setValidation(null);
+    setDirty(true);
     setSelectedNodeId(node.id);
   };
 
@@ -113,11 +121,13 @@ export function WorkflowPage() {
       nodes: current.nodes.map((node) => node.id === nodeId ? { ...node, position } : node),
     }));
     setValidation(null);
+    setDirty(true);
   };
 
   const changeDraft = (next: WorkflowDraft) => {
     setDraft(next);
     setValidation(null);
+    setDirty(true);
   };
 
   const deleteNode = (nodeId: string) => {
@@ -150,6 +160,8 @@ export function WorkflowPage() {
     try {
       const saved = await api.saveWorkflow(draft);
       setDraft(toDraft(saved));
+      setWorkflowVersion(saved.version);
+      setDirty(false);
       await loadList();
       setMessage(`已保存版本 v${saved.version}`);
     } catch (error) {
@@ -242,6 +254,12 @@ export function WorkflowPage() {
           <WorkflowValidationPanel report={validation} onLocate={setSelectedNodeId} />
         </div>
       </div>
+      <WorkflowRunPanel
+        draft={draft}
+        workflowVersion={workflowVersion}
+        dirty={dirty}
+        onValidation={setValidation}
+      />
     </section>
   );
 }

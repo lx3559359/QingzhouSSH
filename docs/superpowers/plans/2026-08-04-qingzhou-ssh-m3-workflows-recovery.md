@@ -225,10 +225,10 @@
 - Modify: `src/features/workflows/WorkflowPage.tsx`
 - Test: `src/features/workflows/WorkflowRunPanel.test.tsx`
 
-- [ ] 写失败测试：服务器选择、运行前诊断、危险摘要确认、节点流事件、暂停、重试、取消/uncertain、回滚二次确认、清理和诊断下载。
-- [ ] 实现运行面板与重载后详情恢复；不得用前端计时器伪造终态。
-- [ ] 运行组件测试、AppShell 回归和构建。
-- [ ] 提交：`feat: control and recover workflow runs`
+- [x] 写失败测试：服务器选择、运行前诊断、危险摘要确认、节点流事件、暂停、重试、取消/uncertain、回滚二次确认、清理和诊断下载。
+- [x] 实现运行面板与重载后详情恢复；不得用前端计时器伪造终态。
+- [x] 运行组件测试、AppShell 回归和构建。
+- [x] 提交：`feat: control and recover workflow runs`
 
 ## Task 15：真实夹具工作流闭环
 

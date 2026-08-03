@@ -9,6 +9,7 @@ const apiMocks = vi.hoisted(() => ({
   saveWorkflow: vi.fn(),
   deleteWorkflow: vi.fn(),
   validateWorkflow: vi.fn(),
+  listServers: vi.fn(), listWorkflowRuns: vi.fn(), getWorkflowRun: vi.fn(),
 }));
 
 vi.mock('../../api/tauri', () => ({ api: apiMocks, asAppError: (error: Error) => ({ code: 'test', message: error.message }) }));
@@ -44,6 +45,9 @@ describe('WorkflowInspector', () => {
     apiMocks.saveWorkflow.mockResolvedValue(definition);
     apiMocks.deleteWorkflow.mockResolvedValue(true);
     apiMocks.validateWorkflow.mockResolvedValue({ valid: true, startNodeId: definition.nodes[0].id, diagnostics: [] });
+    apiMocks.listServers.mockResolvedValue([]);
+    apiMocks.listWorkflowRuns.mockResolvedValue([]);
+    apiMocks.getWorkflowRun.mockResolvedValue(null);
   });
 
   it('edits task parameters and explicit next/true/false connections, then deletes a node', async () => {
