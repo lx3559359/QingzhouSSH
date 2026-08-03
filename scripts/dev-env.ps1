@@ -6,6 +6,7 @@ $localRoot = Join-Path $projectRoot '.local'
 
 $env:CARGO_HOME = Join-Path $localRoot 'cargo-home'
 $env:CARGO_TARGET_DIR = Join-Path $projectRoot 'target'
+$env:RUSTUP_HOME = Join-Path $localRoot 'rustup-home'
 $env:NPM_CONFIG_CACHE = Join-Path $localRoot 'npm-cache'
 $env:COREPACK_HOME = Join-Path $localRoot 'corepack'
 $env:PNPM_HOME = Join-Path $localRoot 'pnpm-home'
@@ -18,6 +19,7 @@ $env:QINGZHOU_ARTIFACTS_DIR = Join-Path $projectRoot 'artifacts'
 @(
   $env:CARGO_HOME,
   $env:CARGO_TARGET_DIR,
+  $env:RUSTUP_HOME,
   $env:NPM_CONFIG_CACHE,
   $env:COREPACK_HOME,
   $env:PNPM_HOME,
@@ -27,8 +29,10 @@ $env:QINGZHOU_ARTIFACTS_DIR = Join-Path $projectRoot 'artifacts'
   $env:QINGZHOU_ARTIFACTS_DIR
 ) | ForEach-Object { New-Item -ItemType Directory -Force -Path $_ | Out-Null }
 
-if (($env:Path -split ';') -notcontains $env:PNPM_HOME) {
-  $env:Path = "$env:PNPM_HOME;$env:Path"
+foreach ($toolBin in @((Join-Path $env:CARGO_HOME 'bin'), $env:PNPM_HOME)) {
+  if (($env:Path -split ';') -notcontains $toolBin) {
+    $env:Path = "$toolBin;$env:Path"
+  }
 }
 
 if (-not $Quiet) {

@@ -6,6 +6,7 @@ $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 $paths = @(
   $env:CARGO_HOME,
   $env:CARGO_TARGET_DIR,
+  $env:RUSTUP_HOME,
   $env:NPM_CONFIG_CACHE,
   $env:COREPACK_HOME,
   $env:PNPM_HOME,
@@ -23,6 +24,11 @@ foreach ($path in $paths) {
   if ((Split-Path -Qualifier $path) -ne (Split-Path -Qualifier $repoRoot)) {
     throw "Path is on another drive: $path"
   }
+}
+
+$cargoBin = Join-Path $env:CARGO_HOME 'bin'
+if (($env:Path -split ';') -notcontains $cargoBin) {
+  throw "Cargo bin is missing from PATH: $cargoBin"
 }
 
 Write-Host 'PASS: all controllable development paths are project-local'
