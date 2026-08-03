@@ -78,9 +78,9 @@
 
 ## Task 13：补齐公开项目文档
 
-- [ ] 添加 Apache-2.0 LICENSE、SECURITY、支持矩阵、用户指南、数据目录、升级/回退与卸载说明。
-- [ ] README 改为完整产品状态并说明 GitHub/ModelScope 下载入口。
-- [ ] 提交：`docs: prepare public qingzhou release`
+- [x] 添加 Apache-2.0 LICENSE、SECURITY、支持矩阵、用户指南、数据目录、升级/回退与卸载说明。
+- [x] README 改为完整产品状态并说明 GitHub/ModelScope 下载入口。
+- [x] 提交：`docs: prepare public qingzhou release`
 
 ## Task 14：创建 GitHub 与 ModelScope 公共项目
 

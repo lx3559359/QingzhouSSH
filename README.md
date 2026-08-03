@@ -1,55 +1,62 @@
 # QingzhouSSH（轻舟 SSH）
 
-QingzhouSSH 是一个面向 Windows 的无交互式 SSH 终端工具。它把服务器连接、Linux 能力识别、快捷任务、日志检索下载和 SFTP 文件传输包装成图形界面，不提供交互式终端、PTY 或持续 stdin。
+QingzhouSSH 是一款面向 Windows 的图形化服务器快捷运维工具。它通过 SSH 执行经过约束的快捷任务、脚本、日志检索、SFTP 文件传输和可视化工作流，但不提供交互式终端、PTY 或持续 stdin。
 
-当前开发版本已完成 **Milestone 3：可视化工作流与恢复**，仍不是完整产品发行版。
+> **No SSH Terminal**：这是“无 SSH 终端”的安全边界，不是终端模拟器，也不会把远程 Shell 直接暴露给界面。
 
-## 当前已实现
+## 核心能力
 
-- 首次启动选择数据根目录；开发环境的依赖、缓存、测试数据和构建产物均约束在项目所在盘。
-- SQLite 服务器资料库与 Windows DPAPI 用户级凭据保险库。
-- 首次连接主机指纹确认，以及指纹变化时在认证前强制拦截。
-- 密码和带口令 OpenSSH 私钥认证，不创建明文私钥临时文件。
-- 自动识别 Ubuntu/Debian、RHEL 系、openEuler、UOS、银河麒麟和 Anolis 等系统家族与基础能力。
-- React + Tauri 桌面界面，展示服务器、信任状态和检测到的系统能力。
-- 参数化内置任务：系统概览、磁盘使用、进程查询、服务状态/启动/停止/重启与日志检索。
-- 受控单条命令与多行脚本执行；每次执行都有超时、输出上限、脱敏事件和危险操作二次确认。
-- 普通 `.log`/`.gz` 日志搜索、50 条分页预览和项目数据目录内下载。
-- SFTP 分块上传/下载、进度、SHA-256 校验、临时文件清理和原子完成。
-- 可筛选执行历史、`uncertain` 中断恢复语义和后端登记的下载文件清单。
-- 可视化工作流列表、八类步骤库、点阵画布、SVG 连线、节点参数和显式真假分支编辑。
-- 不可变工作流版本、共享 Rust 图校验、单服务器串行运行、单调事件和持久化节点时间线。
-- 节点失败暂停与同节点重试、准确取消/`uncertain`、上传覆盖恢复点、逆序回滚和脱敏诊断下载。
-- 前端、Rust、D 盘路径审计及真实 SSH/SFTP/M2/M3 闭环集成测试。
+- 自动探测 Ubuntu、Debian、RHEL 系、openEuler、UOS、Kylin（银河麒麟）和 Anolis 等 Linux 系统及可用命令。
+- Windows DPAPI 用户级凭据保护；首次连接核对主机指纹，指纹变化时在认证前阻断。
+- **Quick tasks**：系统概览、磁盘、进程、服务状态与启停等参数化任务。
+- **Log search and download**：检索远程 `.log`/`.gz`，分页预览，并下载到所选数据目录。
+- **SFTP**：分块上传/下载、单调进度、SHA-256 校验、临时文件和原子完成。
+- **Workflow**：八类节点的可视化编排、条件分支、失败暂停、同节点重试、恢复点、逆序回滚和脱敏诊断包。
+- 危险任务、自定义命令/脚本、服务启停和回滚均要求明确二次确认。
+- **Online update**：GitHub Releases 主源与 ModelScope 镜像；下载后同时校验 Tauri 更新签名、SHA-256 和大小。
 
-## 后续里程碑
+## 下载与安装
 
-- Milestone 4：Windows 安装包、在线更新，以及 GitHub Releases + ModelScope（魔搭）双源发布。
+- [GitHub Releases](https://github.com/lx3559359/QingzhouSSH/releases/latest)：主下载入口、源码、Issue 和安全公告。
+- [ModelScope](https://modelscope.cn/studios)：国内镜像入口；在 Studio 中搜索 `QingzhouSSH`，项目创建后 README 会补充直达地址。
 
-## 开发快速开始
+Windows x64 安装版使用 NSIS `currentUser` 模式，不需要管理员权限。便携版解压后保留 `QingzhouSSH.exe` 旁的 `portable.flag`，应用数据会进入同目录的 `data`。
 
-在 PowerShell 中进入仓库后执行：
+安装包和便携包均附带 `SHA256SUMS`、SPDX SBOM 与 Apache-2.0 许可证。更新签名不等于 Windows Authenticode 代码签名；当前发布如未配置商业代码签名证书，Windows 可能显示“未知发布者”。
+
+## 第一次使用
+
+1. 安装版首次启动时选择 **Data root（数据根目录）**；应用不会回退到 `%APPDATA%` 或 `%LOCALAPPDATA%` 保存业务数据。
+2. 添加服务器地址、端口、用户名和密码或带口令 OpenSSH 私钥。
+3. 第一次连接时，在可信渠道核对界面显示的 SHA-256 主机指纹后再批准。
+4. 选择快捷任务、日志、文件传输或工作流；高风险操作按界面摘要二次确认。
+5. 在“设置”页手工检查、下载并安装更新；工具不会静默安装更新。
+
+完整操作见 [用户指南](docs/user-guide.md)，数据、升级、回退与卸载见 [数据与更新](docs/data-and-updates.md)，系统范围见 [支持矩阵](docs/support-matrix.md)。
+
+## 安全与隐私
+
+- 密码、私钥和私钥口令使用当前 Windows 用户的 DPAPI 加密，跨用户或跨电脑复制后需要重新录入。
+- 主机指纹变化会在发送凭据之前阻断连接。
+- 运行事件、历史和诊断包会脱敏；自定义脚本文本不会出现在确认弹窗和诊断包中。
+- 当前没有遥测和自动崩溃上传。
+- 漏洞请按 [SECURITY.md](SECURITY.md) 私下报告，不要在公开 Issue 中粘贴凭据、私钥、服务器地址或利用细节。
+
+技术边界见 [安全说明](docs/security.md)。
+
+## 开发
+
+本仓库的开发数据和构建产物全部约束在项目目录内。Windows PowerShell 会话先加载：
 
 ```powershell
-. .\scripts\dev-env.ps1
+& .\scripts\dev-env.ps1 -Quiet
 pnpm install --frozen-lockfile
 pnpm test
 pnpm build
-cargo test --manifest-path .\src-tauri\Cargo.toml
-pnpm tauri dev
+cargo test --locked --manifest-path .\src-tauri\Cargo.toml --all-targets
 ```
 
-真实 SSH/SFTP/M2/M3 闭环测试使用项目内的隔离夹具，生成的 Python 包、日志、远端模拟目录和测试密钥全部写入 `.local`：
-
-```powershell
-.\scripts\test-ssh-live.ps1
-```
-
-完整命令和环境要求见 [开发指南](docs/development.md)，M3 验收证据见 [Milestone 3 验收记录](docs/milestone-3-acceptance.md)，安全边界见 [安全说明](docs/security.md)。
-
-## 数据位置
-
-公开版本不假设用户一定有 D 盘。安装版首次启动会要求用户明确选择数据根目录；便携版可通过程序目录旁的 `portable.flag` 使用同目录下的 `data`。本开发工作区固定在 `D:\Codex Project\轻量化SSH快捷工具`，开发数据、缓存、测试夹具和产物只能进入该项目目录内的 `.local`、`target`、`dist` 或 `artifacts`；`scripts/verify-d-drive.ps1` 会检查可控路径没有逃逸到 C 盘 AppData、D 盘根目录或项目父目录。
+在当前工作区，项目位于 `D:\Codex Project\轻量化SSH快捷工具`；依赖、缓存、测试数据和产物只能进入其 `.local`、`target`、`dist`、`artifacts` 或用户明确选择的数据根目录。详见 [开发指南](docs/development.md)。
 
 ## 许可证
 
