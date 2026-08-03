@@ -9,49 +9,49 @@ const SUPPORTED_FAMILIES: [&str; 3] = ["debian", "rhel", "openeuler"];
 
 pub fn built_in_catalog() -> Vec<TaskDefinition> {
     vec![
-        task(
-            "system.overview",
-            TaskCategory::System,
-            "系统概览",
-            "查看运行时间、负载、内存、磁盘、网络和进程摘要",
-            RiskLevel::Safe,
-            Vec::new(),
-            vec![implementation(
+        task(TaskSpec {
+            id: "system.overview",
+            category: TaskCategory::System,
+            title: "系统概览",
+            description: "查看运行时间、负载、内存、磁盘、网络和进程摘要",
+            risk_level: RiskLevel::Safe,
+            parameters: Vec::new(),
+            implementations: vec![implementation(
                 "posix",
                 &[],
                 &["uptime", "uname", "df", "ps"],
                 "printf '== system ==\\n'; uname -a; printf '== uptime ==\\n'; uptime; printf '== memory ==\\n'; (free -b 2>/dev/null || true); printf '== disk ==\\n'; df -P -B1; printf '== network ==\\n'; (ip -brief address 2>/dev/null || hostname -I 2>/dev/null || true); printf '== processes ==\\n'; ps -eo pid,user,%cpu,%mem,etime,args | head -n 21",
             )],
-            OutputKind::KeyValue,
-        ),
-        task(
-            "system.disk_usage",
-            TaskCategory::System,
-            "磁盘使用",
-            "按字节查看挂载点容量和使用率",
-            RiskLevel::Safe,
-            Vec::new(),
-            vec![implementation("posix", &[], &["df"], "df -P -B1")],
-            OutputKind::Table,
-        ),
-        task(
-            "system.process_query",
-            TaskCategory::System,
-            "进程查询",
-            "按名称安全过滤进程",
-            RiskLevel::Safe,
-            vec![
+            output_kind: OutputKind::KeyValue,
+        }),
+        task(TaskSpec {
+            id: "system.disk_usage",
+            category: TaskCategory::System,
+            title: "磁盘使用",
+            description: "按字节查看挂载点容量和使用率",
+            risk_level: RiskLevel::Safe,
+            parameters: Vec::new(),
+            implementations: vec![implementation("posix", &[], &["df"], "df -P -B1")],
+            output_kind: OutputKind::Table,
+        }),
+        task(TaskSpec {
+            id: "system.process_query",
+            category: TaskCategory::System,
+            title: "进程查询",
+            description: "按名称安全过滤进程",
+            risk_level: RiskLevel::Safe,
+            parameters: vec![
                 string_parameter("query", "进程名称", "固定文本过滤词", 1, 128),
                 integer_parameter("limit", "结果上限", "最多返回的进程数", 1, 200, 50),
             ],
-            vec![implementation(
+            implementations: vec![implementation(
                 "posix",
                 &[],
                 &["ps", "grep", "head"],
                 "ps -eo pid,user,%cpu,%mem,etime,args | grep -F -- {{query}} | grep -v '[g]rep -F' | head -n {{limit}}",
             )],
-            OutputKind::Table,
-        ),
+            output_kind: OutputKind::Table,
+        }),
         service_task("service.status", "服务状态", "查看服务状态", RiskLevel::Safe, "status"),
         service_task("service.start", "启动服务", "启动指定服务", RiskLevel::Dangerous, "start"),
         service_task("service.stop", "停止服务", "停止指定服务", RiskLevel::Dangerous, "stop"),
@@ -62,13 +62,13 @@ pub fn built_in_catalog() -> Vec<TaskDefinition> {
             RiskLevel::Dangerous,
             "restart",
         ),
-        task(
-            "logs.search",
-            TaskCategory::Logs,
-            "日志检索",
-            "检索普通日志或 gzip 压缩日志并生成可下载结果",
-            RiskLevel::Caution,
-            vec![
+        task(TaskSpec {
+            id: "logs.search",
+            category: TaskCategory::Logs,
+            title: "日志检索",
+            description: "检索普通日志或 gzip 压缩日志并生成可下载结果",
+            risk_level: RiskLevel::Caution,
+            parameters: vec![
                 ParameterDefinition {
                     name: "path".into(),
                     label: "日志路径".into(),
@@ -91,14 +91,14 @@ pub fn built_in_catalog() -> Vec<TaskDefinition> {
                 integer_parameter("context", "上下文", "匹配项前后行数", 0, 20, 2),
                 integer_parameter("limit", "结果上限", "最多返回的匹配数", 1, 10_000, 1_000),
             ],
-            vec![implementation(
+            implementations: vec![implementation(
                 "grep",
                 &[],
                 &["grep"],
                 "grep -n -F -- {{keyword}} {{path}} | head -n {{limit}}",
             )],
-            OutputKind::LogMatches,
-        ),
+            output_kind: OutputKind::LogMatches,
+        }),
     ]
 }
 
@@ -109,13 +109,13 @@ fn service_task(
     risk_level: RiskLevel,
     action: &str,
 ) -> TaskDefinition {
-    task(
+    task(TaskSpec {
         id,
-        TaskCategory::Service,
+        category: TaskCategory::Service,
         title,
         description,
         risk_level,
-        vec![ParameterDefinition {
+        parameters: vec![ParameterDefinition {
             name: "service".into(),
             label: "服务名".into(),
             description: "systemd 单元或传统服务名".into(),
@@ -124,7 +124,7 @@ fn service_task(
             default_value: None,
             sensitive: false,
         }],
-        vec![
+        implementations: vec![
             TaskImplementation {
                 id: format!("systemd-{action}"),
                 compatibility: compatibility(&["systemd"], &["systemctl"]),
@@ -136,30 +136,32 @@ fn service_task(
                 command_template: format!("service {{{{service}}}} {action}"),
             },
         ],
-        OutputKind::Text,
-    )
+        output_kind: OutputKind::Text,
+    })
 }
 
-fn task(
-    id: &str,
+struct TaskSpec<'a> {
+    id: &'a str,
     category: TaskCategory,
-    title: &str,
-    description: &str,
+    title: &'a str,
+    description: &'a str,
     risk_level: RiskLevel,
     parameters: Vec<ParameterDefinition>,
     implementations: Vec<TaskImplementation>,
     output_kind: OutputKind,
-) -> TaskDefinition {
+}
+
+fn task(spec: TaskSpec<'_>) -> TaskDefinition {
     TaskDefinition {
-        id: id.into(),
+        id: spec.id.into(),
         version: 1,
-        category,
-        title: title.into(),
-        description: description.into(),
-        risk_level,
-        parameters,
-        implementations,
-        output_kind,
+        category: spec.category,
+        title: spec.title.into(),
+        description: spec.description.into(),
+        risk_level: spec.risk_level,
+        parameters: spec.parameters,
+        implementations: spec.implementations,
+        output_kind: spec.output_kind,
     }
 }
 
