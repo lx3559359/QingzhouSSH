@@ -1,20 +1,21 @@
 #![allow(linker_messages)]
 
+pub mod core;
 pub mod error;
+pub mod window;
 
-use tauri::{WebviewUrl, WebviewWindowBuilder};
+use core::data_root::{initialize_data_root, resolve_runtime_data_root};
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
-            WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
-                .title("轻舟 SSH")
-                .inner_size(1180.0, 760.0)
-                .min_inner_size(960.0, 640.0)
-                .incognito(true)
-                .build()?;
+            let resolution = resolve_runtime_data_root()?;
+            if let Some(root) = resolution.path.as_deref() {
+                initialize_data_root(root)?;
+            }
+            window::build_main_window(app.handle(), resolution.path.as_deref())?;
             Ok(())
         })
         .run(tauri::generate_context!())
