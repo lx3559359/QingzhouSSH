@@ -10,9 +10,9 @@
 
 ## Task 2：定义更新领域模型和状态机
 
-- [ ] 先写状态转换、版本策略、清单字段和错误分类测试。
-- [ ] 添加 `domain/update.rs`，拒绝降级、未知状态、非法哈希、大小和平台。
-- [ ] 提交：`feat: model trusted update lifecycle`
+- [x] 先写状态转换、版本策略、清单字段和错误分类测试。
+- [x] 添加 `domain/update.rs`，拒绝降级、未知状态、非法哈希、大小和平台。
+- [x] 提交：`feat: model trusted update lifecycle`
 
 ## Task 3：实现清单与固定来源策略
 
