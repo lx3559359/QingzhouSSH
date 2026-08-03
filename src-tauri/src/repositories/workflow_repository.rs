@@ -11,11 +11,11 @@ use crate::{
     domain::{
         execution::now_millis,
         workflow::{
-            FinishWorkflowNode, FinishWorkflowRestorePoint, NewWorkflowRestorePoint,
-            NewWorkflowRun, WorkflowDefinition, WorkflowDraft, WorkflowEdge, WorkflowNode,
-            WorkflowNodeRun, WorkflowNodeStatus, WorkflowRestorePoint, WorkflowRestorePointStatus,
-            WorkflowRunDetails, WorkflowRunEvent, WorkflowRunFilter, WorkflowRunRecord,
-            WorkflowRunStatus, WorkflowSummary,
+            FinishWorkflowNode, FinishWorkflowRestorePoint, FinishWorkflowRun,
+            NewWorkflowRestorePoint, NewWorkflowRun, WorkflowDefinition, WorkflowDraft,
+            WorkflowEdge, WorkflowNode, WorkflowNodeRun, WorkflowNodeStatus, WorkflowRestorePoint,
+            WorkflowRestorePointStatus, WorkflowRunDetails, WorkflowRunEvent, WorkflowRunFilter,
+            WorkflowRunRecord, WorkflowRunStatus, WorkflowSummary,
         },
     },
     error::{AppError, AppResult},
@@ -235,6 +235,74 @@ impl WorkflowRepository {
         )
         .await?
         .ok_or_else(|| AppError::Database(sqlx::Error::RowNotFound))
+    }
+
+    pub async fn set_current_node(&self, run_id: Uuid, node_id: Uuid) -> AppResult<()> {
+        let result = sqlx::query(
+            "UPDATE workflow_runs SET current_node_id=? WHERE id=? AND status='running'",
+        )
+        .bind(node_id.to_string())
+        .bind(run_id.to_string())
+        .execute(&self.pool)
+        .await?;
+        ensure_one(result.rows_affected(), "工作流不处于可推进状态")
+    }
+
+    pub async fn record_skipped_node(
+        &self,
+        run_id: Uuid,
+        node_id: Uuid,
+    ) -> AppResult<WorkflowNodeRun> {
+        let mut transaction = self.pool.begin().await?;
+        let next_attempt: i64 = sqlx::query_scalar(
+            "SELECT COALESCE(MAX(attempt),0)+1 FROM workflow_node_runs WHERE run_id=? AND node_id=?",
+        )
+        .bind(run_id.to_string())
+        .bind(node_id.to_string())
+        .fetch_one(&mut *transaction)
+        .await?;
+        sqlx::query(
+            "INSERT INTO workflow_node_runs (run_id,node_id,attempt,status,retryable) VALUES (?,?,?,'skipped',0)",
+        )
+        .bind(run_id.to_string())
+        .bind(node_id.to_string())
+        .bind(next_attempt)
+        .execute(&mut *transaction)
+        .await?;
+        transaction.commit().await?;
+        self.get_node_attempt(
+            run_id,
+            node_id,
+            i32::try_from(next_attempt)
+                .map_err(|_| AppError::Validation("节点尝试次数超出范围".into()))?,
+        )
+        .await?
+        .ok_or_else(|| AppError::Database(sqlx::Error::RowNotFound))
+    }
+
+    pub async fn finish_run(&self, finish: FinishWorkflowRun) -> AppResult<()> {
+        if !matches!(
+            finish.status,
+            WorkflowRunStatus::Paused
+                | WorkflowRunStatus::Succeeded
+                | WorkflowRunStatus::Cancelled
+                | WorkflowRunStatus::Uncertain
+        ) {
+            return Err(AppError::Validation("工作流运行结果状态无效".into()));
+        }
+        let result = sqlx::query(
+            "UPDATE workflow_runs SET status=?,finished_at=?,duration_ms=CASE WHEN started_at IS NULL THEN 0 ELSE MAX(0,?-started_at) END,error_category=?,error_message=?,retryable=? WHERE id=? AND status='running'",
+        )
+        .bind(finish.status.as_str())
+        .bind(finish.finished_at)
+        .bind(finish.finished_at)
+        .bind(finish.error_category)
+        .bind(cap_utf8(finish.error_message, 8 * 1024))
+        .bind(finish.retryable)
+        .bind(finish.run_id.to_string())
+        .execute(&self.pool)
+        .await?;
+        ensure_one(result.rows_affected(), "工作流不处于可结束状态")
     }
 
     pub async fn link_node_execution(

@@ -81,6 +81,15 @@ impl ServerConnector {
             .await?
             .ok_or_else(|| AppError::Validation("服务器不存在".into()))
     }
+
+    pub async fn require_trusted_server(&self, server_id: &str) -> AppResult<ServerProfile> {
+        let profile = self.require_server(server_id).await?;
+        self.servers
+            .get_host_key(server_id)
+            .await?
+            .ok_or_else(|| AppError::Security("尚未信任服务器主机密钥".into()))?;
+        Ok(profile)
+    }
 }
 
 fn credential_redactor(credential: &StoredCredential) -> Redactor {

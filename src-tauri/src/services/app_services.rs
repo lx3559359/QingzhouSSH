@@ -38,6 +38,9 @@ use crate::{
         restore_point_service::RestorePointService,
         server_connector::ServerConnector,
         transfer_service::TransferService,
+        workflow_nodes::{execution::ExecutionNodeAdapter, io::IoNodeAdapter},
+        workflow_registry::WorkflowRunRegistry,
+        workflow_service::WorkflowService,
     },
 };
 
@@ -67,6 +70,7 @@ pub struct AppServices {
     transfers: TransferService,
     workflows: WorkflowRepository,
     restore_points: RestorePointService,
+    workflow_runner: WorkflowService,
 }
 
 impl AppServices {
@@ -93,30 +97,42 @@ impl AppServices {
             workflow_repository.clone(),
             connector.clone(),
         );
+        let executions = ExecutionService::new(
+            root.to_path_buf(),
+            execution_repository.clone(),
+            connector.clone(),
+            registry.clone(),
+        );
+        let logs = LogService::new(
+            root.to_path_buf(),
+            execution_repository.clone(),
+            connector.clone(),
+            registry.clone(),
+        );
+        let transfers = TransferService::new(
+            root.to_path_buf(),
+            execution_repository,
+            connector.clone(),
+            registry,
+        );
+        let workflow_runner = WorkflowService::new(
+            workflow_repository.clone(),
+            ExecutionNodeAdapter::new(executions.clone()),
+            IoNodeAdapter::new(logs.clone(), transfers.clone()),
+            restore_points.clone(),
+            connector,
+            WorkflowRunRegistry::default(),
+        );
         Ok(Self {
             data_root: root.to_path_buf(),
             servers,
             vault,
-            executions: ExecutionService::new(
-                root.to_path_buf(),
-                execution_repository.clone(),
-                connector.clone(),
-                registry.clone(),
-            ),
-            logs: LogService::new(
-                root.to_path_buf(),
-                execution_repository.clone(),
-                connector.clone(),
-                registry.clone(),
-            ),
-            transfers: TransferService::new(
-                root.to_path_buf(),
-                execution_repository,
-                connector,
-                registry,
-            ),
+            executions,
+            logs,
+            transfers,
             workflows: workflow_repository,
             restore_points,
+            workflow_runner,
         })
     }
 
@@ -142,6 +158,10 @@ impl AppServices {
 
     pub fn restore_point_service(&self) -> RestorePointService {
         self.restore_points.clone()
+    }
+
+    pub fn workflow_service(&self) -> WorkflowService {
+        self.workflow_runner.clone()
     }
 
     pub async fn create_server(&self, request: CreateServerRequest) -> AppResult<ServerProfile> {

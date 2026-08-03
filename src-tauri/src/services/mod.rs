@@ -7,3 +7,4 @@ pub mod server_connector;
 pub mod transfer_service;
 pub mod workflow_nodes;
 pub mod workflow_registry;
+pub mod workflow_service;

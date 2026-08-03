@@ -417,6 +417,16 @@ pub struct NewWorkflowRun {
     pub server_id: String,
 }
 
+#[derive(Debug, Clone)]
+pub struct FinishWorkflowRun {
+    pub run_id: Uuid,
+    pub status: WorkflowRunStatus,
+    pub finished_at: i64,
+    pub error_category: Option<String>,
+    pub error_message: Option<String>,
+    pub retryable: bool,
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WorkflowRunFilter {

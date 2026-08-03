@@ -116,11 +116,11 @@
 - Modify: `src-tauri/src/services/mod.rs`
 - Test: `src-tauri/tests/workflow_runner.rs`
 
-- [ ] 写失败测试：start → task → condition → true/false → stop/finish 串行运行；未选分支标 skipped；节点失败进入 paused 且后续保持 pending/skipped。
-- [ ] 写校验失败测试：运行前重新检查服务器存在、主机已信任、系统兼容、危险确认和全部参数。
-- [ ] 实现 WorkflowService、node dispatcher、条件选择和完成判定；每一步状态/事件持久化。
-- [ ] 运行 runner、M2 service 和 repository 回归。
-- [ ] 提交：`feat: run linear conditional workflows`
+- [x] 写失败测试：start → task → condition → true/false → stop/finish 串行运行；未选分支标 skipped；节点失败进入 paused 且后续保持 pending/skipped。
+- [x] 写校验失败测试：运行前重新检查服务器存在、主机已信任、系统兼容、危险确认和全部参数。
+- [x] 实现 WorkflowService、node dispatcher、条件选择和完成判定；每一步状态/事件持久化。
+- [x] 运行 runner、M2 service 和 repository 回归。
+- [x] 提交：`feat: run linear conditional workflows`
 
 ## Task 8：取消、失败节点重试与崩溃恢复
 
