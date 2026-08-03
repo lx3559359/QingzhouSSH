@@ -28,10 +28,10 @@
 
 ## Task 5：集成 Tauri 签名下载与 SHA-256
 
-- [ ] 先用可注入下载器测试签名失败、哈希失败、大小不符、成功原子完成和失败清理。
-- [ ] 注册 `tauri-plugin-updater`，Rust 侧调用 `Update::download`，在其签名验证后再次核对 SHA-256。
-- [ ] 待安装对象只保存在 Rust 状态；安装要求显式确认。
-- [ ] 提交：`feat: verify and stage signed updates`
+- [x] 先用可注入下载器测试签名失败、哈希失败、大小不符、成功原子完成和失败清理。
+- [x] 注册 `tauri-plugin-updater`，Rust 侧调用 `Update::download`，在其签名验证后再次核对 SHA-256。
+- [x] 待安装对象只保存在 Rust 状态；安装要求显式确认。
+- [x] 提交：`feat: verify and stage signed updates`
 
 ## Task 6：暴露强类型更新命令
 
