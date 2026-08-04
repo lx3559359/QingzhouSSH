@@ -68,7 +68,7 @@ try {
     throw 'GitHub updater URL is not pinned to the public release'
   }
   $encodedModelScopePath = [Uri]::EscapeDataString("releases/v$version/$publicInstallerName")
-  if ($modelscopePlatform.url -ne "https://modelscope.cn/api/v1/studios/lx3559359/QingzhouSSH/repo?Revision=master&FilePath=$encodedModelScopePath") {
+  if ($modelscopePlatform.url -ne "https://modelscope.cn/api/v1/models/lx3559359/QingzhouSSH/repo?Revision=master&FilePath=$encodedModelScopePath") {
     throw 'ModelScope updater URL is not pinned to the mirrored release'
   }
   foreach ($platform in @($githubPlatform, $modelscopePlatform)) {

@@ -44,7 +44,7 @@
 
 ## 在线更新与发布签名
 
-- 更新清单只允许固定的 `lx3559359/QingzhouSSH` GitHub Release 或配置的同名 ModelScope Studio 项目。下载 URL 必须为无凭据、无自定义端口的 HTTPS，并保持在固定发布路径内。
+- 更新清单只允许固定的 `lx3559359/QingzhouSSH` GitHub Release 或同名 ModelScope 模型仓库。ModelScope Studio 不提供公开单文件下载 API，因此不进入客户端更新信任链。下载 URL 必须为无凭据、无自定义端口的 HTTPS，并保持在固定发布路径内。
 - GitHub 是主源。仅网络失败、404 和服务端错误允许尝试 ModelScope；无效清单、未知字段、非法 URL 或其他安全错误不回退。
 - 清单使用严格字段解析，版本必须为 SemVer，平台固定为 `windows-x86_64`，包大小、SHA-256、签名和构建 ID 均有限制。
 - 下载先进入 `<数据根目录>\updates` 的临时路径，完成后验证大小与 SHA-256，再由 Tauri updater 使用编译时公钥验证签名。状态和文件路径只以受控相对路径持久化，前端不会获得下载 URL、签名或本地绝对路径。

@@ -6,6 +6,12 @@ on:
     tags: ['v*']
   pull_request:
   workflow_dispatch:
+    inputs:
+      prepare_modelscope_mirror:
+        description: Create and verify the public ModelScope release mirror
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -62,6 +68,33 @@ jobs:
               throw "$name contains leading or trailing whitespace"
             }
           }
+
+      - name: Prepare public ModelScope release mirror
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.prepare_modelscope_mirror }}
+        shell: pwsh
+        env:
+          MODELSCOPE_API_TOKEN: ${{ secrets.MODELSCOPE_API_TOKEN }}
+          QINGZHOU_MODELSCOPE_NAMESPACE: ${{ vars.QINGZHOU_MODELSCOPE_NAMESPACE }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
+          foreach ($name in @('MODELSCOPE_API_TOKEN', 'QINGZHOU_MODELSCOPE_NAMESPACE')) {
+            $value = [Environment]::GetEnvironmentVariable($name)
+            if ([string]::IsNullOrWhiteSpace($value)) { throw "$name is not configured" }
+            if ($value[0] -eq [char]0xFEFF) { throw "$name begins with a UTF-8 BOM" }
+            if ($value -ne $value.Trim()) { throw "$name contains leading or trailing whitespace" }
+          }
+          $pythonTarget = Join-Path $env:GITHUB_WORKSPACE '.local\python-modelscope-bootstrap'
+          python -m pip install --disable-pip-version-check --target $pythonTarget 'modelscope-hub==0.1.8'
+          $env:PYTHONPATH = $pythonTarget
+          python .\scripts\modelscope-release.py prepare --repo-id "$env:QINGZHOU_MODELSCOPE_NAMESPACE/QingzhouSSH"
+          $readback = Join-Path $env:GITHUB_WORKSPACE '.local\modelscope-bootstrap-readback.md'
+          $url = "https://modelscope.cn/api/v1/models/$env:QINGZHOU_MODELSCOPE_NAMESPACE/QingzhouSSH/repo?Revision=master&FilePath=releases%2FREADME.md"
+          Invoke-WebRequest -Uri $url -OutFile $readback -MaximumRedirection 10
+          if ((Get-FileHash -LiteralPath $readback -Algorithm SHA256).Hash -ne (Get-FileHash -LiteralPath .\README.md -Algorithm SHA256).Hash) {
+            throw 'Public ModelScope model-repository readback differs from README.md'
+          }
+          Remove-Item -LiteralPath $readback -Force
 
       - name: Install pnpm 10
         uses: pnpm/action-setup@v6

@@ -71,7 +71,7 @@ fn release(bytes: &[u8]) -> UpdateRelease {
         notes: "镜像安全更新".into(),
         published_at: Some("2026-08-04T10:00:00Z".into()),
         platform: "windows-x86_64".into(),
-        download_url: "https://modelscope.cn/api/v1/studios/demo/QingzhouSSH/repo?Revision=master&FilePath=releases%2Fv0.2.0%2Fupdate.exe".into(),
+        download_url: "https://modelscope.cn/api/v1/models/demo/QingzhouSSH/repo?Revision=master&FilePath=releases%2Fv0.2.0%2Fupdate.exe".into(),
         signature: "secret-signature-must-not-cross-ipc".into(),
         sha256: format!("{:x}", Sha256::digest(bytes)),
         size: bytes.len() as u64,

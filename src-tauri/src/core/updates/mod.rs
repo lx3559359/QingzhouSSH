@@ -49,7 +49,7 @@ impl TrustedSourcePolicy {
                 self.github_owner
             ),
             UpdateSource::Modelscope => format!(
-                "https://modelscope.cn/api/v1/studios/{}/{PROJECT_NAME}/repo?Revision=master&FilePath=releases%2Flatest.json",
+                "https://modelscope.cn/api/v1/models/{}/{PROJECT_NAME}/repo?Revision=master&FilePath=releases%2Flatest.json",
                 self.modelscope_namespace
             ),
         }
@@ -89,7 +89,7 @@ impl TrustedSourcePolicy {
     fn validate_modelscope_url(&self, url: &Url) -> Result<(), SourceCheckError> {
         let host_ok = matches!(url.host_str(), Some("modelscope.cn" | "www.modelscope.cn"));
         let expected_path = format!(
-            "/api/v1/studios/{}/{PROJECT_NAME}/repo",
+            "/api/v1/models/{}/{PROJECT_NAME}/repo",
             self.modelscope_namespace
         );
         if !host_ok || url.path() != expected_path {

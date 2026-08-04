@@ -23,6 +23,7 @@ foreach ($requiredText in @(
   'scripts\smoke-release.ps1',
   'scripts\modelscope-release.py upload',
   'scripts\modelscope-release.py download',
+  'scripts\modelscope-release.py prepare',
   'scripts\compare-release-sources.ps1',
   'TAURI_SIGNING_PRIVATE_KEY',
   'TAURI_SIGNING_PRIVATE_KEY_PASSWORD',
@@ -56,6 +57,9 @@ foreach ($requiredCredential in @(
 )) {
   if (-not $preflightBlock.Contains($requiredCredential)) { throw "Release preflight is missing: $requiredCredential" }
 }
+if (-not $workflow.Contains('prepare_modelscope_mirror')) {
+  throw 'Manual ModelScope mirror bootstrap input is missing'
+}
 foreach ($requiredValidation in @('[char]0xFEFF', 'leading or trailing whitespace')) {
   if (-not $preflightBlock.Contains($requiredValidation)) { throw "Release preflight format validation is missing: $requiredValidation" }
 }
@@ -83,10 +87,12 @@ if (-not $python) { throw 'Python is required to validate the ModelScope release
 & $python.Source -B -c "import ast, pathlib; ast.parse(pathlib.Path(r'$modelscopePath').read_text(encoding='utf-8'))"
 if ($LASTEXITCODE -ne 0) { throw 'ModelScope release helper is not valid Python' }
 $modelscope = Get-Content -Raw -Encoding utf8 $modelscopePath
-foreach ($requiredText in @('from modelscope_hub import HubApi', 'repo_type = "studio"', 'releases/latest.json', 'upload_file', 'subprocess.run', '"git"', '"clone"', '"--depth"')) {
+foreach ($requiredText in @('from modelscope_hub import HubApi', 'repo_type = "model"', 'releases/latest.json', 'upload_file', 'repo_exists', 'create_repo', 'urlopen', '/api/v1/models/')) {
   if (-not $modelscope.Contains($requiredText)) { throw "ModelScope helper is missing: $requiredText" }
 }
-if ($modelscope.Contains('download_file')) { throw 'Studio readback must not use the unsupported ModelScope download_file API' }
+if ($modelscope.Contains('/api/v1/studios/') -or $modelscope.Contains('git clone')) {
+  throw 'Updater readback must exercise the public single-file model repository API'
+}
 
 $testRoot = Join-Path $projectRoot '.local\release-pipeline-test'
 $inputRoot = Join-Path $testRoot 'input'

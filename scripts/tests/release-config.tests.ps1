@@ -17,6 +17,7 @@ if ($package.version -notmatch '^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$') {
 if ($release.projectName -ne 'QingzhouSSH') { throw 'Unexpected public project name' }
 if ($release.github.repository -ne 'lx3559359/QingzhouSSH') { throw 'Unexpected GitHub repository' }
 if ($release.modelscope.repository -ne 'QingzhouSSH') { throw 'Unexpected ModelScope repository' }
+if ($release.modelscope.repositoryType -ne 'model') { throw 'ModelScope release mirror must support public single-file downloads' }
 if ($release.modelscope.namespace -ne 'lx3559359') { throw 'Unexpected ModelScope namespace' }
 if ($release.modelscope.namespaceEnvironment -ne 'QINGZHOU_MODELSCOPE_NAMESPACE') {
   throw 'ModelScope namespace must be supplied by a build environment variable'

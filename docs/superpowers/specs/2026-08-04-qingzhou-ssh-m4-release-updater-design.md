@@ -69,7 +69,7 @@ Tauri Minisign 公钥编译进应用，私钥不得进入 Git、日志或发布�
 
 ## 8. 发布自动化与平台项目
 
-GitHub 公共仓库名为 `QingzhouSSH`，保存源码、Issue、Actions 和正式 Releases。ModelScope 公共项目同名，作为源码说明和国内发布物镜像。ModelScope 使用官方 `modelscope-hub`/`ms-hub` API 创建和上传，所有缓存与配置通过 `MODELSCOPE_HOME`、`MODELSCOPE_CACHE` 指向项目目录。
+GitHub 公共仓库名为 `QingzhouSSH`，保存源码、Issue、Actions 和正式 Releases。ModelScope 使用同名公开模型仓库保存国内发布物镜像，因为该仓库类型提供客户端所需的公开单文件下载 API；同名 Studio 保留为项目展示页，不进入更新信任链。ModelScope 使用官方 `modelscope-hub`/`ms-hub` API 创建和上传，所有缓存与配置通过 `MODELSCOPE_HOME`、`MODELSCOPE_CACHE` 指向项目目录。
 
 GitHub Actions 在 Windows 运行器上执行全量门禁、签名构建、安装/启动/卸载冒烟、便携启动和发布物生成；随后把同一目录上传两源并做下载回读。ModelScope token 和 Tauri 私钥只存在于 Actions secrets。
 

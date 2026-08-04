@@ -32,7 +32,7 @@ NSIS 安装器使用 `currentUser`，只安装到当前 Windows 用户，不请�
 
 ## Online update（在线更新）
 
-- GitHub Releases 为主源；[`lx3559359/QingzhouSSH`](https://modelscope.cn/studios/lx3559359/QingzhouSSH) ModelScope Studio 为国内镜像。
+- GitHub Releases 为主源；[`lx3559359/QingzhouSSH`](https://modelscope.cn/models/lx3559359/QingzhouSSH) ModelScope 模型仓库为国内发布镜像，提供公开单文件下载 API；同名 [Studio](https://modelscope.cn/studios/lx3559359/QingzhouSSH) 仅作为项目展示页。
 - 只有网络失败、404 或服务端故障允许从 GitHub 回退 ModelScope。无效 JSON、陌生字段、越权 URL 或其他安全错误会直接阻断。
 - 两源发布同一更新包字节、签名、SHA-256、大小和构建 ID；清单 URL 因源不同而不同。
 - **Tauri updater signature** 使用编译时公钥验证发布者；随后再次验证 SHA-256 和字节数。任一项不一致都会清除临时文件并拒绝安装。

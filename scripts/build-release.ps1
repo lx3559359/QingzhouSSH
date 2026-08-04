@@ -166,7 +166,7 @@ try {
   $updaterName = $publicInstallerName
   $githubUrl = "https://github.com/$($releaseConfig.github.repository)/releases/download/v$version/$([Uri]::EscapeDataString($updaterName))"
   $modelscopeFile = [Uri]::EscapeDataString("releases/v$version/$updaterName")
-  $modelscopeUrl = "https://modelscope.cn/api/v1/studios/$ModelScopeNamespace/$($releaseConfig.modelscope.repository)/repo?Revision=master&FilePath=$modelscopeFile"
+  $modelscopeUrl = "https://modelscope.cn/api/v1/models/$ModelScopeNamespace/$($releaseConfig.modelscope.repository)/repo?Revision=master&FilePath=$modelscopeFile"
   function New-Manifest([string]$Url) {
     return [ordered]@{
       version = $version

@@ -56,7 +56,11 @@ fn parses_only_https_urls_from_the_fixed_github_repository() {
 #[test]
 fn accepts_only_the_declared_modelscope_release_path() {
     let policy = TrustedSourcePolicy::new("lx3559359", "domestic-user").unwrap();
-    let url = "https://modelscope.cn/api/v1/studios/domestic-user/QingzhouSSH/repo?Revision=master&FilePath=releases%2Fv0.2.0%2FQingzhouSSH_0.2.0_x64-setup.exe";
+    assert_eq!(
+        policy.manifest_endpoint(UpdateSource::Modelscope),
+        "https://modelscope.cn/api/v1/models/domestic-user/QingzhouSSH/repo?Revision=master&FilePath=releases%2Flatest.json"
+    );
+    let url = "https://modelscope.cn/api/v1/models/domestic-user/QingzhouSSH/repo?Revision=master&FilePath=releases%2Fv0.2.0%2FQingzhouSSH_0.2.0_x64-setup.exe";
     let decision = parse_manifest(
         &policy,
         UpdateSource::Modelscope,
@@ -66,7 +70,7 @@ fn accepts_only_the_declared_modelscope_release_path() {
     .unwrap();
     assert!(matches!(decision, ManifestDecision::Available(_)));
 
-    let escaped = "https://modelscope.cn/api/v1/studios/domestic-user/QingzhouSSH/repo?Revision=master&FilePath=..%2Fprivate.key";
+    let escaped = "https://modelscope.cn/api/v1/models/domestic-user/QingzhouSSH/repo?Revision=master&FilePath=..%2Fprivate.key";
     assert!(parse_manifest(
         &policy,
         UpdateSource::Modelscope,
@@ -144,7 +148,7 @@ impl ManifestTransport for FakeTransport {
 
 #[tokio::test]
 async fn injectable_transport_checks_github_then_modelscope() {
-    let modelscope_url = "https://modelscope.cn/api/v1/studios/domestic-user/QingzhouSSH/repo?Revision=master&FilePath=releases%2Fv0.2.0%2Fupdate.exe";
+    let modelscope_url = "https://modelscope.cn/api/v1/models/domestic-user/QingzhouSSH/repo?Revision=master&FilePath=releases%2Fv0.2.0%2Fupdate.exe";
     let transport = FakeTransport {
         responses: Mutex::new(VecDeque::from([
             Err(SourceCheckError::new(

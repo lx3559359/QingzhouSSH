@@ -5,10 +5,10 @@ import json
 import os
 import re
 import shutil
-import subprocess
-import tempfile
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlencode
+from urllib.request import urlopen
 
 def project_root() -> Path:
     configured = os.environ.get("GITHUB_WORKSPACE")
@@ -36,8 +36,57 @@ def release_contract(release_dir: Path) -> tuple[dict[str, object], list[str]]:
     return metadata, names
 
 
+def validate_repo_id(repo_id: str) -> None:
+    if re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repo_id) is None:
+        raise ValueError("invalid ModelScope repository identifier")
+
+
+def public_file_url(repo_id: str, file_path: str) -> str:
+    validate_repo_id(repo_id)
+    if (
+        not file_path.startswith("releases/")
+        or ".." in file_path
+        or "\\" in file_path
+        or file_path.startswith("/")
+    ):
+        raise ValueError("ModelScope file must remain inside releases/")
+    query = urlencode({"Revision": "master", "FilePath": file_path})
+    return f"https://modelscope.cn/api/v1/models/{repo_id}/repo?{query}"
+
+
+def fetch_public_file(url: str, destination: Path) -> None:
+    partial = destination.with_name(destination.name + ".partial")
+    try:
+        with urlopen(url, timeout=60) as response, partial.open("wb") as output:
+            shutil.copyfileobj(response, output)
+        partial.replace(destination)
+    finally:
+        partial.unlink(missing_ok=True)
+
+
+def ensure_repository(api: Any, repo_id: str) -> None:
+    validate_repo_id(repo_id)
+    repo_type = "model"
+    if not api.repo_exists(repo_id, repo_type):
+        api.create_repo(
+            repo_id,
+            repo_type,
+            visibility="public",
+            license="Apache-2.0",
+            chinese_name="轻舟 SSH 发布镜像",
+            description="QingzhouSSH Windows 安装包、便携包与在线更新清单",
+        )
+
+
+def prepare(api: Any, repo_id: str, readme_path: Path) -> None:
+    ensure_repository(api, repo_id)
+    api.upload_file(repo_id, "model", str(readme_path), "releases/README.md")
+    print(json.dumps({"source": "modelscope", "prepared": True}))
+
+
 def upload(api: Any, repo_id: str, release_dir: Path) -> None:
-    repo_type = "studio"
+    ensure_repository(api, repo_id)
+    repo_type = "model"
     metadata, names = release_contract(release_dir)
     version = str(metadata["version"])
     for name in names:
@@ -57,56 +106,43 @@ def download(
     release_dir: Path,
     output_dir: Path,
     *,
-    runner: Any = subprocess.run,
+    fetcher: Any = fetch_public_file,
 ) -> None:
-    if re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repo_id) is None:
-        raise ValueError("invalid ModelScope Studio repository identifier")
+    validate_repo_id(repo_id)
     metadata, names = release_contract(release_dir)
     version = str(metadata["version"])
     output_dir.mkdir(parents=True, exist_ok=True)
-    clone_dir = Path(tempfile.mkdtemp(prefix="modelscope-readback-", dir=output_dir.parent))
-    try:
-        runner(
-            [
-                "git",
-                "-c",
-                "core.autocrlf=false",
-                "clone",
-                "--depth",
-                "1",
-                "--branch",
-                "master",
-                "--single-branch",
-                f"https://modelscope.cn/studios/{repo_id}.git",
-                str(clone_dir),
-            ],
-            check=True,
+    for name in names:
+        fetcher(
+            public_file_url(repo_id, f"releases/v{version}/{name}"),
+            output_dir / name,
         )
-        remote_release = clone_dir / "releases" / f"v{version}"
-        for name in names:
-            shutil.copyfile(remote_release / name, output_dir / name)
-        shutil.copyfile(clone_dir / "releases" / "latest.json", output_dir / "latest.json")
-    finally:
-        shutil.rmtree(clone_dir, ignore_errors=True)
+    fetcher(public_file_url(repo_id, "releases/latest.json"), output_dir / "latest.json")
     print(json.dumps({"source": "modelscope", "version": version, "downloaded": len(names) + 1}))
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Publish or read back a QingzhouSSH ModelScope release")
-    parser.add_argument("mode", choices=("upload", "download"))
+    parser.add_argument("mode", choices=("prepare", "upload", "download"))
     parser.add_argument("--repo-id", required=True)
-    parser.add_argument("--release-directory", required=True)
+    parser.add_argument("--release-directory")
     parser.add_argument("--output-directory")
     args = parser.parse_args()
 
-    release_dir = project_path(args.release_directory, must_exist=True)
     token = os.environ.get("MODELSCOPE_API_TOKEN")
-    if args.mode == "upload" and not token:
-        raise RuntimeError("MODELSCOPE_API_TOKEN is required for upload")
-    if args.mode == "upload":
+    if args.mode in ("prepare", "upload") and not token:
+        raise RuntimeError("MODELSCOPE_API_TOKEN is required for publication")
+    if args.mode in ("prepare", "upload"):
         from modelscope_hub import HubApi
 
         api = HubApi(token=token)
+        if args.mode == "prepare":
+            prepare(api, args.repo_id, project_root() / "README.md")
+            return
+    if not args.release_directory:
+        raise ValueError("--release-directory is required for upload and download")
+    release_dir = project_path(args.release_directory, must_exist=True)
+    if args.mode == "upload":
         upload(api, args.repo_id, release_dir)
         return
     if not args.output_directory:
