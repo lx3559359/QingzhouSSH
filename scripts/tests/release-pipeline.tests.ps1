@@ -51,6 +51,9 @@ foreach ($requiredCredential in @(
 )) {
   if (-not $preflightBlock.Contains($requiredCredential)) { throw "Release preflight is missing: $requiredCredential" }
 }
+foreach ($requiredValidation in @('[char]0xFEFF', 'leading or trailing whitespace')) {
+  if (-not $preflightBlock.Contains($requiredValidation)) { throw "Release preflight format validation is missing: $requiredValidation" }
+}
 if ($workflow -match 'shell:\s*powershell') { throw 'Release workflow must use PowerShell 7 native error propagation' }
 if ([regex]::Matches($workflow, '\$PSNativeCommandUseErrorActionPreference\s*=\s*\$true').Count -lt 10) {
   throw 'Every command-bearing release step must fail on a non-zero native exit code'

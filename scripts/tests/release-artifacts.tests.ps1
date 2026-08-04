@@ -4,11 +4,13 @@ $projectRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 $testRoot = Join-Path $projectRoot '.local\release-artifacts-test'
 $inputRoot = Join-Path $testRoot 'input'
 $outputRoot = Join-Path $testRoot 'output'
+$version = [string](Get-Content -Raw -Encoding utf8 (Join-Path $projectRoot 'package.json') | ConvertFrom-Json).version
 New-Item -ItemType Directory -Force -Path $inputRoot | Out-Null
 
-$installer = Join-Path $inputRoot 'Qingzhou SSH_0.1.0_x64-setup.exe'
+$installerName = "Qingzhou SSH_${version}_x64-setup.exe"
+$installer = Join-Path $inputRoot $installerName
 $signature = "$installer.sig"
-$portable = Join-Path $inputRoot 'QingzhouSSH-v0.1.0-windows-x86_64-portable.zip'
+$portable = Join-Path $inputRoot "QingzhouSSH-v${version}-windows-x86_64-portable.zip"
 $fixturePublicKey = 'RWQf6LRCGA9i53mlYecO4IzT51TGPpvWucNSCh1CBM0QTaLn73Y7GFO3'
 $fixtureSignature = "untrusted comment: signature from minisign secret key`nRUQf6LRCGA9i559r3g7V1qNyJDApGip8MfqcadIgT9CuhV3EMhHoN1mGTkUidF/z7SrlQgXdy8ofjb7bNJJylDOocrCo8KLzZwo=`ntrusted comment: timestamp:1633700835`tfile:test`tprehashed`nwLMDjy9FLAuxZ3q4NlEvkgtyhrr0gtTu6KC4KBJdITbbOeAi1zBIYo0v4iTgt8jJpIidRJnp94ABQkJAgAooBQ=="
 [IO.File]::WriteAllBytes($installer, [Text.UTF8Encoding]::new($false).GetBytes('test'))
@@ -56,12 +58,14 @@ try {
   $expectedUpdaterHash = (Get-FileHash -LiteralPath $installer -Algorithm SHA256).Hash.ToLowerInvariant()
   $expectedSignature = (Get-Content -Raw -Encoding utf8 $signature).Trim()
 
-  if ($github.version -ne '0.1.0' -or $modelscope.version -ne '0.1.0') { throw 'Manifest version is not synchronized' }
+  if ($github.version -ne $version -or $modelscope.version -ne $version) { throw 'Manifest version is not synchronized' }
   if ($github.pub_date -ne '2026-08-04T10:00:00Z') { throw 'Published time was not preserved' }
-  if ($githubPlatform.url -ne 'https://github.com/lx3559359/QingzhouSSH/releases/download/v0.1.0/Qingzhou%20SSH_0.1.0_x64-setup.exe') {
+  $encodedInstallerName = [Uri]::EscapeDataString($installerName)
+  if ($githubPlatform.url -ne "https://github.com/lx3559359/QingzhouSSH/releases/download/v$version/$encodedInstallerName") {
     throw 'GitHub updater URL is not pinned to the public release'
   }
-  if ($modelscopePlatform.url -ne 'https://modelscope.cn/api/v1/studios/lx3559359/QingzhouSSH/repo?Revision=master&FilePath=releases%2Fv0.1.0%2FQingzhou%20SSH_0.1.0_x64-setup.exe') {
+  $encodedModelScopePath = [Uri]::EscapeDataString("releases/v$version/$installerName")
+  if ($modelscopePlatform.url -ne "https://modelscope.cn/api/v1/studios/lx3559359/QingzhouSSH/repo?Revision=master&FilePath=$encodedModelScopePath") {
     throw 'ModelScope updater URL is not pinned to the mirrored release'
   }
   foreach ($platform in @($githubPlatform, $modelscopePlatform)) {
@@ -69,7 +73,7 @@ try {
     if ($platform.sha256 -ne $expectedUpdaterHash) { throw 'Updater SHA-256 is incorrect' }
     if ([int64]$platform.size -ne (Get-Item -LiteralPath $installer).Length) { throw 'Updater size is incorrect' }
   }
-  if ($githubPlatform.build_id -ne $modelscopePlatform.build_id -or $githubPlatform.build_id -notmatch '^build-0\.1\.0-[0-9a-f]{12}$') {
+  if ($githubPlatform.build_id -ne $modelscopePlatform.build_id -or $githubPlatform.build_id -notmatch "^build-$([regex]::Escape($version))-[0-9a-f]{12}$") {
     throw 'Dual-source build identifiers differ or are not reproducible'
   }
 

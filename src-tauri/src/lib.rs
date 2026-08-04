@@ -15,8 +15,16 @@ use services::update_service::UpdateManager;
 use state::AppState;
 use tauri::Manager;
 
+fn install_tls_crypto_provider() {
+    if rustls::crypto::CryptoProvider::get_default().is_none() {
+        let _ = rustls::crypto::ring::default_provider().install_default();
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    install_tls_crypto_provider();
+
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
@@ -85,6 +93,18 @@ pub fn run() {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn installs_ring_provider_before_reqwest_client_creation() {
+        super::install_tls_crypto_provider();
+
+        let client = std::panic::catch_unwind(|| reqwest::Client::builder().build());
+        assert!(client.is_ok(), "reqwest client construction panicked");
+        assert!(
+            client.unwrap().is_ok(),
+            "reqwest client construction failed"
+        );
+    }
+
     #[test]
     fn package_identity_is_stable() {
         assert_eq!(env!("CARGO_PKG_NAME"), "qingzhou-ssh");

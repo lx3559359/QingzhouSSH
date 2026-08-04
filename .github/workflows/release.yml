@@ -51,8 +51,15 @@ jobs:
             'MODELSCOPE_API_TOKEN',
             'QINGZHOU_MODELSCOPE_NAMESPACE'
           )) {
-            if ([string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($name))) {
+            $value = [Environment]::GetEnvironmentVariable($name)
+            if ([string]::IsNullOrWhiteSpace($value)) {
               throw "$name is not configured for tagged releases"
+            }
+            if ($value[0] -eq [char]0xFEFF) {
+              throw "$name begins with a UTF-8 BOM"
+            }
+            if ($value -ne $value.Trim()) {
+              throw "$name contains leading or trailing whitespace"
             }
           }
 
