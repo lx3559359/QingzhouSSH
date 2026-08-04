@@ -42,6 +42,11 @@ $signedBuildStart = $workflow.IndexOf('name: Build signed NSIS bundle once', [St
 if ($preflightStart -lt 0 -or $signedBuildStart -lt 0 -or $preflightStart -gt $signedBuildStart) {
   throw 'Tagged releases must validate every credential before signed build or publication'
 }
+$artifactUploadStart = $workflow.IndexOf('name: Upload workflow artifact', [StringComparison]::Ordinal)
+$releaseSmokeStart = $workflow.IndexOf('name: Install, update and portable smoke', [StringComparison]::Ordinal)
+if ($artifactUploadStart -lt 0 -or $releaseSmokeStart -lt 0 -or $artifactUploadStart -gt $releaseSmokeStart) {
+  throw 'Assembled signed artifacts must be retained before release smoke begins'
+}
 $preflightBlock = $workflow.Substring($preflightStart, $signedBuildStart - $preflightStart)
 foreach ($requiredCredential in @(
   'secrets.TAURI_SIGNING_PRIVATE_KEY',

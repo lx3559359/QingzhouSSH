@@ -167,14 +167,6 @@ jobs:
           "QINGZHOU_VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           "QINGZHOU_RELEASE_DIR=$releaseDir" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
-      - name: Install, update and portable smoke
-        if: ${{ startsWith(github.ref, 'refs/tags/v') }}
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $PSNativeCommandUseErrorActionPreference = $true
-          & .\scripts\smoke-release.ps1 -ReleaseDirectory $env:QINGZHOU_RELEASE_DIR -AllowLocalMachineMutation
-
       - name: Upload workflow artifact
         if: ${{ startsWith(github.ref, 'refs/tags/v') }}
         uses: actions/upload-artifact@v7
@@ -182,6 +174,14 @@ jobs:
           name: QingzhouSSH-v${{ github.ref_name }}-verified
           path: ${{ env.QINGZHOU_RELEASE_DIR }}
           if-no-files-found: error
+
+      - name: Install, update and portable smoke
+        if: ${{ startsWith(github.ref, 'refs/tags/v') }}
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
+          & .\scripts\smoke-release.ps1 -ReleaseDirectory $env:QINGZHOU_RELEASE_DIR -AllowLocalMachineMutation
 
       - name: Publish GitHub Release
         if: ${{ startsWith(github.ref, 'refs/tags/v') }}

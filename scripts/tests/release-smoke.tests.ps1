@@ -19,7 +19,7 @@ try {
   [IO.File]::WriteAllBytes((Join-Path $testRoot 'uninstall.exe'), [byte[]](1))
   $expected = Join-Path $nestedRoot 'QingzhouSSH.exe'
   [IO.File]::WriteAllBytes($expected, [byte[]](2))
-  $actual = Find-InstalledExecutable $testRoot
+  $actual = Find-InstalledExecutable ('"' + $testRoot + '"')
   if ($null -eq $actual -or $actual.FullName -ne $expected) {
     throw 'Installed executable discovery did not ignore the uninstaller and find the nested application'
   }
