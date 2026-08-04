@@ -7,8 +7,10 @@ $outputRoot = Join-Path $testRoot 'output'
 $version = [string](Get-Content -Raw -Encoding utf8 (Join-Path $projectRoot 'package.json') | ConvertFrom-Json).version
 New-Item -ItemType Directory -Force -Path $inputRoot | Out-Null
 
-$installerName = "Qingzhou SSH_${version}_x64-setup.exe"
-$installer = Join-Path $inputRoot $installerName
+$inputInstallerName = "轻舟 SSH_${version}_x64-setup.exe"
+$publicInstallerName = "QingzhouSSH_${version}_x64-setup.exe"
+$publicSignatureName = "$publicInstallerName.sig"
+$installer = Join-Path $inputRoot $inputInstallerName
 $signature = "$installer.sig"
 $portable = Join-Path $inputRoot "QingzhouSSH-v${version}-windows-x86_64-portable.zip"
 $fixturePublicKey = 'RWQf6LRCGA9i53mlYecO4IzT51TGPpvWucNSCh1CBM0QTaLn73Y7GFO3'
@@ -49,6 +51,7 @@ try {
   $sbomPath = Join-Path $outputRoot 'SBOM.spdx.json'
   foreach ($required in @($githubManifestPath, $modelscopeManifestPath, $metadataPath, $sumsPath, $sbomPath)) {
     if (-not (Test-Path -LiteralPath $required -PathType Leaf)) { throw "Missing release file: $required" }
+    if ([IO.File]::ReadAllBytes($required) -contains 13) { throw "Release text files must use reproducible LF line endings: $required" }
   }
 
   $github = Get-Content -Raw -Encoding utf8 $githubManifestPath | ConvertFrom-Json
@@ -60,11 +63,11 @@ try {
 
   if ($github.version -ne $version -or $modelscope.version -ne $version) { throw 'Manifest version is not synchronized' }
   if ($github.pub_date -ne '2026-08-04T10:00:00Z') { throw 'Published time was not preserved' }
-  $encodedInstallerName = [Uri]::EscapeDataString($installerName)
+  $encodedInstallerName = [Uri]::EscapeDataString($publicInstallerName)
   if ($githubPlatform.url -ne "https://github.com/lx3559359/QingzhouSSH/releases/download/v$version/$encodedInstallerName") {
     throw 'GitHub updater URL is not pinned to the public release'
   }
-  $encodedModelScopePath = [Uri]::EscapeDataString("releases/v$version/$installerName")
+  $encodedModelScopePath = [Uri]::EscapeDataString("releases/v$version/$publicInstallerName")
   if ($modelscopePlatform.url -ne "https://modelscope.cn/api/v1/studios/lx3559359/QingzhouSSH/repo?Revision=master&FilePath=$encodedModelScopePath") {
     throw 'ModelScope updater URL is not pinned to the mirrored release'
   }
@@ -78,10 +81,13 @@ try {
   }
 
   $metadata = Get-Content -Raw -Encoding utf8 $metadataPath | ConvertFrom-Json
+  if ($metadata.updaterFile -ne $publicInstallerName -or $metadata.signatureFile -ne $publicSignatureName) {
+    throw 'Public installer and signature names must be stable ASCII names'
+  }
   $payloadNames = @($metadata.files | ForEach-Object name)
   foreach ($requiredName in @(
-    (Split-Path $installer -Leaf),
-    (Split-Path $signature -Leaf),
+    $publicInstallerName,
+    $publicSignatureName,
     (Split-Path $portable -Leaf)
   )) {
     if ($payloadNames -notcontains $requiredName) { throw "Release metadata is missing $requiredName" }
@@ -122,7 +128,7 @@ try {
     }
   }
 
-  $updaterOutput = Join-Path $outputRoot (Split-Path $installer -Leaf)
+  $updaterOutput = Join-Path $outputRoot $publicInstallerName
   [IO.File]::WriteAllBytes($updaterOutput, [byte[]](9, 9, 9))
   $tamperRejected = $false
   try {

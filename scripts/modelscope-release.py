@@ -3,11 +3,12 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import shutil
+import subprocess
+import tempfile
 from pathlib import Path
-
-from modelscope_hub import HubApi
-
+from typing import Any
 
 def project_root() -> Path:
     configured = os.environ.get("GITHUB_WORKSPACE")
@@ -35,7 +36,7 @@ def release_contract(release_dir: Path) -> tuple[dict[str, object], list[str]]:
     return metadata, names
 
 
-def upload(api: HubApi, repo_id: str, release_dir: Path) -> None:
+def upload(api: Any, repo_id: str, release_dir: Path) -> None:
     repo_type = "studio"
     metadata, names = release_contract(release_dir)
     version = str(metadata["version"])
@@ -51,17 +52,42 @@ def upload(api: HubApi, repo_id: str, release_dir: Path) -> None:
     print(json.dumps({"source": "modelscope", "version": version, "uploaded": len(names) + 1}))
 
 
-def download(api: HubApi, repo_id: str, release_dir: Path, output_dir: Path) -> None:
-    repo_type = "studio"
+def download(
+    repo_id: str,
+    release_dir: Path,
+    output_dir: Path,
+    *,
+    runner: Any = subprocess.run,
+) -> None:
+    if re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repo_id) is None:
+        raise ValueError("invalid ModelScope Studio repository identifier")
     metadata, names = release_contract(release_dir)
     version = str(metadata["version"])
     output_dir.mkdir(parents=True, exist_ok=True)
-    for name in names:
-        remote_path = f"releases/v{version}/{name}"
-        downloaded = Path(api.download_file(repo_id, repo_type, remote_path, revision="master"))
-        shutil.copyfile(downloaded, output_dir / name)
-    latest = Path(api.download_file(repo_id, repo_type, "releases/latest.json", revision="master"))
-    shutil.copyfile(latest, output_dir / "latest.json")
+    clone_dir = Path(tempfile.mkdtemp(prefix="modelscope-readback-", dir=output_dir.parent))
+    try:
+        runner(
+            [
+                "git",
+                "-c",
+                "core.autocrlf=false",
+                "clone",
+                "--depth",
+                "1",
+                "--branch",
+                "master",
+                "--single-branch",
+                f"https://modelscope.cn/studios/{repo_id}.git",
+                str(clone_dir),
+            ],
+            check=True,
+        )
+        remote_release = clone_dir / "releases" / f"v{version}"
+        for name in names:
+            shutil.copyfile(remote_release / name, output_dir / name)
+        shutil.copyfile(clone_dir / "releases" / "latest.json", output_dir / "latest.json")
+    finally:
+        shutil.rmtree(clone_dir, ignore_errors=True)
     print(json.dumps({"source": "modelscope", "version": version, "downloaded": len(names) + 1}))
 
 
@@ -77,14 +103,16 @@ def main() -> None:
     token = os.environ.get("MODELSCOPE_API_TOKEN")
     if args.mode == "upload" and not token:
         raise RuntimeError("MODELSCOPE_API_TOKEN is required for upload")
-    api = HubApi(token=token)
     if args.mode == "upload":
+        from modelscope_hub import HubApi
+
+        api = HubApi(token=token)
         upload(api, args.repo_id, release_dir)
         return
     if not args.output_directory:
         raise ValueError("--output-directory is required for download")
     output_dir = project_path(args.output_directory, must_exist=False)
-    download(api, args.repo_id, release_dir, output_dir)
+    download(args.repo_id, release_dir, output_dir)
 
 
 if __name__ == "__main__":

@@ -83,9 +83,10 @@ if (-not $python) { throw 'Python is required to validate the ModelScope release
 & $python.Source -B -c "import ast, pathlib; ast.parse(pathlib.Path(r'$modelscopePath').read_text(encoding='utf-8'))"
 if ($LASTEXITCODE -ne 0) { throw 'ModelScope release helper is not valid Python' }
 $modelscope = Get-Content -Raw -Encoding utf8 $modelscopePath
-foreach ($requiredText in @('from modelscope_hub import HubApi', 'repo_type = "studio"', 'releases/latest.json', 'upload_file', 'download_file')) {
+foreach ($requiredText in @('from modelscope_hub import HubApi', 'repo_type = "studio"', 'releases/latest.json', 'upload_file', 'subprocess.run', '"git"', '"clone"', '"--depth"')) {
   if (-not $modelscope.Contains($requiredText)) { throw "ModelScope helper is missing: $requiredText" }
 }
+if ($modelscope.Contains('download_file')) { throw 'Studio readback must not use the unsupported ModelScope download_file API' }
 
 $testRoot = Join-Path $projectRoot '.local\release-pipeline-test'
 $inputRoot = Join-Path $testRoot 'input'

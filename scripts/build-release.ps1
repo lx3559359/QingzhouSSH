@@ -32,8 +32,8 @@ function Get-LowerHash([string]$Path) {
 }
 
 function Write-Json([string]$Path, $Value) {
-  $json = $Value | ConvertTo-Json -Depth 24
-  [IO.File]::WriteAllText($Path, $json + [Environment]::NewLine, $utf8NoBom)
+  $json = (($Value | ConvertTo-Json -Depth 24) -replace "`r`n?", "`n")
+  [IO.File]::WriteAllText($Path, $json + "`n", $utf8NoBom)
 }
 
 function New-FileRecord([string]$Path, [string]$Role) {
@@ -62,8 +62,14 @@ $portable = Resolve-ProjectFile 'Portable archive' $PortableArchivePath
 if ((Split-Path $signatureFile -Leaf) -ne ((Split-Path $installer -Leaf) + '.sig')) {
   throw 'Updater signature file must be named after the signed NSIS installer'
 }
-$names = @($installer, $signatureFile, $portable | ForEach-Object { Split-Path $_ -Leaf })
+$publicInstallerName = "QingzhouSSH_${version}_x64-setup.exe"
+$publicSignatureName = "$publicInstallerName.sig"
+$portableName = Split-Path $portable -Leaf
+$names = @($publicInstallerName, $publicSignatureName, $portableName)
 if (@($names | Select-Object -Unique).Count -ne 3) { throw 'Release artifact names must be unique' }
+if (@($names | Where-Object { $_ -notmatch '^[0-9A-Za-z._-]+$' }).Count -ne 0) {
+  throw 'Public release artifact names must use portable ASCII characters'
+}
 
 $signature = (Get-Content -Raw -Encoding utf8 $signatureFile).Trim()
 if ($signature.Length -lt 64 -or $signature.Length -gt 16384 -or $signature -match 'placeholder|replace|todo') {
@@ -83,14 +89,14 @@ $staging = Assert-UnderProject 'Release staging directory' (Join-Path $outputPar
 New-Item -ItemType Directory -Path $staging | Out-Null
 try {
   New-Item -ItemType Directory -Path (Join-Path $staging 'github'), (Join-Path $staging 'modelscope') | Out-Null
-  foreach ($source in @($installer, $signatureFile, $portable)) {
-    Copy-Item -LiteralPath $source -Destination $staging
-  }
+  Copy-Item -LiteralPath $installer -Destination (Join-Path $staging $publicInstallerName)
+  Copy-Item -LiteralPath $signatureFile -Destination (Join-Path $staging $publicSignatureName)
+  Copy-Item -LiteralPath $portable -Destination (Join-Path $staging $portableName)
 
   $fileRecords = @(
-    (New-FileRecord (Join-Path $staging (Split-Path $installer -Leaf)) 'installer-updater'),
-    (New-FileRecord (Join-Path $staging (Split-Path $signatureFile -Leaf)) 'updater-signature'),
-    (New-FileRecord (Join-Path $staging (Split-Path $portable -Leaf)) 'portable')
+    (New-FileRecord (Join-Path $staging $publicInstallerName) 'installer-updater'),
+    (New-FileRecord (Join-Path $staging $publicSignatureName) 'updater-signature'),
+    (New-FileRecord (Join-Path $staging $portableName) 'portable')
   )
 
   $npmPackage = Get-Content -Raw -Encoding utf8 (Join-Path $projectRoot 'package.json') | ConvertFrom-Json
@@ -157,7 +163,7 @@ try {
   }
   Write-Json (Join-Path $staging 'SBOM.spdx.json') $sbom
 
-  $updaterName = Split-Path $installer -Leaf
+  $updaterName = $publicInstallerName
   $githubUrl = "https://github.com/$($releaseConfig.github.repository)/releases/download/v$version/$([Uri]::EscapeDataString($updaterName))"
   $modelscopeFile = [Uri]::EscapeDataString("releases/v$version/$updaterName")
   $modelscopeUrl = "https://modelscope.cn/api/v1/studios/$ModelScopeNamespace/$($releaseConfig.modelscope.repository)/repo?Revision=master&FilePath=$modelscopeFile"
@@ -188,7 +194,7 @@ try {
     publishedAt = $PublishedAt
     buildId = $buildId
     updaterFile = $updaterName
-    signatureFile = Split-Path $signatureFile -Leaf
+    signatureFile = $publicSignatureName
     githubManifest = 'github/latest.json'
     modelscopeManifest = 'modelscope/latest.json'
     files = $fileRecords

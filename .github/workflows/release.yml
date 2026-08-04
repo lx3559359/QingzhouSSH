@@ -111,6 +111,7 @@ jobs:
           & .\scripts\tests\release-artifacts.tests.ps1
           & .\scripts\tests\release-pipeline.tests.ps1
           & .\scripts\tests\release-smoke.tests.ps1
+          python -B .\scripts\tests\modelscope-release.tests.py
 
       - name: Rust checks
         shell: pwsh
@@ -171,7 +172,7 @@ jobs:
         if: ${{ startsWith(github.ref, 'refs/tags/v') }}
         uses: actions/upload-artifact@v7
         with:
-          name: QingzhouSSH-v${{ github.ref_name }}-verified
+          name: QingzhouSSH-${{ github.ref_name }}-verified
           path: ${{ env.QINGZHOU_RELEASE_DIR }}
           if-no-files-found: error
 
