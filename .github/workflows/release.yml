@@ -87,14 +87,16 @@ jobs:
           $pythonTarget = Join-Path $env:GITHUB_WORKSPACE '.local\python-modelscope-bootstrap'
           python -m pip install --disable-pip-version-check --target $pythonTarget 'modelscope-hub==0.1.8'
           $env:PYTHONPATH = $pythonTarget
-          python .\scripts\modelscope-release.py prepare --repo-id "$env:QINGZHOU_MODELSCOPE_NAMESPACE/QingzhouSSH"
-          $readback = Join-Path $env:GITHUB_WORKSPACE '.local\modelscope-bootstrap-readback.md'
-          $url = "https://modelscope.cn/api/v1/models/$env:QINGZHOU_MODELSCOPE_NAMESPACE/QingzhouSSH/repo?Revision=master&FilePath=releases%2FREADME.md"
+          $bootstrap = Join-Path $env:GITHUB_WORKSPACE '.local\modelscope-healthcheck.bin'
+          [IO.File]::WriteAllBytes($bootstrap, [byte[]](0..255))
+          python .\scripts\modelscope-release.py prepare --repo-id "$env:QINGZHOU_MODELSCOPE_NAMESPACE/QingzhouSSH" --bootstrap-file $bootstrap
+          $readback = Join-Path $env:GITHUB_WORKSPACE '.local\modelscope-healthcheck-readback.bin'
+          $url = "https://modelscope.cn/api/v1/models/$env:QINGZHOU_MODELSCOPE_NAMESPACE/QingzhouSSH/repo?Revision=master&FilePath=releases%2Fhealthcheck.bin"
           Invoke-WebRequest -Uri $url -OutFile $readback -MaximumRedirection 10
-          if ((Get-FileHash -LiteralPath $readback -Algorithm SHA256).Hash -ne (Get-FileHash -LiteralPath .\README.md -Algorithm SHA256).Hash) {
-            throw 'Public ModelScope model-repository readback differs from README.md'
+          if ((Get-FileHash -LiteralPath $readback -Algorithm SHA256).Hash -ne (Get-FileHash -LiteralPath $bootstrap -Algorithm SHA256).Hash) {
+            throw 'Public ModelScope model-repository binary readback differs'
           }
-          Remove-Item -LiteralPath $readback -Force
+          Remove-Item -LiteralPath $bootstrap, $readback -Force
 
       - name: Install pnpm 10
         uses: pnpm/action-setup@v6

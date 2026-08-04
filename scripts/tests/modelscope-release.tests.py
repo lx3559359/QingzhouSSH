@@ -22,7 +22,9 @@ spec.loader.exec_module(module)
 test_root = PROJECT_ROOT / ".local" / f"modelscope-release-test-{uuid.uuid4().hex}"
 release_dir = test_root / "release"
 output_dir = test_root / "readback"
+healthcheck = test_root / "healthcheck.bin"
 release_dir.mkdir(parents=True)
+healthcheck.write_bytes(bytes(range(256)))
 metadata = {
     "version": "9.8.7",
     "files": [
@@ -96,6 +98,12 @@ try:
         )
     ]:
         raise AssertionError(f"Model repository creation contract differs: {fake_api.created}")
+    module.prepare(fake_api, "lx3559359/QingzhouSSH", healthcheck)
+    if fake_api.uploaded != [
+        ("lx3559359/QingzhouSSH", "model", str(healthcheck), "releases/healthcheck.bin")
+    ]:
+        raise AssertionError(f"Binary healthcheck upload contract differs: {fake_api.uploaded}")
+    fake_api.uploaded.clear()
     module.upload(fake_api, "lx3559359/QingzhouSSH", release_dir)
     if len(fake_api.uploaded) != len(expected_names) + 1:
         raise AssertionError("Every release file and latest manifest must be uploaded")

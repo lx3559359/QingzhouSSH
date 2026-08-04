@@ -78,9 +78,9 @@ def ensure_repository(api: Any, repo_id: str) -> None:
         )
 
 
-def prepare(api: Any, repo_id: str, readme_path: Path) -> None:
+def prepare(api: Any, repo_id: str, healthcheck_path: Path) -> None:
     ensure_repository(api, repo_id)
-    api.upload_file(repo_id, "model", str(readme_path), "releases/README.md")
+    api.upload_file(repo_id, "model", str(healthcheck_path), "releases/healthcheck.bin")
     print(json.dumps({"source": "modelscope", "prepared": True}))
 
 
@@ -127,6 +127,7 @@ def main() -> None:
     parser.add_argument("--repo-id", required=True)
     parser.add_argument("--release-directory")
     parser.add_argument("--output-directory")
+    parser.add_argument("--bootstrap-file")
     args = parser.parse_args()
 
     token = os.environ.get("MODELSCOPE_API_TOKEN")
@@ -137,7 +138,9 @@ def main() -> None:
 
         api = HubApi(token=token)
         if args.mode == "prepare":
-            prepare(api, args.repo_id, project_root() / "README.md")
+            if not args.bootstrap_file:
+                raise ValueError("--bootstrap-file is required for prepare")
+            prepare(api, args.repo_id, project_path(args.bootstrap_file, must_exist=True))
             return
     if not args.release_directory:
         raise ValueError("--release-directory is required for upload and download")

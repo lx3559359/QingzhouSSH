@@ -60,6 +60,9 @@ foreach ($requiredCredential in @(
 if (-not $workflow.Contains('prepare_modelscope_mirror')) {
   throw 'Manual ModelScope mirror bootstrap input is missing'
 }
+if (-not $workflow.Contains('releases%2Fhealthcheck.bin')) {
+  throw 'ModelScope bootstrap must verify byte-exact binary public readback'
+}
 foreach ($requiredValidation in @('[char]0xFEFF', 'leading or trailing whitespace')) {
   if (-not $preflightBlock.Contains($requiredValidation)) { throw "Release preflight format validation is missing: $requiredValidation" }
 }
