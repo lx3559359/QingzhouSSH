@@ -1,0 +1,30 @@
+$ErrorActionPreference = 'Stop'
+
+$projectRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
+$helperPath = Join-Path $projectRoot 'scripts\lib\release-smoke.ps1'
+$helper = Get-Content -Raw -Encoding utf8 $helperPath
+
+if ($helper -match '(?m)Get-ChildItem[^\r\n]*\s-File(?:\s|$)') {
+  throw 'Release smoke must not depend on the FileSystem-only Get-ChildItem -File dynamic parameter'
+}
+if ($helper -notmatch '(?s)Get-ChildItem[^\r\n]+-Recurse\s*\|\s*Where-Object\s*\{.{0,200}?-not\s+\$_\.PSIsContainer') {
+  throw 'Release smoke must filter installed executables with PSIsContainer'
+}
+
+. $helperPath
+$testRoot = Join-Path $projectRoot ('.local\release-smoke-helper-test-' + [Guid]::NewGuid().ToString('N'))
+$nestedRoot = Join-Path $testRoot 'nested'
+New-Item -ItemType Directory -Force -Path $nestedRoot | Out-Null
+try {
+  [IO.File]::WriteAllBytes((Join-Path $testRoot 'uninstall.exe'), [byte[]](1))
+  $expected = Join-Path $nestedRoot 'QingzhouSSH.exe'
+  [IO.File]::WriteAllBytes($expected, [byte[]](2))
+  $actual = Find-InstalledExecutable $testRoot
+  if ($null -eq $actual -or $actual.FullName -ne $expected) {
+    throw 'Installed executable discovery did not ignore the uninstaller and find the nested application'
+  }
+} finally {
+  if (Test-Path -LiteralPath $testRoot) { Remove-Item -LiteralPath $testRoot -Recurse -Force }
+}
+
+Write-Output 'PASS: release smoke uses provider-compatible installed-file discovery'

@@ -110,6 +110,7 @@ jobs:
           & .\scripts\tests\release-config.tests.ps1
           & .\scripts\tests\release-artifacts.tests.ps1
           & .\scripts\tests\release-pipeline.tests.ps1
+          & .\scripts\tests\release-smoke.tests.ps1
 
       - name: Rust checks
         shell: pwsh
