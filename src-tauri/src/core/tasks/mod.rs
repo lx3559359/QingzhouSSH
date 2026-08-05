@@ -9,7 +9,10 @@ pub use model::{
     OutputKind, ParameterDefinition, ParameterKind, PrivilegeRequirement, ResultParserKind,
     RiskLevel, RollbackPlan, TaskCategory, TaskDefinition, TaskImplementation, TaskStep,
 };
-pub use parameters::{shell_quote, validate_parameters, ValidatedParameter, ValidatedParameters};
+pub use parameters::{
+    script_parameter_env_name, shell_quote, validate_parameters, ValidatedParameter,
+    ValidatedParameters,
+};
 pub use render::render_command;
 
 use crate::{

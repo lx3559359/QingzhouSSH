@@ -84,6 +84,17 @@ pub enum ParameterKind {
     AbsolutePath,
     ServiceName,
     TimeRange,
+    Host,
+    Port,
+    InterfaceName,
+    Cidr,
+    ContainerName,
+    FileMode,
+    CronExpression,
+    MultiSelect {
+        options: Vec<String>,
+        max_items: usize,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

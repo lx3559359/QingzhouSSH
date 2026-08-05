@@ -2,13 +2,14 @@ use qingzhou_ssh_lib::{
     core::{
         system_probe::SystemCapabilities,
         tasks::{
-            built_in_catalog, render_command, select_implementation, shell_quote,
-            task_version_is_compatible, validate_parameters, ExecutionScope, ParameterKind,
-            PrivilegeRequirement, TaskCategory,
+            built_in_catalog, render_command, script_parameter_env_name, select_implementation,
+            shell_quote, task_version_is_compatible, validate_parameters, ExecutionScope,
+            ParameterDefinition, ParameterKind, PrivilegeRequirement, TaskCategory, TaskDefinition,
         },
     },
     error::AppError,
 };
+use serde_json::json;
 
 fn capabilities(os_id: &str, family: &str, service: &str, commands: &[&str]) -> SystemCapabilities {
     SystemCapabilities {
@@ -20,6 +21,137 @@ fn capabilities(os_id: &str, family: &str, service: &str, commands: &[&str]) -> 
         architecture: "x86_64".into(),
         shell: "/bin/sh".into(),
         commands: commands.iter().map(|value| (*value).into()).collect(),
+    }
+}
+
+fn parameter_fixture(parameters: Vec<ParameterDefinition>) -> TaskDefinition {
+    let mut definition = built_in_catalog()
+        .into_iter()
+        .find(|item| item.id == "system.overview")
+        .unwrap();
+    definition.parameters = parameters;
+    definition
+}
+
+fn kind(name: &str, kind: ParameterKind) -> ParameterDefinition {
+    ParameterDefinition {
+        name: name.into(),
+        label: name.into(),
+        description: name.into(),
+        kind,
+        required: true,
+        default_value: None,
+        sensitive: false,
+    }
+}
+
+#[test]
+fn operations_parameters_reject_shell_structure_and_out_of_range_values() {
+    let definition = parameter_fixture(vec![
+        kind("host", ParameterKind::Host),
+        kind("port", ParameterKind::Port),
+        kind("interface", ParameterKind::InterfaceName),
+        kind("cidr", ParameterKind::Cidr),
+        kind("container", ParameterKind::ContainerName),
+        kind("mode", ParameterKind::FileMode),
+        kind("cron", ParameterKind::CronExpression),
+    ]);
+    for bad in [
+        json!({"host":"a;id","port":22,"interface":"eth0","cidr":"10.0.0.1/24","container":"web","mode":"0644","cron":"0 2 * * *"}),
+        json!({"host":"bad..example","port":22,"interface":"eth0","cidr":"10.0.0.1/24","container":"web","mode":"0644","cron":"0 2 * * *"}),
+        json!({"host":"-bad.example","port":22,"interface":"eth0","cidr":"10.0.0.1/24","container":"web","mode":"0644","cron":"0 2 * * *"}),
+        json!({"host":"example.com","port":0,"interface":"eth0","cidr":"10.0.0.1/24","container":"web","mode":"0644","cron":"0 2 * * *"}),
+        json!({"host":"example.com","port":22,"interface":"../../x","cidr":"10.0.0.1/24","container":"web","mode":"0644","cron":"0 2 * * *"}),
+        json!({"host":"example.com","port":22,"interface":"eth0","cidr":"10.0.0.1/99","container":"web","mode":"0644","cron":"0 2 * * *"}),
+        json!({"host":"example.com","port":22,"interface":"eth0","cidr":"10.0.0.1/24","container":"$(id)","mode":"0644","cron":"0 2 * * *"}),
+        json!({"host":"example.com","port":22,"interface":"eth0","cidr":"10.0.0.1/24","container":"web","mode":"4777","cron":"0 2 * * *"}),
+        json!({"host":"example.com","port":22,"interface":"eth0","cidr":"10.0.0.1/24","container":"web","mode":"0644","cron":"@reboot id"}),
+    ] {
+        assert!(validate_parameters(&definition, &bad).is_err());
+    }
+}
+
+#[test]
+fn multi_select_rejects_empty_duplicate_unknown_and_excess_items() {
+    let definition = parameter_fixture(vec![kind(
+        "features",
+        ParameterKind::MultiSelect {
+            options: vec!["audit".into(), "metrics".into()],
+            max_items: 2,
+        },
+    )]);
+    for bad in [
+        json!({"features": []}),
+        json!({"features": ["audit", "audit"]}),
+        json!({"features": ["unknown"]}),
+        json!({"features": ["audit", "metrics", "unknown"]}),
+    ] {
+        assert!(validate_parameters(&definition, &bad).is_err());
+    }
+}
+
+#[test]
+fn operations_parameters_accept_safe_values_and_quote_each_one() {
+    let definition = parameter_fixture(vec![
+        kind("host", ParameterKind::Host),
+        kind("port", ParameterKind::Port),
+        kind("interface", ParameterKind::InterfaceName),
+        kind("cidr", ParameterKind::Cidr),
+        kind("container", ParameterKind::ContainerName),
+        kind("mode", ParameterKind::FileMode),
+        kind("cron", ParameterKind::CronExpression),
+        kind(
+            "features",
+            ParameterKind::MultiSelect {
+                options: vec!["audit".into(), "metrics".into()],
+                max_items: 2,
+            },
+        ),
+    ]);
+    let validated = validate_parameters(
+        &definition,
+        &json!({
+            "host":"example.com",
+            "port":22,
+            "interface":"eth0.10",
+            "cidr":"10.0.0.1/24",
+            "container":"web:blue",
+            "mode":"0644",
+            "cron":"0 2 * * *",
+            "features":["audit", "metrics"]
+        }),
+    )
+    .unwrap();
+    for name in [
+        "host",
+        "port",
+        "interface",
+        "cidr",
+        "container",
+        "mode",
+        "cron",
+    ] {
+        let shell_value = &validated.get(name).unwrap().shell_value;
+        assert!(shell_value.starts_with('\'') && shell_value.ends_with('\''));
+    }
+    assert_eq!(
+        validated.get("features").unwrap().shell_value,
+        "'audit' 'metrics'"
+    );
+}
+
+#[test]
+fn script_parameter_names_map_only_to_reserved_safe_environment_variables() {
+    assert_eq!(script_parameter_env_name("HOST").unwrap(), "QZ_PARAM_HOST");
+    for invalid in [
+        "",
+        "host",
+        "1HOST",
+        "HOST-NAME",
+        "QZ_SECRET",
+        "PARAMETER_NAME_THAT_IS_LONGER_THAN_32_CHARS",
+    ] {
+        assert!(script_parameter_env_name(invalid).is_err());
     }
 }
 
