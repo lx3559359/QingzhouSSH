@@ -259,6 +259,38 @@ impl ExecutionService {
     }
 
     #[allow(clippy::too_many_arguments)]
+    pub(crate) async fn execute_personal_script_with_cancel<E: EventSink>(
+        &self,
+        server_id: &str,
+        script_version: i32,
+        launcher: String,
+        timeout_seconds: u64,
+        parameters: Vec<ExecutionParameter>,
+        events: &mut E,
+        cancel: &CancellationToken,
+    ) -> AppResult<ExecutionDetails> {
+        let execution = self
+            .repository
+            .create(NewExecution {
+                server_id: server_id.into(),
+                task_id: "script.personal".into(),
+                task_version: script_version,
+                category: "advanced".into(),
+                parameters,
+            })
+            .await?;
+        self.run_command_with_limit_and_cancel(
+            execution.id,
+            launcher,
+            Duration::from_secs(timeout_seconds),
+            DEFAULT_OUTPUT_LIMIT,
+            events,
+            Some(cancel),
+        )
+        .await
+    }
+
+    #[allow(clippy::too_many_arguments)]
     pub(crate) async fn execute_planned_step_with_cancel<E: EventSink>(
         &self,
         server_id: &str,

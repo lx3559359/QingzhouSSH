@@ -39,6 +39,10 @@ pub enum AppError {
     ForbiddenScriptField(String),
     #[error("脚本包安全检查失败：{0}")]
     UnsafeScriptPackage(String),
+    #[error("个人脚本运行需要有效的二次确认：{0}")]
+    ScriptConfirmationRequired(String),
+    #[error("个人脚本预演已经过期：{0}")]
+    ScriptPreviewExpired(String),
     #[error("更新操作失败：{0}")]
     Update(String),
     #[error("I/O 操作失败：{0}")]
@@ -76,6 +80,8 @@ impl AppError {
             Self::UnsupportedScriptPackage(_) => "unsupported_script_package",
             Self::ForbiddenScriptField(_) => "forbidden_script_field",
             Self::UnsafeScriptPackage(_) => "unsafe_script_package",
+            Self::ScriptConfirmationRequired(_) => "script_confirmation_required",
+            Self::ScriptPreviewExpired(_) => "script_preview_expired",
             Self::Update(_) => "update",
             Self::Io(_) => "io",
             Self::Database(_) => "database",

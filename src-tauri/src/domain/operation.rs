@@ -67,6 +67,7 @@ impl OperationStatus {
                 | (Self::PreviewReady, Self::Running)
                 | (Self::PreviewReady, Self::Cancelled)
                 | (Self::WaitingConfirmation, Self::BackingUp)
+                | (Self::WaitingConfirmation, Self::Running)
                 | (Self::WaitingConfirmation, Self::Cancelled)
                 | (Self::BackingUp, Self::Running)
                 | (Self::BackingUp, Self::Failed)

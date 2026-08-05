@@ -8,6 +8,7 @@ pub mod operation_restore_service;
 pub mod operation_service;
 pub mod remote_recovery_service;
 pub mod restore_point_service;
+pub mod script_service;
 pub mod server_connector;
 pub mod transfer_service;
 pub mod update_service;

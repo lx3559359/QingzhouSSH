@@ -30,7 +30,8 @@ use crate::{
         operation_batch_repository::OperationBatchRepository,
         operation_repository::OperationRepository,
         operation_restore_repository::OperationRestoreRepository,
-        server_repository::ServerRepository, workflow_repository::WorkflowRepository,
+        script_repository::ScriptRepository, server_repository::ServerRepository,
+        workflow_repository::WorkflowRepository,
     },
     services::{
         execution_service::{
@@ -44,6 +45,7 @@ use crate::{
         operation_service::OperationService,
         remote_recovery_service::RemoteRecoveryService,
         restore_point_service::RestorePointService,
+        script_service::ScriptService,
         server_connector::ServerConnector,
         transfer_service::TransferService,
         workflow_diagnostics::WorkflowDiagnosticsService,
@@ -80,6 +82,7 @@ pub struct AppServices {
     operation_reports: OperationReportService,
     operation_restore_points: OperationRestoreService,
     remote_recovery: RemoteRecoveryService,
+    scripts: ScriptService,
     logs: LogService,
     transfers: TransferService,
     workflows: WorkflowRepository,
@@ -111,6 +114,7 @@ impl AppServices {
         operation_batch_repository.recover_interrupted().await?;
         let workflow_repository = WorkflowRepository::new(database.pool().clone());
         workflow_repository.recover_interrupted().await?;
+        let script_repository = ScriptRepository::new(database.pool().clone());
         let registry = ExecutionRegistry::default();
         let connector = ServerConnector::new(servers.clone(), vault.clone());
         let restore_points = RestorePointService::new(
@@ -136,6 +140,12 @@ impl AppServices {
             operation_restore_points.clone(),
             remote_recovery.clone(),
             connector.clone(),
+        );
+        let scripts = ScriptService::new(
+            root.to_path_buf(),
+            script_repository,
+            operation_repository.clone(),
+            executions.clone(),
         );
         let operation_batches = OperationBatchService::new(
             operation_batch_repository.clone(),
@@ -183,6 +193,7 @@ impl AppServices {
             operation_reports,
             operation_restore_points,
             remote_recovery,
+            scripts,
             logs,
             transfers,
             workflows: workflow_repository,
@@ -218,6 +229,10 @@ impl AppServices {
 
     pub fn remote_recovery_service(&self) -> RemoteRecoveryService {
         self.remote_recovery.clone()
+    }
+
+    pub fn script_service(&self) -> ScriptService {
+        self.scripts.clone()
     }
 
     pub fn log_service(&self) -> LogService {
