@@ -1,5 +1,7 @@
 use serde_json::json;
 
+use std::collections::BTreeSet;
+
 use crate::core::tasks::model::{
     CompatibilityPredicate, ExecutionScope, OutputKind, ParameterDefinition, ParameterKind,
     PrivilegeRequirement, ResultParserKind, RiskLevel, TaskCategory, TaskDefinition,
@@ -8,8 +10,10 @@ use crate::core::tasks::model::{
 
 const SUPPORTED_FAMILIES: [&str; 3] = ["debian", "rhel", "openeuler"];
 
+mod helpers;
+
 pub fn built_in_catalog() -> Vec<TaskDefinition> {
-    vec![
+    let mut catalog = vec![
         task(TaskSpec {
             id: "system.overview",
             category: TaskCategory::System,
@@ -109,7 +113,14 @@ pub fn built_in_catalog() -> Vec<TaskDefinition> {
             )],
             output_kind: OutputKind::LogMatches,
         }),
-    ]
+    ];
+    let mut ids = BTreeSet::new();
+    catalog.retain(|definition| {
+        let inserted = ids.insert(definition.id.clone());
+        debug_assert!(inserted, "内置任务 ID 重复：{}", definition.id);
+        inserted
+    });
+    catalog
 }
 
 fn service_task(
