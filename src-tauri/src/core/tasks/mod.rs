@@ -1,6 +1,7 @@
 mod catalog;
 mod model;
 mod parameters;
+mod planner;
 mod render;
 
 pub use catalog::built_in_catalog;
@@ -13,6 +14,7 @@ pub use parameters::{
     script_parameter_env_name, shell_quote, validate_parameters, ValidatedParameter,
     ValidatedParameters,
 };
+pub use planner::{plan_task, validate_scope, PlannedTask, PublicTaskPlan, RenderedTaskStep};
 pub use render::render_command;
 
 use crate::{

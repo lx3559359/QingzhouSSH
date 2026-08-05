@@ -217,7 +217,7 @@ fn service_implementation(
         preflight_steps: Vec::new(),
         preview_steps: vec![task_step("preview", "查看当前服务状态", &preview_template)],
         backup_plan: None,
-        execution_steps: vec![task_step("execute", "执行服务操作", &command_template)],
+        execution_steps: vec![task_step("execute", "执行任务", &command_template)],
         verify_steps: Vec::new(),
         rollback_plan: None,
         result_parser: ResultParserKind::ServiceStatus,
