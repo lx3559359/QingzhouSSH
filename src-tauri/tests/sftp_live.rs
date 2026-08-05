@@ -2,7 +2,10 @@ use std::time::Duration;
 
 use qingzhou_ssh_lib::{
     core::{
-        sftp::{download, upload, DownloadRequest, UploadRequest},
+        sftp::{
+            download, list_remote_directory, upload, BrowserEntryKind, DownloadRequest,
+            UploadRequest,
+        },
         ssh::{
             executor::VecEventSink,
             transport::{connect_authenticated, execute, inspect_host_key, SshEndpoint},
@@ -60,6 +63,14 @@ async fn uploads_and_downloads_verified_file_against_fixture() {
     .await
     .unwrap();
     assert_eq!(uploaded.bytes, payload.len() as u64);
+
+    let listing = list_remote_directory(&session, "/tmp").await.unwrap();
+    let uploaded_name = remote_path.rsplit('/').next().unwrap();
+    assert_eq!(listing.path, "/tmp");
+    assert!(listing
+        .entries
+        .iter()
+        .any(|entry| { entry.name == uploaded_name && entry.kind == BrowserEntryKind::File }));
 
     let mut download_events = VecEventSink::default();
     let downloaded = download(

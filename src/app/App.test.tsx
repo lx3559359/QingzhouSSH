@@ -1,5 +1,6 @@
 import '@testing-library/jest-dom/vitest';
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const apiMocks = vi.hoisted(() => ({
@@ -7,7 +8,17 @@ const apiMocks = vi.hoisted(() => ({
   initializeDataRoot: vi.fn(),
 }));
 
+const windowMocks = vi.hoisted(() => ({
+  startDragging: vi.fn().mockResolvedValue(undefined),
+  minimize: vi.fn().mockResolvedValue(undefined),
+  toggleMaximize: vi.fn().mockResolvedValue(undefined),
+  close: vi.fn().mockResolvedValue(undefined),
+}));
+
 vi.mock('../api/tauri', () => ({ api: apiMocks }));
+vi.mock('@tauri-apps/api/window', () => ({
+  getCurrentWindow: () => windowMocks,
+}));
 vi.mock('./AppShell', () => ({
   AppShell: () => <section aria-label="操作中心">操作中心</section>,
 }));
@@ -45,5 +56,27 @@ describe('App', () => {
 
     expect(await screen.findByLabelText('操作中心')).toBeVisible();
     expect(screen.getByText('D:\\QingzhouSSH')).toBeVisible();
+  });
+
+  it('uses the blue header as the draggable frame with complete window controls', async () => {
+    const user = userEvent.setup();
+    apiMocks.bootstrapStatus.mockReturnValue(new Promise(() => undefined));
+    render(<App />);
+
+    const dragRegion = screen.getByTestId('window-drag-region');
+    fireEvent.mouseDown(dragRegion, { button: 0 });
+    expect(windowMocks.startDragging).toHaveBeenCalledTimes(1);
+
+    fireEvent.mouseDown(dragRegion, { button: 2 });
+    fireEvent.mouseDown(screen.getByRole('button', { name: '最小化窗口' }), { button: 0 });
+    expect(windowMocks.startDragging).toHaveBeenCalledTimes(1);
+
+    await user.click(screen.getByRole('button', { name: '最小化窗口' }));
+    await user.click(screen.getByRole('button', { name: '最大化或还原窗口' }));
+    await user.click(screen.getByRole('button', { name: '关闭窗口' }));
+
+    expect(windowMocks.minimize).toHaveBeenCalledTimes(1);
+    expect(windowMocks.toggleMaximize).toHaveBeenCalledTimes(1);
+    expect(windowMocks.close).toHaveBeenCalledTimes(1);
   });
 });

@@ -184,7 +184,10 @@ export type ExecutionEvent = ExecutionEventBase &
     | { type: 'failed'; category: string; message: string; retryable: boolean }
   );
 
+export type LogSearchTarget = 'content' | 'filename';
+
 export interface LogSearchRequest {
+  target: LogSearchTarget;
   path: string;
   keyword: string;
   caseSensitive: boolean;
@@ -192,6 +195,22 @@ export interface LogSearchRequest {
   limit: number;
   startTime: string | null;
   endTime: string | null;
+}
+
+export type BrowserEntryKind = 'directory' | 'file' | 'symlink' | 'other';
+
+export interface BrowserEntry {
+  name: string;
+  path: string;
+  kind: BrowserEntryKind;
+  size: number | null;
+  modifiedAt: number | null;
+}
+
+export interface DirectoryListing {
+  path: string;
+  parent: string | null;
+  entries: BrowserEntry[];
 }
 
 export interface LogMatch {
@@ -202,8 +221,20 @@ export interface LogMatch {
   text: string;
 }
 
+export type ContentSearchResult = LogMatch & { resultType: 'content' };
+
+export interface RemoteFileMatch {
+  resultType: 'file';
+  path: string;
+  name: string;
+  size: number | null;
+  modifiedAt: number | null;
+}
+
+export type SearchResultItem = ContentSearchResult | RemoteFileMatch;
+
 export interface LogResultPage {
-  items: LogMatch[];
+  items: SearchResultItem[];
   nextCursor: string | null;
 }
 
@@ -478,6 +509,7 @@ export type WorkflowEvent = WorkflowEventBase &
 export interface AppErrorDto {
   code: string;
   message: string;
+  retryable?: boolean;
 }
 
 export type UpdateSource = 'github' | 'modelscope';

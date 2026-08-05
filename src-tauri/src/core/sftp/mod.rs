@@ -1,5 +1,10 @@
+mod browser;
 mod transfer;
 
+pub use browser::{
+    list_local_directory, list_remote_directory, remote_parent, validate_remote_directory_path,
+    BrowserEntry, BrowserEntryKind, DirectoryListing,
+};
 pub(crate) use transfer::{backup_remote_file, delete_remote_file};
 
 pub use transfer::{

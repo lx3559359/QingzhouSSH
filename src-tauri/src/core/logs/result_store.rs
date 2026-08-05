@@ -9,7 +9,7 @@ use tokio::{
 use uuid::Uuid;
 
 use crate::{
-    core::logs::parser::{LogLineKind, LogMatch},
+    core::logs::parser::{LogLineKind, SearchResultItem},
     error::{AppError, AppResult},
 };
 
@@ -26,7 +26,7 @@ pub struct StoredLogResults {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LogResultPage {
-    pub items: Vec<LogMatch>,
+    pub items: Vec<SearchResultItem>,
     pub next_cursor: Option<String>,
 }
 
@@ -45,7 +45,7 @@ impl LogResultStore {
     pub async fn write(
         &self,
         execution_id: Uuid,
-        matches: &[LogMatch],
+        matches: &[SearchResultItem],
     ) -> AppResult<StoredLogResults> {
         let directory = self.result_directory(execution_id);
         tokio::fs::create_dir_all(&directory).await?;
@@ -58,18 +58,29 @@ impl LogResultStore {
                 .map_err(|error| AppError::Serialization(error.to_string()))?;
             jsonl.write_all(&encoded).await?;
             jsonl.write_all(b"\n").await?;
-            let kind = match item.kind {
-                LogLineKind::Match => "MATCH",
-                LogLineKind::Context => "CONTEXT",
+            let rendered = match item {
+                SearchResultItem::Content(item) => {
+                    let kind = match item.kind {
+                        LogLineKind::Match => "MATCH",
+                        LogLineKind::Context => "CONTEXT",
+                    };
+                    format!(
+                        "{}:{} [{kind}] {}\n",
+                        item.path, item.line_number, item.text
+                    )
+                }
+                SearchResultItem::File(item) => format!(
+                    "{} [FILE] size={} modified={}\n",
+                    item.path,
+                    item.size
+                        .map(|value| value.to_string())
+                        .unwrap_or_else(|| "unknown".into()),
+                    item.modified_at
+                        .map(|value| value.to_string())
+                        .unwrap_or_else(|| "unknown".into())
+                ),
             };
-            text.write_all(
-                format!(
-                    "{}:{} [{kind}] {}\n",
-                    item.path, item.line_number, item.text
-                )
-                .as_bytes(),
-            )
-            .await?;
+            text.write_all(rendered.as_bytes()).await?;
         }
         jsonl.flush().await?;
         text.flush().await?;

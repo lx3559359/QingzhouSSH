@@ -141,6 +141,7 @@ jobs:
           $ErrorActionPreference = 'Stop'
           $PSNativeCommandUseErrorActionPreference = $true
           & .\scripts\tests\dev-env.tests.ps1
+          & .\scripts\tests\desktop-ux.tests.ps1
           & .\scripts\tests\package-config.tests.ps1
           & .\scripts\tests\release-config.tests.ps1
           & .\scripts\tests\release-artifacts.tests.ps1

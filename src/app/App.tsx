@@ -1,4 +1,5 @@
 import { Database, SpinnerGap } from '@phosphor-icons/react';
+import type { MouseEvent } from 'react';
 import { useCallback, useEffect, useState } from 'react';
 
 import appIcon from '../../assets/app-icon.svg';
@@ -6,10 +7,18 @@ import type { BootstrapStatus } from '../api/contracts';
 import { api } from '../api/tauri';
 import { DataRootGate } from '../features/bootstrap/DataRootGate';
 import { AppShell } from './AppShell';
+import { WindowControls } from './WindowControls';
+import { windowControls } from './nativeWindow';
 import '../styles/theme.css';
 
 function displayError(cause: unknown) {
   return cause instanceof Error ? cause.message : String(cause);
+}
+
+function startWindowDrag(event: MouseEvent<HTMLElement>) {
+  if (event.button !== 0) return;
+  if ((event.target as HTMLElement).closest('.window-controls')) return;
+  void windowControls.startDragging().catch(() => undefined);
 }
 
 export function App() {
@@ -33,7 +42,11 @@ export function App() {
   return (
     <main className="app-shell">
       <section className="app-window">
-        <header className="app-topbar">
+        <header
+          className="app-topbar"
+          data-testid="window-drag-region"
+          onMouseDown={startWindowDrag}
+        >
           <div className="brand-lockup">
             <img className="brand-icon" src={appIcon} alt="" />
             <div>
@@ -41,12 +54,15 @@ export function App() {
               <p>安全地完成 Linux 操作</p>
             </div>
           </div>
-          {bootstrap?.state === 'ready' && (
-            <div className="data-root-badge" title={bootstrap.dataRoot}>
-              <Database weight="duotone" aria-hidden="true" />
-              <span>{bootstrap.dataRoot}</span>
-            </div>
-          )}
+          <div className="app-topbar__actions">
+            {bootstrap?.state === 'ready' && (
+              <div className="data-root-badge" title={bootstrap.dataRoot}>
+                <Database weight="duotone" aria-hidden="true" />
+                <span>{bootstrap.dataRoot}</span>
+              </div>
+            )}
+            <WindowControls />
+          </div>
         </header>
 
         <div className="app-content">

@@ -2,9 +2,28 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::{AppError, AppResult};
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LogSearchTarget {
+    #[default]
+    Content,
+    Filename,
+}
+
+impl LogSearchTarget {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Content => "content",
+            Self::Filename => "filename",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LogSearchRequest {
+    #[serde(default)]
+    pub target: LogSearchTarget,
     pub path: String,
     pub keyword: String,
     pub case_sensitive: bool,
@@ -16,14 +35,17 @@ pub struct LogSearchRequest {
 
 impl LogSearchRequest {
     pub fn validate(&self) -> AppResult<()> {
-        let lower_path = self.path.to_ascii_lowercase();
-        if !self.path.starts_with('/')
-            || self.path.contains('\0')
-            || self.path.split('/').any(|component| component == "..")
-            || !(lower_path.ends_with(".log") || lower_path.ends_with(".gz"))
+        if self.target == LogSearchTarget::Filename {
+            return self.validate_filename_search();
+        }
+        if !self.path.is_empty()
+            && (!self.path.starts_with('/')
+                || self.path.contains('\0')
+                || self.path.split('/').any(|component| component == "..")
+                || self.path.ends_with('/'))
         {
             return Err(AppError::Validation(
-                "日志路径必须是无 NUL 的 .log 或 .gz 绝对路径".into(),
+                "指定日志路径必须是远程文件的绝对路径".into(),
             ));
         }
         if self.keyword.is_empty() || self.keyword.contains('\0') || self.keyword.len() > 512 {
@@ -56,8 +78,42 @@ impl LogSearchRequest {
         Ok(())
     }
 
+    fn validate_filename_search(&self) -> AppResult<()> {
+        if !self.path.is_empty() {
+            return Err(AppError::Validation(
+                "按文件名查找时不能指定日志路径".into(),
+            ));
+        }
+        if self.keyword.is_empty()
+            || self.keyword.len() > 256
+            || self
+                .keyword
+                .chars()
+                .any(|character| matches!(character, '\0' | '\r' | '\n' | '\u{1f}'))
+        {
+            return Err(AppError::Validation(
+                "文件名关键字必须为 1 到 256 字节，且不能包含控制字符".into(),
+            ));
+        }
+        if self.case_sensitive
+            || self.context_lines != 0
+            || !(1..=200).contains(&self.limit)
+            || self.start_time.is_some()
+            || self.end_time.is_some()
+        {
+            return Err(AppError::Validation(
+                "文件名查找参数无效：仅支持忽略大小写、最多 200 个结果".into(),
+            ));
+        }
+        Ok(())
+    }
+
     pub fn is_gzip(&self) -> bool {
         self.path.to_ascii_lowercase().ends_with(".gz")
+    }
+
+    pub fn is_smart_search(&self) -> bool {
+        self.target == LogSearchTarget::Content && self.path.is_empty()
     }
 }
 

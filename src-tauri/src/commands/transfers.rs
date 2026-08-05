@@ -1,13 +1,38 @@
+use std::path::PathBuf;
+
 use tauri::{ipc::Channel, State};
 
 use crate::{
-    core::sftp::{DownloadRequest, UploadRequest},
+    core::sftp::{DirectoryListing, DownloadRequest, UploadRequest},
     domain::{events::ExecutionEvent, execution::ExecutionDetails},
     error::AppResult,
     state::AppState,
 };
 
 use super::{services, ChannelEventSink};
+
+#[tauri::command]
+pub async fn list_local_directory(
+    path: Option<PathBuf>,
+    state: State<'_, AppState>,
+) -> AppResult<DirectoryListing> {
+    services(&state)
+        .await?
+        .list_local_directory(path.as_deref())
+        .await
+}
+
+#[tauri::command]
+pub async fn list_remote_directory(
+    server_id: String,
+    path: String,
+    state: State<'_, AppState>,
+) -> AppResult<DirectoryListing> {
+    services(&state)
+        .await?
+        .list_remote_directory(&server_id, &path)
+        .await
+}
 
 #[tauri::command]
 pub async fn upload_file(

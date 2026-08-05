@@ -7,6 +7,8 @@ use crate::error::AppResult;
 pub fn build_main_window(app: &AppHandle, data_root: Option<&Path>) -> AppResult<WebviewWindow> {
     let builder = WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
         .title("轻舟 SSH")
+        .decorations(false)
+        .resizable(true)
         .inner_size(1180.0, 760.0)
         .min_inner_size(960.0, 640.0);
     let builder = match data_root {

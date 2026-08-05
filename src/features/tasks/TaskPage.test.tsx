@@ -162,4 +162,23 @@ describe('TaskPage', () => {
       ),
     );
   });
+
+  it('turns structured backend failures into actionable Chinese guidance', async () => {
+    const user = userEvent.setup();
+    apiMocks.startTaskExecution.mockRejectedValue({
+      code: 'ssh',
+      message: 'SSH 操作失败：Connection refused',
+      retryable: true,
+    });
+    render(<TaskPage />);
+
+    await screen.findByRole('heading', { name: '系统概览' });
+    await user.click(screen.getByRole('button', { name: '选择任务 系统概览' }));
+    await user.click(screen.getByRole('button', { name: '运行任务' }));
+
+    expect(await screen.findByText('无法连接到目标服务器，请确认服务器在线、SSH 地址和端口正确后重试。')).toBeVisible();
+    expect(screen.queryByText('[object Object]')).not.toBeInTheDocument();
+    await user.click(screen.getByText('查看技术详情'));
+    expect(screen.getByText('SSH 操作失败：Connection refused')).toBeVisible();
+  });
 });

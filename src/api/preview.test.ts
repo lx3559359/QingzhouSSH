@@ -13,10 +13,36 @@ describe('preview data root', () => {
 
     expect(status).toEqual({
       state: 'ready',
-      dataRoot: import.meta.env.VITE_QINGZHOU_DATA_ROOT,
+      dataRoot: import.meta.env.VITE_QINGZHOU_DATA_ROOT ?? '.local\\dev-data（项目目录内）',
     });
-    expect(status.dataRoot).toMatch(/[\\/].local[\\/]dev-data$/);
+    expect(status.dataRoot).toMatch(/\.local[\\/]dev-data/);
     expect(status.dataRoot).not.toBe('D:\\QingzhouSSH\\data');
+  });
+});
+
+describe('log search preview API', () => {
+  it('returns file-shaped preview results for filename search', async () => {
+    const details = await previewApi.searchLogs(
+      'preview-openeuler',
+      {
+        target: 'filename',
+        path: '',
+        keyword: 'requi',
+        caseSensitive: false,
+        contextLines: 0,
+        limit: 200,
+        startTime: null,
+        endTime: null,
+      },
+      () => undefined,
+    );
+
+    const page = await previewApi.readLogResultPage(details.record.id, null, 50);
+    expect(page.items[0]).toEqual(expect.objectContaining({
+      resultType: 'file',
+      name: 'requirements.txt',
+      path: '/home/app/requirements.txt',
+    }));
   });
 });
 

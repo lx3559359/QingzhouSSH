@@ -8,13 +8,11 @@ import type {
   TaskAvailability,
 } from '../../api/contracts';
 import { api } from '../../api/tauri';
+import { describeTaskError } from '../../api/errors';
+import type { UserFacingError } from '../../api/errors';
 import { ExecutionDrawer } from './ExecutionDrawer';
 import { ParameterForm } from './ParameterForm';
 import { AdvancedExecutionPanel } from './AdvancedExecutionPanel';
-
-function displayError(cause: unknown) {
-  return cause instanceof Error ? cause.message : String(cause);
-}
 
 export function TaskPage() {
   const [view, setView] = useState<'catalog' | 'advanced'>('catalog');
@@ -28,7 +26,7 @@ export function TaskPage() {
   const [running, setRunning] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
+  const [error, setError] = useState<UserFacingError | null>(null);
 
   useEffect(() => {
     api.listServers()
@@ -36,7 +34,7 @@ export function TaskPage() {
         setServers(profiles);
         setServerId(profiles[0]?.id ?? '');
       })
-      .catch((cause) => setError(displayError(cause)))
+      .catch((cause) => setError(describeTaskError(cause)))
       .finally(() => setLoading(false));
   }, []);
 
@@ -48,7 +46,7 @@ export function TaskPage() {
     setLoading(true);
     api.listTaskDefinitions(serverId)
       .then(setTasks)
-      .catch((cause) => setError(displayError(cause)))
+      .catch((cause) => setError(describeTaskError(cause)))
       .finally(() => setLoading(false));
   }, [serverId]);
 
@@ -69,7 +67,7 @@ export function TaskPage() {
     );
     setEvents([]);
     setDetails(null);
-    setError('');
+    setError(null);
   }
 
   async function execute(dangerousConfirmed: boolean) {
@@ -78,7 +76,7 @@ export function TaskPage() {
     setRunning(true);
     setEvents([]);
     setDetails(null);
-    setError('');
+    setError(null);
     try {
       const result = await api.startTaskExecution(
         serverId,
@@ -91,7 +89,7 @@ export function TaskPage() {
       );
       setDetails(result);
     } catch (cause) {
-      setError(displayError(cause));
+      setError(describeTaskError(cause));
     } finally {
       setRunning(false);
     }
@@ -130,7 +128,18 @@ export function TaskPage() {
         <button type="button" className={view === 'advanced' ? 'is-active' : ''} onClick={() => setView('advanced')}>高级执行</button>
       </div>
 
-      {error && <p className="inline-message inline-message--error page-alert" role="alert">{error}</p>}
+      {error && (
+        <div className="inline-message inline-message--error page-alert task-error" role="alert">
+          <strong>{error.summary}</strong>
+          {error.retryable && <span>你可以修正后直接再次运行，任务不会自动执行其他命令。</span>}
+          {error.detail && (
+            <details>
+              <summary>查看技术详情</summary>
+              <code>{error.detail}</code>
+            </details>
+          )}
+        </div>
+      )}
       {view === 'advanced' ? (
         <AdvancedExecutionPanel servers={servers} serverId={serverId} />
       ) : loading ? (

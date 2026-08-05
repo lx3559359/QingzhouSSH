@@ -75,6 +75,7 @@ describe('Tauri API wrapper', () => {
       dangerousConfirmed: false,
     };
     const logRequest = {
+      target: 'content' as const,
       path: '/var/log/app.log',
       keyword: 'error',
       caseSensitive: false,
@@ -97,6 +98,8 @@ describe('Tauri API wrapper', () => {
       onEvent,
     );
     await api.cancelExecution('execution-1');
+    await api.listLocalDirectory(null);
+    await api.listRemoteDirectory('server-1', '/var/log');
     await api.searchLogs('server-1', logRequest, onEvent);
     await api.readLogResultPage('execution-1', '50', 50);
     await api.downloadLogResult('execution-1', 'result.txt');
@@ -118,6 +121,8 @@ describe('Tauri API wrapper', () => {
       ['start_task_execution', ['serverId', 'request', 'onEvent']],
       ['start_custom_execution', ['serverId', 'request', 'onEvent']],
       ['cancel_execution', ['executionId']],
+      ['list_local_directory', ['path']],
+      ['list_remote_directory', ['serverId', 'path']],
       ['search_logs', ['serverId', 'request', 'onEvent']],
       ['read_log_result_page', ['executionId', 'cursor', 'pageSize']],
       ['download_log_result', ['executionId', 'suggestedName']],

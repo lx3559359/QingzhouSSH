@@ -44,6 +44,8 @@ pub fn run() {
             commands::logs::search_logs,
             commands::logs::read_log_result_page,
             commands::logs::download_log_result,
+            commands::transfers::list_local_directory,
+            commands::transfers::list_remote_directory,
             commands::transfers::upload_file,
             commands::transfers::download_file,
             commands::updates::get_update_status,

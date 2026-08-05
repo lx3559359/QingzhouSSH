@@ -10,7 +10,7 @@ use crate::{
     core::{
         logs::{
             build_search_command, parse_search_output, LogResultPage, LogResultStore,
-            LogSearchRequest, StoredLogResults,
+            LogSearchRequest, LogSearchTarget, StoredLogResults,
         },
         sftp::{download_destination, sha256_local_file},
         ssh::executor::{execute_streaming, CommandRequest, EventSink},
@@ -137,8 +137,14 @@ impl LogService {
                 let stored = self.store.write(execution_id, &matches).await?;
                 self.record_files(execution_id, &stored, &output_path)
                     .await?;
-                self.finish_success(execution_id, started_at, &stored, &mut sequenced)
-                    .await
+                self.finish_success(
+                    execution_id,
+                    started_at,
+                    request.target,
+                    &stored,
+                    &mut sequenced,
+                )
+                .await
             }
             Ok(outcome) => {
                 self.finish_error(
@@ -240,6 +246,7 @@ impl LogService {
         &self,
         execution_id: Uuid,
         started_at: i64,
+        target: LogSearchTarget,
         stored: &StoredLogResults,
         events: &mut MonotonicEventSink<'_, E>,
     ) -> AppResult<()> {
@@ -255,7 +262,10 @@ impl LogService {
                 error_category: None,
                 error_message: None,
                 retryable: false,
-                output_summary: Some(format!("{} 条日志记录", stored.count)),
+                output_summary: Some(match target {
+                    LogSearchTarget::Content => format!("{} 条日志记录", stored.count),
+                    LogSearchTarget::Filename => format!("{} 个文件", stored.count),
+                }),
                 remote_process_group: None,
             })
             .await?;
@@ -350,6 +360,7 @@ impl<E: EventSink> EventSink for CaptureEventSink<'_, '_, E> {
 
 fn search_parameters(request: &LogSearchRequest) -> Vec<ExecutionParameter> {
     vec![
+        parameter("target", request.target.as_str()),
         parameter("path", &request.path),
         parameter("keyword", &request.keyword),
         parameter("caseSensitive", &request.case_sensitive.to_string()),

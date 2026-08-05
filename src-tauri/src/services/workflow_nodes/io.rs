@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use crate::{
     core::{
-        logs::LogSearchRequest,
+        logs::{LogSearchRequest, LogSearchTarget},
         sftp::{DownloadRequest, UploadRequest},
         ssh::executor::EventSink,
     },
@@ -47,6 +47,7 @@ impl IoNodeAdapter {
                     .search(
                         server_id,
                         LogSearchRequest {
+                            target: LogSearchTarget::Content,
                             path: path.clone(),
                             keyword: keyword.clone(),
                             case_sensitive: *case_sensitive,

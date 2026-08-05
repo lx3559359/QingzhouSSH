@@ -1,7 +1,7 @@
 import '@testing-library/jest-dom/vitest';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('../features/servers/ServerListPage', () => ({
   ServerListPage: () => <section aria-label="服务器内容">服务器内容</section>,
@@ -10,10 +10,22 @@ vi.mock('../features/tasks/TaskPage', () => ({
   TaskPage: () => <section aria-label="快捷任务内容">快捷任务内容</section>,
 }));
 vi.mock('../features/logs/LogSearchPage', () => ({
-  LogSearchPage: () => <section aria-label="日志检索内容">日志检索内容</section>,
+  LogSearchPage: ({ searchIntent, onSearchIntentConsumed }: {
+    searchIntent?: { serverId: string; path: string; keyword: string } | null;
+    onSearchIntentConsumed?: () => void;
+  }) => <section aria-label="日志检索内容">
+    日志检索内容
+    {searchIntent && <span>{`${searchIntent.serverId}|${searchIntent.path}|${searchIntent.keyword}`}</span>}
+    {searchIntent && <button type="button" onClick={onSearchIntentConsumed}>消费搜索意图</button>}
+  </section>,
 }));
 vi.mock('../features/transfers/FileTransferPage', () => ({
-  FileTransferPage: () => <section aria-label="文件传输内容">文件传输内容</section>,
+  FileTransferPage: ({ onSearchRemoteFile }: {
+    onSearchRemoteFile?: (intent: { serverId: string; path: string; keyword: string }) => void;
+  }) => <section aria-label="文件传输内容">
+    文件传输内容
+    <button type="button" onClick={() => onSearchRemoteFile?.({ serverId: 'server-1', path: '/srv/report.log', keyword: 'report.log' })}>模拟搜索远程文件</button>
+  </section>,
 }));
 vi.mock('../features/downloads/DownloadsPage', () => ({
   DownloadsPage: () => <section aria-label="下载文件内容">下载文件内容</section>,
@@ -31,9 +43,22 @@ vi.mock('../features/settings/SettingsPage', () => ({
 import { AppShell } from './AppShell';
 
 describe('AppShell', () => {
+  const scrollTo = vi.fn();
+
+  beforeEach(() => {
+    scrollTo.mockClear();
+    Object.defineProperty(HTMLElement.prototype, 'scrollTo', {
+      configurable: true,
+      value: scrollTo,
+    });
+  });
+
   it('offers the complete navigation and opens the workflow builder', async () => {
     const user = userEvent.setup();
     render(<AppShell dataRoot="D:\\Codex Project\\轻量化SSH快捷工具\\data" />);
+
+    expect(screen.getByText('本地安全保护已开启')).toBeVisible();
+    expect(screen.queryByText(/WebView/i)).not.toBeInTheDocument();
 
     for (const name of ['首页', '服务器', '快捷任务', '日志检索', '文件传输', '工作流', '执行记录', '下载文件', '设置']) {
       expect(screen.getByRole('button', { name })).toBeVisible();
@@ -41,6 +66,7 @@ describe('AppShell', () => {
 
     await user.click(screen.getByRole('button', { name: '快捷任务' }));
     expect(screen.getByLabelText('快捷任务内容')).toBeVisible();
+    expect(scrollTo).toHaveBeenLastCalledWith({ top: 0, left: 0 });
 
     await user.click(screen.getByRole('button', { name: '日志检索' }));
     expect(screen.getByLabelText('日志检索内容')).toBeVisible();
@@ -51,5 +77,20 @@ describe('AppShell', () => {
 
     await user.click(screen.getByRole('button', { name: '设置' }));
     expect(screen.getByLabelText('设置内容')).toBeVisible();
+  });
+
+  it('carries a one-shot remote-file search intent from SFTP to log search', async () => {
+    const user = userEvent.setup();
+    render(<AppShell dataRoot="D:\\Codex Project\\轻量化SSH快捷工具\\data" />);
+
+    await user.click(screen.getByRole('button', { name: '文件传输' }));
+    await user.click(screen.getByRole('button', { name: '模拟搜索远程文件' }));
+
+    expect(screen.getByLabelText('日志检索内容')).toBeVisible();
+    expect(screen.getByText('server-1|/srv/report.log|report.log')).toBeVisible();
+    await user.click(screen.getByRole('button', { name: '消费搜索意图' }));
+    await user.click(screen.getByRole('button', { name: '文件传输' }));
+    await user.click(screen.getByRole('button', { name: '日志检索' }));
+    expect(screen.queryByText('server-1|/srv/report.log|report.log')).not.toBeInTheDocument();
   });
 });

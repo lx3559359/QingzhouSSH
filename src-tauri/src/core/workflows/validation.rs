@@ -9,7 +9,7 @@ use uuid::Uuid;
 
 use crate::{
     core::{
-        logs::LogSearchRequest,
+        logs::{LogSearchRequest, LogSearchTarget},
         sftp::{download_destination, validate_remote_path},
         tasks::{built_in_catalog, validate_parameters},
         workflows::condition::validate_condition,
@@ -338,6 +338,7 @@ fn validate_node(node: &WorkflowNode) -> AppResult<()> {
             start_time,
             end_time,
         } => LogSearchRequest {
+            target: LogSearchTarget::Content,
             path: path.clone(),
             keyword: keyword.clone(),
             case_sensitive: *case_sensitive,

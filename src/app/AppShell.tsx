@@ -9,12 +9,13 @@ import {
   FileMagnifyingGlass,
   UploadSimple,
 } from '@phosphor-icons/react';
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 import { ServerListPage } from '../features/servers/ServerListPage';
 import { TaskPage } from '../features/tasks/TaskPage';
 import { LogSearchPage } from '../features/logs/LogSearchPage';
 import { FileTransferPage } from '../features/transfers/FileTransferPage';
+import type { RemoteFileSearchIntent } from '../features/transfers/FileTransferPage';
 import { DownloadsPage } from '../features/downloads/DownloadsPage';
 import { ExecutionHistoryPage } from '../features/history/ExecutionHistoryPage';
 import { WorkflowPage } from '../features/workflows/WorkflowPage';
@@ -45,6 +46,12 @@ const navigation = [
 
 export function AppShell({ dataRoot }: { dataRoot: string }) {
   const [page, setPage] = useState<PageKey>('home');
+  const [searchIntent, setSearchIntent] = useState<RemoteFileSearchIntent | null>(null);
+  const contentRef = useRef<HTMLElement>(null);
+
+  useEffect(() => {
+    contentRef.current?.scrollTo?.({ top: 0, left: 0 });
+  }, [page]);
 
   return (
     <div className="workspace-shell">
@@ -71,20 +78,17 @@ export function AppShell({ dataRoot }: { dataRoot: string }) {
           ))}
         </div>
         <div className="side-navigation__security">
-          <span className="status-dot" />
-          <div>
-            <strong>本地安全模式</strong>
-            <small>凭据不会进入 WebView</small>
-          </div>
+          <span className="status-dot" aria-hidden="true" />
+          <strong>本地安全保护已开启</strong>
         </div>
       </nav>
 
-      <section className="workspace-content">
+      <section className="workspace-content" ref={contentRef}>
         {page === 'home' && <HomePage onNavigate={setPage} />}
         {page === 'servers' && <ServerListPage />}
         {page === 'tasks' && <TaskPage />}
-        {page === 'logs' && <LogSearchPage />}
-        {page === 'transfers' && <FileTransferPage />}
+        {page === 'logs' && <LogSearchPage searchIntent={searchIntent} onSearchIntentConsumed={() => setSearchIntent(null)} />}
+        {page === 'transfers' && <FileTransferPage onSearchRemoteFile={(intent) => { setSearchIntent(intent); setPage('logs'); }} />}
         {page === 'workflows' && <WorkflowPage />}
         {page === 'history' && <ExecutionHistoryPage />}
         {page === 'downloads' && <DownloadsPage />}

@@ -5,7 +5,7 @@ use std::{
 
 use qingzhou_ssh_lib::{
     core::{
-        logs::LogSearchRequest,
+        logs::{LogSearchRequest, LogSearchTarget, SearchResultItem},
         secret_protector::SecretProtector,
         sftp::{DownloadRequest, UploadRequest},
         ssh::executor::VecEventSink,
@@ -193,6 +193,7 @@ async fn tasks_scripts_logs_sftp_history_and_canaries_close_the_m2_loop() {
             .search_logs(
                 &password_server,
                 LogSearchRequest {
+                    target: LogSearchTarget::Content,
                     path: path.into(),
                     keyword: "ERROR".into(),
                     case_sensitive: true,
@@ -210,10 +211,11 @@ async fn tasks_scripts_logs_sftp_history_and_canaries_close_the_m2_loop() {
             .read_log_result_page(details.record.id, None, 50)
             .await
             .unwrap();
-        assert!(page
-            .items
-            .iter()
-            .any(|item| item.text.contains("ERROR fixture failure")));
+        assert!(page.items.iter().any(|item| matches!(
+            item,
+            SearchResultItem::Content(item)
+                if item.text.contains("ERROR fixture failure")
+        )));
         let relative = services
             .download_log_result(details.record.id, download_name)
             .await

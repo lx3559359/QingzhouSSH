@@ -5,6 +5,7 @@ import type {
   CreateServerRequest,
   CustomExecutionRequest,
   DownloadRequest,
+  DirectoryListing,
   ExecutionDetails,
   ExecutionEvent,
   ExecutionFilter,
@@ -18,7 +19,6 @@ import type {
   TaskAvailability,
   TaskExecutionRequest,
   UploadRequest,
-  AppErrorDto,
   ExecutionFile,
   StartWorkflowRunRequest,
   WorkflowDefinition,
@@ -33,6 +33,7 @@ import type {
   UpdateStatus,
 } from './contracts';
 import { dataRootPreviewApi, previewApi } from './preview';
+export { normalizeAppError as asAppError } from './errors';
 
 export type ExecutionEventHandler = (event: ExecutionEvent) => void;
 
@@ -49,21 +50,6 @@ function createMonotonicChannel<T extends { sequence: number }>(onEvent: (event:
 
 function createEventChannel(onEvent: ExecutionEventHandler) {
   return createMonotonicChannel(onEvent);
-}
-
-export function asAppError(error: unknown): AppErrorDto {
-  if (
-    typeof error === 'object' &&
-    error !== null &&
-    'code' in error &&
-    'message' in error &&
-    typeof error.code === 'string' &&
-    typeof error.message === 'string'
-  ) {
-    return { code: error.code, message: error.message };
-  }
-  if (error instanceof Error) return { code: 'unknown', message: error.message };
-  return { code: 'unknown', message: '操作失败' };
 }
 
 export const tauriApi = {
@@ -103,6 +89,10 @@ export const tauriApi = {
     }),
   cancelExecution: (executionId: string) =>
     invoke<void>('cancel_execution', { executionId }),
+  listLocalDirectory: (path: string | null) =>
+    invoke<DirectoryListing>('list_local_directory', { path }),
+  listRemoteDirectory: (serverId: string, path: string) =>
+    invoke<DirectoryListing>('list_remote_directory', { serverId, path }),
   searchLogs: (
     serverId: string,
     request: LogSearchRequest,

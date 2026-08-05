@@ -2,6 +2,7 @@ import type {
   CreateServerRequest,
   CustomExecutionRequest,
   DownloadRequest,
+  DirectoryListing,
   ExecutionDetails,
   ExecutionEvent,
   ExecutionFile,
@@ -44,6 +45,7 @@ const previewServer: ServerProfile = {
 
 let previewServers = [previewServer];
 let previewExecutions: ExecutionDetails[] = [];
+let previewLogTarget: LogSearchRequest['target'] = 'content';
 const previewDataRoot =
   import.meta.env.VITE_QINGZHOU_DATA_ROOT ?? '.local\\dev-data（项目目录内）';
 
@@ -860,18 +862,54 @@ export const previewApi = {
     return details;
   },
   cancelExecution: async (_executionId: string) => undefined,
+  listLocalDirectory: async (path: string | null): Promise<DirectoryListing> => ({
+    path: path ?? previewDataRoot,
+    parent: null,
+    entries: [
+      { name: 'downloads', path: `${previewDataRoot}\\downloads`, kind: 'directory', size: null, modifiedAt: null },
+      { name: 'example.log', path: `${previewDataRoot}\\example.log`, kind: 'file', size: 4096, modifiedAt: 1_775_000_000 },
+    ],
+  }),
+  listRemoteDirectory: async (_serverId: string, path: string): Promise<DirectoryListing> => ({
+    path,
+    parent: path === '/' ? null : '/',
+    entries: path === '/'
+      ? [
+          { name: 'home', path: '/home', kind: 'directory', size: null, modifiedAt: null },
+          { name: 'var', path: '/var', kind: 'directory', size: null, modifiedAt: null },
+        ]
+      : [
+          { name: 'app.log', path: `${path}/app.log`.replace('//', '/'), kind: 'file', size: 8192, modifiedAt: 1_775_000_000 },
+        ],
+  }),
   searchLogs: async (
     serverId: string,
-    _request: LogSearchRequest,
+    request: LogSearchRequest,
     onEvent: (event: ExecutionEvent) => void,
   ) => {
+    previewLogTarget = request.target;
     const details = createPreviewExecution(serverId, 'logs.search');
     emitPreview(onEvent, details);
     return details;
   },
   readLogResultPage: async (_executionId: string, cursor: string | null, pageSize: number) => {
+    if (previewLogTarget === 'filename') {
+      return {
+        items: [
+          {
+            resultType: 'file' as const,
+            path: '/home/app/requirements.txt',
+            name: 'requirements.txt',
+            size: 96,
+            modifiedAt: 1_785_801_600,
+          },
+        ],
+        nextCursor: null,
+      };
+    }
     const start = cursor ? Number(cursor) : 0;
     const items = Array.from({ length: Math.min(pageSize, 8) }, (_, index) => ({
+      resultType: 'content' as const,
       path: '/var/log/app.log',
       lineNumber: start + index + 1,
       kind: 'match' as const,

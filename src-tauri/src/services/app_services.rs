@@ -47,7 +47,7 @@ use crate::{
 
 use crate::core::{
     logs::{LogResultPage, LogSearchRequest},
-    sftp::{DownloadRequest, UploadRequest},
+    sftp::{self, DirectoryListing, DownloadRequest, UploadRequest},
     ssh::executor::EventSink,
 };
 
@@ -320,6 +320,22 @@ impl AppServices {
         self.logs
             .download_result(execution_id, suggested_name)
             .await
+    }
+
+    pub async fn list_local_directory(&self, path: Option<&Path>) -> AppResult<DirectoryListing> {
+        sftp::list_local_directory(&self.data_root, path).await
+    }
+
+    pub async fn list_remote_directory(
+        &self,
+        server_id: &str,
+        path: &str,
+    ) -> AppResult<DirectoryListing> {
+        let connector = ServerConnector::new(self.servers.clone(), self.vault.clone());
+        let connected = connector.connect(server_id).await?;
+        let listing = sftp::list_remote_directory(&connected.session, path).await;
+        connected.session.disconnect().await;
+        listing
     }
 
     pub async fn upload_file<E: EventSink>(

@@ -107,11 +107,13 @@ impl Serialize for AppError {
         struct Payload<'a> {
             code: &'a str,
             message: String,
+            retryable: bool,
         }
 
         Payload {
             code: self.code(),
             message: self.to_string(),
+            retryable: self.retryable(),
         }
         .serialize(serializer)
     }
