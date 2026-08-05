@@ -273,9 +273,32 @@ pub async fn execute_streaming<E: EventSink>(
     }
 
     let totals = writer.finish().await?;
+    let exit_status = require_exit_status(exit_status)?;
     Ok(CommandOutcome {
-        exit_status: exit_status.unwrap_or(-1),
+        exit_status,
         stdout_bytes: totals.stdout_bytes,
         stderr_bytes: totals.stderr_bytes,
     })
+}
+
+fn require_exit_status(exit_status: Option<i32>) -> AppResult<i32> {
+    exit_status.ok_or_else(|| {
+        AppError::RemoteStateUncertain(
+            "SSH 通道在返回远程退出状态前关闭，无法确认命令是否已经生效".into(),
+        )
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn missing_remote_exit_status_is_uncertain_instead_of_fake_negative_one() {
+        assert!(matches!(
+            require_exit_status(None),
+            Err(AppError::RemoteStateUncertain(_))
+        ));
+        assert_eq!(require_exit_status(Some(17)).unwrap(), 17);
+    }
 }

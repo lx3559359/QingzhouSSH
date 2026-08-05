@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import base64
 import gzip
 import logging
 import os
@@ -22,7 +23,7 @@ PKG=apt
 SERVICE=systemd
 ARCH=x86_64
 SHELL=/bin/bash
-COMMANDS=grep,gzip,awk,systemctl,service,ps,head,df,uptime,uname,free,ip,hostname,hostnamectl,timedatectl,swapon,swapoff,mkswap,stat,chmod,chown,fallocate,sha256sum,mktemp,cat,mv,rm,mkdir,sh,docker
+COMMANDS=grep,gzip,awk,systemctl,systemd-run,service,ps,head,df,uptime,uname,free,ip,nmcli,hostname,hostnamectl,timedatectl,swapon,swapoff,mkswap,stat,chmod,chown,fallocate,sha256sum,mktemp,cat,mv,rm,mkdir,rmdir,find,sh,docker,base64,sed,tr,id
 SERVICES=qingzhou-fixture.service,qingzhou-verify-fail.service,
 CONTAINERS=fixture-container,
 """
@@ -62,17 +63,78 @@ class FixtureServer(asyncssh.SSHServer):
         return True
 
     def validate_password(self, username: str, password: str) -> bool:
-        return username == "testuser" and password == "testpass"
+        return username in {"testuser", "root-sim", "sudo-user", "no-priv"} and password == "testpass"
 
 
-def command_result(command: str) -> tuple[str, str, int]:
+def command_result(command: str, username: str = "testuser") -> tuple[str, str, int]:
     if any(marker in command for marker in FAILURE_MARKERS):
         return "", "workflow fixture injected failure\n", 73
     if "__QZ_OS_BEGIN__" in command:
         return PROBE_OUTPUT, "", 0
     if command.strip() == "id -u":
-        return "0\n", "", 0
+        return ("0\n", "", 0) if username in {"testuser", "root-sim"} else ("1000\n", "", 0)
     if command.strip() == "sudo -n true":
+        return ("", "", 0) if username == "sudo-user" else ("", "sudo: a password is required\n", 1)
+    if "qz_addresses=$(ip -o address show" in command and "gatewayfour" in command:
+        return (
+            "interface=eth0\n"
+            "addresses=127.0.0.1/8\n"
+            "gatewayfour=127.0.0.1\n"
+            "gatewaysix=none\n",
+            "",
+            0,
+        )
+    if "backend=networkmanager" in command and "connectionb" in command:
+        encode = lambda value: base64.b64encode(value.encode("utf-8")).decode("ascii")
+        return (
+            "backend=networkmanager\n"
+            "interface=eth0\n"
+            f"connectionb={encode('fixture-connection')}\n"
+            f"ipfourmethodb={encode('manual')}\n"
+            f"ipfouraddressesb={encode('127.0.0.1/8')}\n"
+            f"ipfourgatewayb={encode('127.0.0.1')}\n"
+            f"ipsixmethodb={encode('ignore')}\n"
+            "ipsixaddressesb=\n"
+            "ipsixgatewayb=\n",
+            "",
+            0,
+        )
+    if "rollback_armed" in command:
+        run_id = recovery_run_id(command)
+        hashes = re.findall(r"[0-9a-f]{64}", command)
+        if run_id is None or not hashes:
+            return "", "fixture rejected malformed recovery arm command\n", 64
+        write_state(f"ip-recovery-{run_id}", f"armed:{hashes[0]}")
+        append_ip_event(run_id, "armed")
+        return "rollback_armed\n", "", 0
+    if "network_applied" in command:
+        run_id = recovery_run_id(command)
+        if run_id is None or not read_optional_state(f"ip-recovery-{run_id}", "").startswith("armed:"):
+            return "", "fixture refused network apply before rollback was armed\n", 65
+        recovery = read_state(f"ip-recovery-{run_id}")
+        write_state(f"ip-recovery-{run_id}", recovery.replace("armed:", "staged:", 1))
+        append_ip_event(run_id, "applied")
+        return "network_applied\n", "", 0
+    if "target_connection_verified" in command:
+        run_id = recovery_run_id(command)
+        if run_id is None or not read_optional_state(f"ip-recovery-{run_id}", "").startswith("staged:"):
+            return "", "fixture refused network finalize before staged apply\n", 66
+        recovery = read_state(f"ip-recovery-{run_id}")
+        write_state(f"ip-recovery-{run_id}", recovery.replace("staged:", "committed:", 1))
+        append_ip_event(run_id, "finalized")
+        return "target_connection_verified\nrollback_cancelled\n", "", 0
+    if "printf 'state='" in command and "printf 'scriptsha='" in command:
+        run_id = recovery_run_id(command)
+        recovery = read_optional_state(f"ip-recovery-{run_id}") if run_id else None
+        if run_id is None or recovery is None or ":" not in recovery:
+            return "", "fixture recovery state is missing\n", 67
+        state, script_hash = recovery.split(":", 1)
+        return f"state={state}\nscriptsha={script_hash}\ncommitted={'true' if state == 'committed' else 'false'}\n", "", 0
+    if 'find "$qz_dir" -xdev -depth -mindepth 1 -delete' in command:
+        run_id = recovery_run_id(command)
+        if run_id is None:
+            return "", "fixture rejected malformed recovery cleanup command\n", 64
+        append_ip_event(run_id, "cleaned")
         return "", "", 0
     if "printf 'manager=systemd\\nservice=%s\\nactive=%s\\nenabled=%s\\n'" in command:
         match = re.search(
@@ -215,7 +277,13 @@ async def handle_process(process: asyncssh.SSHServerProcess[str]) -> None:
             process.stdout.write("workflow-cancel-delay completed\n")
             process.exit(0)
             return
-        stdout, stderr, status = command_result(process.command)
+        if "fixture-disconnect" in process.command and "hostnamectl set-hostname" in process.command:
+            write_state("disconnect-triggered", "true")
+            process.channel.abort()
+            await process.channel.wait_closed()
+            return
+        username = process.get_extra_info("username", "testuser")
+        stdout, stderr, status = command_result(process.command, username)
         if stdout:
             process.stdout.write(stdout)
         if stderr:
@@ -285,11 +353,25 @@ def read_state(name: str) -> str:
     ).strip()
 
 
-def read_optional_state(name: str) -> str | None:
+def read_optional_state(name: str, default: str | None = None) -> str | None:
     if REMOTE_ROOT is None:
         raise RuntimeError("fixture remote root is not initialized")
     path = REMOTE_ROOT / "run" / "qingzhou-fixture" / f"{name}.state"
-    return path.read_text(encoding="utf-8").strip() if path.exists() else None
+    return path.read_text(encoding="utf-8").strip() if path.exists() else default
+
+
+def recovery_run_id(command: str) -> str | None:
+    match = re.search(r"qingzhou-recovery(?:/|-)([0-9a-f-]{36})", command)
+    if match:
+        return match.group(1)
+    match = re.search(r"\b[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}\b", command)
+    return match.group(0) if match else None
+
+
+def append_ip_event(run_id: str, event: str) -> None:
+    key = f"ip-events-{run_id}"
+    current = read_optional_state(key, "") or ""
+    write_state(key, ",".join(filter(None, [current, event])))
 
 
 def service_state_key(service: str) -> str:

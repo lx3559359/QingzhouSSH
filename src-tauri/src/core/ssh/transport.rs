@@ -292,10 +292,16 @@ async fn run_command(
         }
     }
 
+    let exit_status = exit_status.ok_or_else(|| {
+        AppError::RemoteStateUncertain(
+            "SSH 通道在返回远程退出状态前关闭，无法确认命令是否已经生效".into(),
+        )
+    })?;
+
     Ok(CommandOutput {
         stdout: String::from_utf8_lossy(&stdout).into_owned(),
         stderr: String::from_utf8_lossy(&stderr).into_owned(),
-        exit_status: exit_status.unwrap_or(-1),
+        exit_status,
     })
 }
 
