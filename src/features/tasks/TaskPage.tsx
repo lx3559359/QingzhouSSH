@@ -13,9 +13,10 @@ import type { UserFacingError } from '../../api/errors';
 import { ExecutionDrawer } from './ExecutionDrawer';
 import { ParameterForm } from './ParameterForm';
 import { AdvancedExecutionPanel } from './AdvancedExecutionPanel';
+import { ScriptCenter } from './scripts/ScriptCenter';
 
 export function TaskPage() {
-  const [view, setView] = useState<'catalog' | 'advanced'>('catalog');
+  const [view, setView] = useState<'catalog' | 'scripts' | 'advanced'>('catalog');
   const [servers, setServers] = useState<ServerProfile[]>([]);
   const [serverId, setServerId] = useState('');
   const [tasks, setTasks] = useState<TaskAvailability[]>([]);
@@ -133,6 +134,7 @@ export function TaskPage() {
 
       <div className="task-view-switch" aria-label="任务模式">
         <button type="button" className={view === 'catalog' ? 'is-active' : ''} onClick={() => setView('catalog')}>内置任务</button>
+        <button type="button" className={view === 'scripts' ? 'is-active' : ''} onClick={() => setView('scripts')}>我的脚本</button>
         <button type="button" className={view === 'advanced' ? 'is-active' : ''} onClick={() => setView('advanced')}>高级执行</button>
       </div>
 
@@ -148,7 +150,9 @@ export function TaskPage() {
           )}
         </div>
       )}
-      {view === 'advanced' ? (
+      {view === 'scripts' ? (
+        <ScriptCenter apiClient={api} servers={servers} serverId={serverId} builtInTasks={tasks} onChooseBuiltIn={() => setView('catalog')} />
+      ) : view === 'advanced' ? (
         <AdvancedExecutionPanel servers={servers} serverId={serverId} />
       ) : loading ? (
         <div className="silver-card loading-card" role="status"><SpinnerGap className="spin" />正在匹配任务…</div>

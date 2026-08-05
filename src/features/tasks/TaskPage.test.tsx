@@ -8,6 +8,7 @@ const apiMocks = vi.hoisted(() => ({
   listTaskDefinitions: vi.fn(),
   startTaskExecution: vi.fn(),
   cancelExecution: vi.fn(),
+  listPersonalScripts: vi.fn(),
 }));
 
 vi.mock('../../api/tauri', () => ({ api: apiMocks }));
@@ -177,6 +178,22 @@ describe('TaskPage', () => {
       },
     );
     apiMocks.cancelExecution.mockResolvedValue(undefined);
+    apiMocks.listPersonalScripts.mockResolvedValue([]);
+  });
+
+  it('opens the personal script center as a first-class task mode', async () => {
+    const user = userEvent.setup();
+    render(<TaskPage />);
+    await screen.findByRole('heading', { name: '系统概览' });
+
+    await user.click(screen.getByRole('button', { name: '我的脚本' }));
+
+    expect(await screen.findByRole('region', { name: '个人脚本中心' })).toBeVisible();
+    expect(screen.getByRole('heading', { name: '个人脚本' })).toBeVisible();
+    expect(apiMocks.listPersonalScripts).toHaveBeenCalledWith({
+      query: undefined,
+      favorite: undefined,
+    });
   });
 
   it('selects a server, loads compatible cards, and streams task output', async () => {
