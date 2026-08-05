@@ -3,6 +3,7 @@ pub mod execution;
 pub mod operation;
 pub mod operation_batch;
 pub mod operation_restore;
+pub mod script;
 pub mod server;
 pub mod update;
 pub mod workflow;
