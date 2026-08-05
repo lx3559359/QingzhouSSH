@@ -5,8 +5,9 @@ mod render;
 
 pub use catalog::built_in_catalog;
 pub use model::{
-    CompatibilityPredicate, OutputKind, ParameterDefinition, ParameterKind, RiskLevel,
-    TaskCategory, TaskDefinition, TaskImplementation,
+    BackupItemDefinition, BackupItemKind, BackupPlan, CompatibilityPredicate, ExecutionScope,
+    OutputKind, ParameterDefinition, ParameterKind, PrivilegeRequirement, ResultParserKind,
+    RiskLevel, RollbackPlan, TaskCategory, TaskDefinition, TaskImplementation, TaskStep,
 };
 pub use parameters::{shell_quote, validate_parameters, ValidatedParameter, ValidatedParameters};
 pub use render::render_command;
@@ -30,6 +31,23 @@ pub fn select_implementation<'a>(
                 definition.id, capabilities.os_id, capabilities.os_family
             ))
         })
+}
+
+pub fn task_version_is_compatible(definition: &TaskDefinition, requested_version: i32) -> bool {
+    definition.version == requested_version
+        || (definition.version == 2
+            && requested_version == 1
+            && matches!(
+                definition.id.as_str(),
+                "system.overview"
+                    | "system.disk_usage"
+                    | "system.process_query"
+                    | "service.status"
+                    | "service.start"
+                    | "service.stop"
+                    | "service.restart"
+                    | "logs.search"
+            ))
 }
 
 fn matches_capabilities(

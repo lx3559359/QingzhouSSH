@@ -9,7 +9,7 @@ use crate::{
     core::{
         redaction::Redactor,
         ssh::executor::{EventSink, VecEventSink},
-        tasks::{built_in_catalog, select_implementation, RiskLevel},
+        tasks::{built_in_catalog, select_implementation, task_version_is_compatible, RiskLevel},
         workflows::{evaluate_condition, require_valid_workflow, ConditionContext},
     },
     domain::{
@@ -624,7 +624,9 @@ impl WorkflowService {
                 {
                     let task = built_in_catalog()
                         .into_iter()
-                        .find(|task| task.id == *task_id && task.version == *task_version)
+                        .find(|task| {
+                            task.id == *task_id && task_version_is_compatible(task, *task_version)
+                        })
                         .ok_or_else(|| AppError::Validation("工作流任务版本不存在".into()))?;
                     select_implementation(&task, &connected.capabilities)?;
                 }

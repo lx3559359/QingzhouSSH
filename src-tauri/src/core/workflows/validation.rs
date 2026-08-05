@@ -11,7 +11,7 @@ use crate::{
     core::{
         logs::{LogSearchRequest, LogSearchTarget},
         sftp::{download_destination, validate_remote_path},
-        tasks::{built_in_catalog, validate_parameters},
+        tasks::{built_in_catalog, task_version_is_compatible, validate_parameters},
         workflows::condition::validate_condition,
     },
     domain::workflow::{
@@ -287,7 +287,10 @@ fn validate_node(node: &WorkflowNode) -> AppResult<()> {
         } => {
             let definition = built_in_catalog()
                 .into_iter()
-                .find(|definition| definition.id == *task_id && definition.version == *task_version)
+                .find(|definition| {
+                    definition.id == *task_id
+                        && task_version_is_compatible(definition, *task_version)
+                })
                 .ok_or_else(|| AppError::Validation("工作流任务 ID 或版本不存在".into()))?;
             let object = Map::from_iter(parameters.clone());
             validate_parameters(&definition, &Value::Object(object)).map(|_| ())

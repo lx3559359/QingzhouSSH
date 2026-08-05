@@ -5,8 +5,14 @@ use serde_json::Value;
 #[serde(rename_all = "snake_case")]
 pub enum TaskCategory {
     System,
+    Storage,
+    Network,
+    Security,
     Service,
     Logs,
+    Web,
+    Container,
+    Script,
     Advanced,
 }
 
@@ -14,11 +20,31 @@ impl TaskCategory {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::System => "system",
+            Self::Storage => "storage",
+            Self::Network => "network",
+            Self::Security => "security",
             Self::Service => "service",
             Self::Logs => "logs",
+            Self::Web => "web",
+            Self::Container => "container",
+            Self::Script => "script",
             Self::Advanced => "advanced",
         }
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PrivilegeRequirement {
+    CurrentUser,
+    RootOrPasswordlessSudo,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ExecutionScope {
+    SingleServer,
+    ReadOnlyBatch,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -82,11 +108,70 @@ pub struct CompatibilityPredicate {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct TaskStep {
+    pub id: String,
+    pub title: String,
+    pub timeout_seconds: u64,
+    pub output_limit_bytes: u64,
+    #[serde(skip_serializing, skip_deserializing)]
+    pub command_template: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum BackupItemKind {
+    RemoteFile,
+    CommandSnapshot,
+    ManagedBlock,
+    RuntimeState,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BackupItemDefinition {
+    pub id: String,
+    pub kind: BackupItemKind,
+    #[serde(skip_serializing, skip_deserializing)]
+    pub target_template: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BackupPlan {
+    pub items: Vec<BackupItemDefinition>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RollbackPlan {
+    pub steps: Vec<TaskStep>,
+    pub automatic_on_failure: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ResultParserKind {
+    Text,
+    KeyValue,
+    Table,
+    HealthSummary,
+    NetworkProbe,
+    ServiceStatus,
+    ContainerStatus,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct TaskImplementation {
     pub id: String,
     pub compatibility: CompatibilityPredicate,
-    #[serde(skip_serializing)]
-    pub command_template: String,
+    pub preflight_steps: Vec<TaskStep>,
+    pub preview_steps: Vec<TaskStep>,
+    pub backup_plan: Option<BackupPlan>,
+    pub execution_steps: Vec<TaskStep>,
+    pub verify_steps: Vec<TaskStep>,
+    pub rollback_plan: Option<RollbackPlan>,
+    pub result_parser: ResultParserKind,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -98,6 +183,9 @@ pub struct TaskDefinition {
     pub title: String,
     pub description: String,
     pub risk_level: RiskLevel,
+    pub estimated_seconds: u32,
+    pub privilege: PrivilegeRequirement,
+    pub scope: ExecutionScope,
     pub parameters: Vec<ParameterDefinition>,
     pub implementations: Vec<TaskImplementation>,
     pub output_kind: OutputKind,

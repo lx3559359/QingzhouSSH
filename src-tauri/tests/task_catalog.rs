@@ -3,7 +3,8 @@ use qingzhou_ssh_lib::{
         system_probe::SystemCapabilities,
         tasks::{
             built_in_catalog, render_command, select_implementation, shell_quote,
-            validate_parameters, ParameterKind, TaskCategory,
+            task_version_is_compatible, validate_parameters, ExecutionScope, ParameterKind,
+            PrivilegeRequirement, TaskCategory,
         },
     },
     error::AppError,
@@ -20,6 +21,82 @@ fn capabilities(os_id: &str, family: &str, service: &str, commands: &[&str]) -> 
         shell: "/bin/sh".into(),
         commands: commands.iter().map(|value| (*value).into()).collect(),
     }
+}
+
+#[test]
+fn v2_task_definition_serializes_safe_metadata_but_not_commands() {
+    let definition = built_in_catalog()
+        .into_iter()
+        .find(|item| item.id == "system.overview")
+        .unwrap();
+    assert_eq!(definition.category, TaskCategory::System);
+    assert_eq!(definition.privilege, PrivilegeRequirement::CurrentUser);
+    assert_eq!(definition.scope, ExecutionScope::ReadOnlyBatch);
+    assert!(!definition.implementations[0].execution_steps.is_empty());
+
+    let encoded = serde_json::to_string(&definition).unwrap();
+    assert!(encoded.contains("estimatedSeconds"));
+    assert!(!encoded.contains("uname -a"));
+    assert!(!encoded.contains("commandTemplate"));
+}
+
+#[test]
+fn task_categories_cover_the_operations_center() {
+    for category in [
+        TaskCategory::System,
+        TaskCategory::Storage,
+        TaskCategory::Network,
+        TaskCategory::Security,
+        TaskCategory::Service,
+        TaskCategory::Logs,
+        TaskCategory::Web,
+        TaskCategory::Container,
+        TaskCategory::Script,
+        TaskCategory::Advanced,
+    ] {
+        assert!(!category.as_str().is_empty());
+    }
+}
+
+#[test]
+fn dangerous_service_previews_only_read_current_status() {
+    for definition in built_in_catalog().into_iter().filter(|item| {
+        matches!(
+            item.id.as_str(),
+            "service.start" | "service.stop" | "service.restart"
+        )
+    }) {
+        for implementation in definition.implementations {
+            let previews = implementation
+                .preview_steps
+                .iter()
+                .map(|step| step.command_template.as_str())
+                .collect::<Vec<_>>();
+            assert!(
+                !previews.is_empty(),
+                "{} must have a preview",
+                definition.id
+            );
+            assert!(
+                previews.iter().all(|command| command.contains("status")),
+                "{} preview must only inspect service status",
+                definition.id
+            );
+        }
+    }
+}
+
+#[test]
+fn only_original_v1_tasks_receive_the_v2_compatibility_bridge() {
+    let mut definition = built_in_catalog()
+        .into_iter()
+        .find(|item| item.id == "system.overview")
+        .unwrap();
+    assert!(task_version_is_compatible(&definition, 1));
+    assert!(task_version_is_compatible(&definition, 2));
+
+    definition.id = "system.future_task".into();
+    assert!(!task_version_is_compatible(&definition, 1));
 }
 
 #[test]

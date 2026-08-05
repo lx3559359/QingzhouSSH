@@ -1,7 +1,10 @@
 use serde_json::{Map, Value};
 
 use crate::{
-    core::{ssh::executor::EventSink, tasks::built_in_catalog},
+    core::{
+        ssh::executor::EventSink,
+        tasks::{built_in_catalog, task_version_is_compatible},
+    },
     domain::workflow::{WorkflowCustomMode, WorkflowNodeConfig},
     error::{AppError, AppResult},
     services::{
@@ -44,7 +47,7 @@ impl ExecutionNodeAdapter {
                     .into_iter()
                     .find(|definition| definition.id == *task_id)
                     .ok_or_else(|| AppError::Validation("工作流任务不存在".into()))?;
-                if definition.version != *task_version {
+                if !task_version_is_compatible(&definition, *task_version) {
                     return Err(AppError::Validation("工作流任务版本不存在".into()));
                 }
                 self.service

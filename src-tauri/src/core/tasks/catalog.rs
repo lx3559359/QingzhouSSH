@@ -1,8 +1,9 @@
 use serde_json::json;
 
 use crate::core::tasks::model::{
-    CompatibilityPredicate, OutputKind, ParameterDefinition, ParameterKind, RiskLevel,
-    TaskCategory, TaskDefinition, TaskImplementation,
+    CompatibilityPredicate, ExecutionScope, OutputKind, ParameterDefinition, ParameterKind,
+    PrivilegeRequirement, ResultParserKind, RiskLevel, TaskCategory, TaskDefinition,
+    TaskImplementation, TaskStep,
 };
 
 const SUPPORTED_FAMILIES: [&str; 3] = ["debian", "rhel", "openeuler"];
@@ -21,6 +22,7 @@ pub fn built_in_catalog() -> Vec<TaskDefinition> {
                 &[],
                 &["uptime", "uname", "df", "ps"],
                 "printf '== system ==\\n'; uname -a; printf '== uptime ==\\n'; uptime; printf '== memory ==\\n'; (free -b 2>/dev/null || true); printf '== disk ==\\n'; df -P -B1; printf '== network ==\\n'; (ip -brief address 2>/dev/null || hostname -I 2>/dev/null || true); printf '== processes ==\\n'; ps -eo pid,user,%cpu,%mem,etime,args | head -n 21",
+                ResultParserKind::KeyValue,
             )],
             output_kind: OutputKind::KeyValue,
         }),
@@ -31,7 +33,13 @@ pub fn built_in_catalog() -> Vec<TaskDefinition> {
             description: "按字节查看挂载点容量和使用率",
             risk_level: RiskLevel::Safe,
             parameters: Vec::new(),
-            implementations: vec![implementation("posix", &[], &["df"], "df -P -B1")],
+            implementations: vec![implementation(
+                "posix",
+                &[],
+                &["df"],
+                "df -P -B1",
+                ResultParserKind::Table,
+            )],
             output_kind: OutputKind::Table,
         }),
         task(TaskSpec {
@@ -49,6 +57,7 @@ pub fn built_in_catalog() -> Vec<TaskDefinition> {
                 &[],
                 &["ps", "grep", "head"],
                 "ps -eo pid,user,%cpu,%mem,etime,args | grep -F -- {{query}} | grep -v '[g]rep -F' | head -n {{limit}}",
+                ResultParserKind::Table,
             )],
             output_kind: OutputKind::Table,
         }),
@@ -96,6 +105,7 @@ pub fn built_in_catalog() -> Vec<TaskDefinition> {
                 &[],
                 &["grep"],
                 "grep -n -F -- {{keyword}} {{path}} | head -n {{limit}}",
+                ResultParserKind::Text,
             )],
             output_kind: OutputKind::LogMatches,
         }),
@@ -125,16 +135,8 @@ fn service_task(
             sensitive: false,
         }],
         implementations: vec![
-            TaskImplementation {
-                id: format!("systemd-{action}"),
-                compatibility: compatibility(&["systemd"], &["systemctl"]),
-                command_template: format!("systemctl {action} -- {{{{service}}}}"),
-            },
-            TaskImplementation {
-                id: format!("sysv-{action}"),
-                compatibility: compatibility(&["service"], &["service"]),
-                command_template: format!("service {{{{service}}}} {action}"),
-            },
+            service_implementation("systemd", "systemctl", action),
+            service_implementation("service", "service", action),
         ],
         output_kind: OutputKind::Text,
     })
@@ -152,13 +154,21 @@ struct TaskSpec<'a> {
 }
 
 fn task(spec: TaskSpec<'_>) -> TaskDefinition {
+    let scope = if spec.risk_level == RiskLevel::Safe {
+        ExecutionScope::ReadOnlyBatch
+    } else {
+        ExecutionScope::SingleServer
+    };
     TaskDefinition {
         id: spec.id.into(),
-        version: 1,
+        version: 2,
         category: spec.category,
         title: spec.title.into(),
         description: spec.description.into(),
         risk_level: spec.risk_level,
+        estimated_seconds: 30,
+        privilege: PrivilegeRequirement::CurrentUser,
+        scope,
         parameters: spec.parameters,
         implementations: spec.implementations,
         output_kind: spec.output_kind,
@@ -170,10 +180,56 @@ fn implementation(
     service_managers: &[&str],
     required_commands: &[&str],
     command_template: &str,
+    result_parser: ResultParserKind,
 ) -> TaskImplementation {
     TaskImplementation {
         id: id.into(),
         compatibility: compatibility(service_managers, required_commands),
+        preflight_steps: Vec::new(),
+        preview_steps: vec![task_step("preview", "执行预演", command_template)],
+        backup_plan: None,
+        execution_steps: vec![task_step("execute", "执行任务", command_template)],
+        verify_steps: Vec::new(),
+        rollback_plan: None,
+        result_parser,
+    }
+}
+
+fn service_implementation(
+    service_manager: &str,
+    command: &str,
+    action: &str,
+) -> TaskImplementation {
+    let command_template = if command == "systemctl" {
+        format!("systemctl {action} -- {{{{service}}}}")
+    } else {
+        format!("service {{{{service}}}} {action}")
+    };
+    let preview_template = if command == "systemctl" {
+        "systemctl status -- {{service}}".to_owned()
+    } else {
+        "service {{service}} status".to_owned()
+    };
+
+    TaskImplementation {
+        id: format!("{service_manager}-{action}"),
+        compatibility: compatibility(&[service_manager], &[command]),
+        preflight_steps: Vec::new(),
+        preview_steps: vec![task_step("preview", "查看当前服务状态", &preview_template)],
+        backup_plan: None,
+        execution_steps: vec![task_step("execute", "执行服务操作", &command_template)],
+        verify_steps: Vec::new(),
+        rollback_plan: None,
+        result_parser: ResultParserKind::ServiceStatus,
+    }
+}
+
+fn task_step(id: &str, title: &str, command_template: &str) -> TaskStep {
+    TaskStep {
+        id: id.into(),
+        title: title.into(),
+        timeout_seconds: 30,
+        output_limit_bytes: 1024 * 1024,
         command_template: command_template.into(),
     }
 }
