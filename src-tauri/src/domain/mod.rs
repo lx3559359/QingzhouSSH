@@ -1,5 +1,6 @@
 pub mod events;
 pub mod execution;
+pub mod operation;
 pub mod server;
 pub mod update;
 pub mod workflow;
