@@ -422,6 +422,8 @@ impl OperationService {
                 | "service.boot_policy"
                 | "service.cron_manage"
                 | "container.action"
+                | "network.hosts_manage"
+                | "security.firewall_open_port"
         ) {
             return Err(AppError::Validation(
                 "该危险任务的恢复执行器尚未完成，服务器未发生修改".into(),
@@ -785,7 +787,25 @@ impl OperationService {
     ) -> AppResult<(TaskDefinition, OperationRunRecord)> {
         let definition = resolve_definition(&request.task_id, request.task_version)?;
         let validated = validate_parameters(&definition, &request.parameters)?;
-        self.connector.require_server(server_id).await?;
+        let server = self.connector.require_server(server_id).await?;
+        if definition.id == "security.firewall_open_port"
+            && validated
+                .get("action")
+                .and_then(|parameter| parameter.value.as_str())
+                == Some("remove")
+            && validated
+                .get("protocol")
+                .and_then(|parameter| parameter.value.as_str())
+                == Some("tcp")
+            && validated
+                .get("port")
+                .and_then(|parameter| parameter.value.as_u64())
+                == Some(u64::from(server.port))
+        {
+            return Err(AppError::Validation(
+                "不能移除当前连接正在使用的 SSH 端口规则，请先迁移 SSH 端口并验证新连接".into(),
+            ));
+        }
         let run = self
             .repository
             .create(NewOperationRun {

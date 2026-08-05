@@ -42,6 +42,7 @@ use crate::{
         operation_report_service::OperationReportService,
         operation_restore_service::OperationRestoreService,
         operation_service::OperationService,
+        remote_recovery_service::RemoteRecoveryService,
         restore_point_service::RestorePointService,
         server_connector::ServerConnector,
         transfer_service::TransferService,
@@ -78,6 +79,7 @@ pub struct AppServices {
     operation_batches: OperationBatchService,
     operation_reports: OperationReportService,
     operation_restore_points: OperationRestoreService,
+    remote_recovery: RemoteRecoveryService,
     logs: LogService,
     transfers: TransferService,
     workflows: WorkflowRepository,
@@ -133,6 +135,7 @@ impl AppServices {
             operation_restore_points.clone(),
             connector.clone(),
         );
+        let remote_recovery = RemoteRecoveryService::new(connector.clone());
         let operation_batches = OperationBatchService::new(
             operation_batch_repository.clone(),
             servers.clone(),
@@ -178,6 +181,7 @@ impl AppServices {
             operation_batches,
             operation_reports,
             operation_restore_points,
+            remote_recovery,
             logs,
             transfers,
             workflows: workflow_repository,
@@ -209,6 +213,10 @@ impl AppServices {
 
     pub fn operation_restore_service(&self) -> OperationRestoreService {
         self.operation_restore_points.clone()
+    }
+
+    pub fn remote_recovery_service(&self) -> RemoteRecoveryService {
+        self.remote_recovery.clone()
     }
 
     pub fn log_service(&self) -> LogService {

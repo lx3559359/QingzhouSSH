@@ -100,6 +100,14 @@ fn firewall_open_port() -> TaskDefinition {
         90,
         vec![
             enum_parameter("action", "操作", "添加或移除规则", &["add", "remove"], None),
+            parameter(
+                "entryId",
+                "规则标识",
+                "客户端自动生成，只允许修改同一标识的工具规则",
+                ParameterKind::ManagedId,
+                true,
+                None,
+            ),
             port_parameter("port", "端口", "要管理的单个端口", true, None),
             enum_parameter(
                 "protocol",
@@ -112,39 +120,87 @@ fn firewall_open_port() -> TaskDefinition {
         vec![
             firewall_implementation(
                 "firewalld",
-                &["firewall-cmd"],
-                "firewall-cmd --list-all-zones",
-                "firewall-cmd --list-all-zones",
-                r#"if test {{action}} = 'add'; then firewall-cmd --permanent --add-port={{port}}/{{protocol}}; else firewall-cmd --permanent --remove-port={{port}}/{{protocol}}; fi; firewall-cmd --reload"#,
-                "firewall-cmd --list-ports",
+                &["firewall-cmd", "grep"],
+                firewalld_snapshot(),
+                firewalld_snapshot(),
+                firewalld_action(),
+                firewalld_verify(),
             ),
             firewall_implementation(
                 "ufw",
-                &["ufw"],
-                "ufw status numbered",
-                "ufw status verbose",
-                r#"if test {{action}} = 'add'; then ufw allow {{port}}/{{protocol}}; else ufw delete allow {{port}}/{{protocol}}; fi"#,
-                "ufw status numbered",
+                &["ufw", "awk", "sed"],
+                ufw_snapshot(),
+                ufw_snapshot(),
+                ufw_action(),
+                ufw_verify(),
             ),
             firewall_implementation(
                 "nftables",
-                &["nft"],
-                "nft list ruleset",
-                "nft list ruleset",
-                "{{managed:firewall:nft:action}}",
-                "nft list ruleset",
+                &["nft", "awk"],
+                nft_snapshot(),
+                nft_snapshot(),
+                nft_action(),
+                nft_verify(),
             ),
             firewall_implementation(
                 "iptables",
                 &["iptables"],
-                "iptables -S",
-                "iptables-save",
-                "{{managed:firewall:iptables:action}}",
-                "iptables -S",
+                iptables_snapshot(),
+                iptables_snapshot(),
+                iptables_action(),
+                iptables_verify(),
             ),
         ],
         OutputKind::KeyValue,
     )
+}
+
+fn firewalld_snapshot() -> &'static str {
+    r#"qz_id={{entryId}}; qz_port={{port}}; qz_protocol={{protocol}}; qz_marker="qingzhou:$qz_id"; qz_rule="0 -p $qz_protocol --dport $qz_port -m comment --comment $qz_marker -j ACCEPT"; qz_present=false; qz_owned=$(firewall-cmd --permanent --direct --get-rules ipv4 filter INPUT | grep --fixed-strings -- "$qz_marker" || true); if test -n "$qz_owned"; then test "$qz_owned" = "$qz_rule" || exit 65; qz_present=true; fi; printf 'backend=firewalld\nentryid=%s\nport=%s\nprotocol=%s\npresent=%s\n' "$qz_id" "$qz_port" "$qz_protocol" "$qz_present""#
+}
+
+fn firewalld_action() -> &'static str {
+    r#"qz_action={{action}}; qz_id={{entryId}}; qz_port={{port}}; qz_protocol={{protocol}}; qz_marker="qingzhou:$qz_id"; qz_rule="0 -p $qz_protocol --dport $qz_port -m comment --comment $qz_marker -j ACCEPT"; qz_owned=$(firewall-cmd --permanent --direct --get-rules ipv4 filter INPUT | grep --fixed-strings -- "$qz_marker" || true); if test -n "$qz_owned"; then test "$qz_owned" = "$qz_rule" || exit 65; fi; case "$qz_action" in add) if test -z "$qz_owned"; then firewall-cmd --permanent --direct --add-rule ipv4 filter INPUT 0 -p "$qz_protocol" --dport "$qz_port" -m comment --comment "$qz_marker" -j ACCEPT || exit; fi;; remove) if test -n "$qz_owned"; then firewall-cmd --permanent --direct --remove-rule ipv4 filter INPUT 0 -p "$qz_protocol" --dport "$qz_port" -m comment --comment "$qz_marker" -j ACCEPT || exit; fi;; *) exit 64;; esac; firewall-cmd --reload"#
+}
+
+fn firewalld_verify() -> &'static str {
+    r#"qz_action={{action}}; qz_id={{entryId}}; qz_port={{port}}; qz_protocol={{protocol}}; qz_marker="qingzhou:$qz_id"; qz_rule="0 -p $qz_protocol --dport $qz_port -m comment --comment $qz_marker -j ACCEPT"; qz_owned=$(firewall-cmd --permanent --direct --get-rules ipv4 filter INPUT | grep --fixed-strings -- "$qz_marker" || true); case "$qz_action" in add) test "$qz_owned" = "$qz_rule";; remove) test -z "$qz_owned";; *) exit 64;; esac"#
+}
+
+fn ufw_snapshot() -> &'static str {
+    r#"qz_id={{entryId}}; qz_port={{port}}; qz_protocol={{protocol}}; qz_marker="qingzhou:$qz_id"; qz_present=false; qz_rows=$(ufw status numbered | awk -v marker="$qz_marker" 'index($0, marker) { print }'); if test -n "$qz_rows"; then test "$(printf '%s\n' "$qz_rows" | awk 'NF { count++ } END { print count + 0 }')" -eq 1; printf '%s\n' "$qz_rows" | awk -v port="$qz_port/$qz_protocol" 'index($0, port) { found=1 } END { exit !found }'; qz_present=true; fi; printf 'backend=ufw\nentryid=%s\nport=%s\nprotocol=%s\npresent=%s\n' "$qz_id" "$qz_port" "$qz_protocol" "$qz_present""#
+}
+
+fn ufw_action() -> &'static str {
+    r#"qz_action={{action}}; qz_id={{entryId}}; qz_port={{port}}; qz_protocol={{protocol}}; qz_marker="qingzhou:$qz_id"; qz_rows=$(ufw status numbered | awk -v marker="$qz_marker" 'index($0, marker) { print }'); if test -n "$qz_rows"; then test "$(printf '%s\n' "$qz_rows" | awk 'NF { count++ } END { print count + 0 }')" -eq 1; printf '%s\n' "$qz_rows" | awk -v port="$qz_port/$qz_protocol" 'index($0, port) { found=1 } END { exit !found }'; fi; case "$qz_action" in add) test -n "$qz_rows" || ufw allow "$qz_port/$qz_protocol" comment "$qz_marker";; remove) if test -n "$qz_rows"; then qz_number=$(printf '%s\n' "$qz_rows" | sed -n 's/^\[[[:space:]]*\([0-9][0-9]*\)\].*/\1/p'); test -n "$qz_number" && ufw --force delete "$qz_number"; fi;; *) exit 64;; esac"#
+}
+
+fn ufw_verify() -> &'static str {
+    r#"qz_action={{action}}; qz_id={{entryId}}; qz_port={{port}}; qz_protocol={{protocol}}; qz_marker="qingzhou:$qz_id"; qz_rows=$(ufw status numbered | awk -v marker="$qz_marker" 'index($0, marker) { print }'); case "$qz_action" in add) test "$(printf '%s\n' "$qz_rows" | awk 'NF { count++ } END { print count + 0 }')" -eq 1 && printf '%s\n' "$qz_rows" | awk -v port="$qz_port/$qz_protocol" 'index($0, port) { found=1 } END { exit !found }';; remove) test -z "$qz_rows";; *) exit 64;; esac"#
+}
+
+fn nft_snapshot() -> &'static str {
+    r#"qz_id={{entryId}}; qz_port={{port}}; qz_protocol={{protocol}}; qz_marker="qingzhou:$qz_id"; qz_present=false; qz_rows=$(nft -a list chain inet qingzhou input 2>/dev/null | awk -v marker="$qz_marker" 'index($0, marker) { print }'); if test -n "$qz_rows"; then test "$(printf '%s\n' "$qz_rows" | awk 'NF { count++ } END { print count + 0 }')" -eq 1; printf '%s\n' "$qz_rows" | awk -v protocol="$qz_protocol" -v port="$qz_port" 'index($0, protocol " dport " port) { found=1 } END { exit !found }'; qz_present=true; fi; printf 'backend=nftables\nentryid=%s\nport=%s\nprotocol=%s\npresent=%s\n' "$qz_id" "$qz_port" "$qz_protocol" "$qz_present""#
+}
+
+fn nft_action() -> &'static str {
+    r#"qz_action={{action}}; qz_id={{entryId}}; qz_port={{port}}; qz_protocol={{protocol}}; qz_marker="qingzhou:$qz_id"; qz_rows=$(nft -a list chain inet qingzhou input 2>/dev/null | awk -v marker="$qz_marker" 'index($0, marker) { print }'); if test -n "$qz_rows"; then test "$(printf '%s\n' "$qz_rows" | awk 'NF { count++ } END { print count + 0 }')" -eq 1; printf '%s\n' "$qz_rows" | awk -v protocol="$qz_protocol" -v port="$qz_port" 'index($0, protocol " dport " port) { found=1 } END { exit !found }'; fi; case "$qz_action" in add) if test -z "$qz_rows"; then nft list table inet qingzhou >/dev/null 2>&1 || nft add table inet qingzhou; nft list chain inet qingzhou input >/dev/null 2>&1 || nft 'add chain inet qingzhou input { type filter hook input priority 0; }'; nft add rule inet qingzhou input "$qz_protocol" dport "$qz_port" counter accept comment "$qz_marker"; fi;; remove) if test -n "$qz_rows"; then qz_handle=$(printf '%s\n' "$qz_rows" | awk '{ for (i=1; i<=NF; i++) if ($i == "handle") { print $(i+1); exit } }'); test -n "$qz_handle" && nft delete rule inet qingzhou input handle "$qz_handle"; fi;; *) exit 64;; esac"#
+}
+
+fn nft_verify() -> &'static str {
+    r#"qz_action={{action}}; qz_id={{entryId}}; qz_port={{port}}; qz_protocol={{protocol}}; qz_marker="qingzhou:$qz_id"; qz_rows=$(nft -a list chain inet qingzhou input 2>/dev/null | awk -v marker="$qz_marker" 'index($0, marker) { print }'); case "$qz_action" in add) test "$(printf '%s\n' "$qz_rows" | awk 'NF { count++ } END { print count + 0 }')" -eq 1 && printf '%s\n' "$qz_rows" | awk -v protocol="$qz_protocol" -v port="$qz_port" 'index($0, protocol " dport " port) { found=1 } END { exit !found }';; remove) test -z "$qz_rows";; *) exit 64;; esac"#
+}
+
+fn iptables_snapshot() -> &'static str {
+    r#"qz_id={{entryId}}; qz_port={{port}}; qz_protocol={{protocol}}; qz_marker="qingzhou:$qz_id"; qz_present=false; if iptables -C INPUT -p "$qz_protocol" --dport "$qz_port" -m comment --comment "$qz_marker" -j ACCEPT >/dev/null 2>&1; then qz_present=true; fi; printf 'backend=iptables\nentryid=%s\nport=%s\nprotocol=%s\npresent=%s\n' "$qz_id" "$qz_port" "$qz_protocol" "$qz_present""#
+}
+
+fn iptables_action() -> &'static str {
+    r#"qz_action={{action}}; qz_id={{entryId}}; qz_port={{port}}; qz_protocol={{protocol}}; qz_marker="qingzhou:$qz_id"; case "$qz_action" in add) iptables -C INPUT -p "$qz_protocol" --dport "$qz_port" -m comment --comment "$qz_marker" -j ACCEPT >/dev/null 2>&1 || iptables -I INPUT -p "$qz_protocol" --dport "$qz_port" -m comment --comment "$qz_marker" -j ACCEPT;; remove) if iptables -C INPUT -p "$qz_protocol" --dport "$qz_port" -m comment --comment "$qz_marker" -j ACCEPT >/dev/null 2>&1; then iptables -D INPUT -p "$qz_protocol" --dport "$qz_port" -m comment --comment "$qz_marker" -j ACCEPT; fi;; *) exit 64;; esac"#
+}
+
+fn iptables_verify() -> &'static str {
+    r#"qz_action={{action}}; qz_id={{entryId}}; qz_port={{port}}; qz_protocol={{protocol}}; qz_marker="qingzhou:$qz_id"; case "$qz_action" in add) iptables -C INPUT -p "$qz_protocol" --dport "$qz_port" -m comment --comment "$qz_marker" -j ACCEPT;; remove) ! iptables -C INPUT -p "$qz_protocol" --dport "$qz_port" -m comment --comment "$qz_marker" -j ACCEPT >/dev/null 2>&1;; *) exit 64;; esac"#
 }
 
 fn firewall_implementation(

@@ -558,6 +558,7 @@ fn is_snapshot_rollback_task(task_id: &str) -> bool {
             | "service.restart"
             | "service.boot_policy"
             | "container.action"
+            | "security.firewall_open_port"
     )
 }
 
@@ -652,7 +653,110 @@ pub fn build_snapshot_rollback_command(
         }
         "service.boot_policy" => build_service_policy_rollback(&values),
         "container.action" => build_container_rollback(&values),
+        "security.firewall_open_port" => build_firewall_rollback(&values),
         _ => Err(AppError::Validation("该任务尚未实现受控快照回滚".into())),
+    }
+}
+
+fn build_firewall_rollback(
+    values: &BTreeMap<String, String>,
+) -> AppResult<SnapshotRollbackCommand> {
+    let backend = required_snapshot_value(values, "backend")?;
+    let entry_id = required_snapshot_value(values, "entryid")?;
+    let parsed_id = Uuid::parse_str(entry_id)
+        .map_err(|_| AppError::Integrity("恢复点中的防火墙规则标识无效".into()))?;
+    if parsed_id.is_nil() || parsed_id.hyphenated().to_string() != entry_id.to_ascii_lowercase() {
+        return Err(AppError::Integrity("恢复点中的防火墙规则标识无效".into()));
+    }
+    let port = parse_bounded_u32(values, "port", 65_535)?;
+    if port == 0 {
+        return Err(AppError::Integrity("恢复点中的防火墙端口无效".into()));
+    }
+    let protocol = required_snapshot_value(values, "protocol")?;
+    if !matches!(protocol, "tcp" | "udp") {
+        return Err(AppError::Integrity("恢复点中的防火墙协议无效".into()));
+    }
+    let present = parse_snapshot_bool(values, "present")?;
+    let marker = format!("qingzhou:{entry_id}");
+
+    match backend {
+        "firewalld" => {
+            let rule =
+                format!("0 -p {protocol} --dport {port} -m comment --comment {marker} -j ACCEPT");
+            let mutation = if present {
+                format!(
+                    "test -n \"$qz_owned\" || firewall-cmd --permanent --direct --add-rule ipv4 filter INPUT 0 -p {protocol} --dport {port} -m comment --comment {marker} -j ACCEPT"
+                )
+            } else {
+                format!(
+                    "if test -n \"$qz_owned\"; then firewall-cmd --permanent --direct --remove-rule ipv4 filter INPUT 0 -p {protocol} --dport {port} -m comment --comment {marker} -j ACCEPT || exit; fi"
+                )
+            };
+            let expected = if present { &rule } else { "" };
+            Ok(SnapshotRollbackCommand {
+                command: format!(
+                    "qz_marker='{marker}'; qz_rule='{rule}'; qz_owned=$(firewall-cmd --permanent --direct --get-rules ipv4 filter INPUT | grep --fixed-strings -- \"$qz_marker\" || true); test -z \"$qz_owned\" || test \"$qz_owned\" = \"$qz_rule\"; {mutation}; firewall-cmd --reload"
+                ),
+                verify: format!(
+                    "qz_owned=$(firewall-cmd --permanent --direct --get-rules ipv4 filter INPUT | grep --fixed-strings -- '{marker}' || true); test \"$qz_owned\" = '{expected}'"
+                ),
+            })
+        }
+        "ufw" => {
+            let mutation = if present {
+                format!("test -n \"$qz_rows\" || ufw allow '{port}/{protocol}' comment '{marker}'")
+            } else {
+                "if test -n \"$qz_rows\"; then qz_number=$(printf '%s\\n' \"$qz_rows\" | sed -n 's/^\\[[[:space:]]*\\([0-9][0-9]*\\)\\].*/\\1/p'); test -n \"$qz_number\" && ufw --force delete \"$qz_number\"; fi".into()
+            };
+            let expected_count = if present { 1 } else { 0 };
+            Ok(SnapshotRollbackCommand {
+                command: format!(
+                    "qz_rows=$(ufw status numbered | awk -v marker='{marker}' 'index($0, marker) {{ print }}'); test \"$(printf '%s\\n' \"$qz_rows\" | awk 'NF {{ count++ }} END {{ print count + 0 }}')\" -le 1; {mutation}"
+                ),
+                verify: format!(
+                    "qz_rows=$(ufw status numbered | awk -v marker='{marker}' 'index($0, marker) {{ print }}'); test \"$(printf '%s\\n' \"$qz_rows\" | awk 'NF {{ count++ }} END {{ print count + 0 }}')\" -eq {expected_count}"
+                ),
+            })
+        }
+        "nftables" => {
+            let mutation = if present {
+                format!(
+                    "if test -z \"$qz_rows\"; then nft list table inet qingzhou >/dev/null 2>&1 || nft add table inet qingzhou; nft list chain inet qingzhou input >/dev/null 2>&1 || nft 'add chain inet qingzhou input {{ type filter hook input priority 0; }}'; nft add rule inet qingzhou input {protocol} dport {port} counter accept comment '{marker}'; fi"
+                )
+            } else {
+                "if test -n \"$qz_rows\"; then qz_handle=$(printf '%s\\n' \"$qz_rows\" | awk '{ for (i=1; i<=NF; i++) if ($i == \"handle\") { print $(i+1); exit } }'); test -n \"$qz_handle\" && nft delete rule inet qingzhou input handle \"$qz_handle\"; fi".into()
+            };
+            let expected_count = if present { 1 } else { 0 };
+            Ok(SnapshotRollbackCommand {
+                command: format!(
+                    "qz_rows=$(nft -a list chain inet qingzhou input 2>/dev/null | awk -v marker='{marker}' 'index($0, marker) {{ print }}'); test \"$(printf '%s\\n' \"$qz_rows\" | awk 'NF {{ count++ }} END {{ print count + 0 }}')\" -le 1; {mutation}"
+                ),
+                verify: format!(
+                    "qz_rows=$(nft -a list chain inet qingzhou input 2>/dev/null | awk -v marker='{marker}' 'index($0, marker) {{ print }}'); test \"$(printf '%s\\n' \"$qz_rows\" | awk 'NF {{ count++ }} END {{ print count + 0 }}')\" -eq {expected_count}"
+                ),
+            })
+        }
+        "iptables" => {
+            let rule =
+                format!("-p {protocol} --dport {port} -m comment --comment '{marker}' -j ACCEPT");
+            let mutation = if present {
+                format!("iptables -C INPUT {rule} >/dev/null 2>&1 || iptables -I INPUT {rule}")
+            } else {
+                format!(
+                    "if iptables -C INPUT {rule} >/dev/null 2>&1; then iptables -D INPUT {rule}; fi"
+                )
+            };
+            let verify = if present {
+                format!("iptables -C INPUT {rule}")
+            } else {
+                format!("! iptables -C INPUT {rule} >/dev/null 2>&1")
+            };
+            Ok(SnapshotRollbackCommand {
+                command: mutation,
+                verify,
+            })
+        }
+        _ => Err(AppError::Integrity("恢复点中的防火墙后端无效".into())),
     }
 }
 

@@ -232,26 +232,44 @@ fn hosts_manage() -> TaskDefinition {
                 &["add", "remove"],
                 None,
             ),
+            parameter(
+                "entryId",
+                "映射标识",
+                "客户端自动生成，只允许修改同一标识的工具映射",
+                ParameterKind::ManagedId,
+                true,
+                None,
+            ),
             host_parameter("address", "IP 地址", "映射目标 IPv4 或 IPv6 地址", true),
             host_parameter("hostname", "主机名", "要解析的主机名", true),
         ],
         vec![dangerous_implementation(
             "hosts-managed-block",
             &[],
-            &["getent"],
+            &[
+                "getent", "sed", "awk", "mktemp", "stat", "chown", "chmod", "mv", "rm", "wc",
+            ],
             "test ! -L /etc/hosts; sed -n '1,300p' /etc/hosts; getent hosts {{hostname}} || true",
             vec![backup_item(
                 "hosts-before",
                 BackupItemKind::RemoteFile,
                 "/etc/hosts",
             )],
-            "{{managed:hosts:action}}",
-            "test ! -L /etc/hosts; {{managed:hosts:verify}}; getent hosts {{hostname}} || true",
+            hosts_action_command(),
+            hosts_verify_command(),
             "{{restore:file:hosts-before}}",
             ResultParserKind::NetworkProbe,
         )],
         OutputKind::KeyValue,
     )
+}
+
+fn hosts_action_command() -> &'static str {
+    r##"qz_action={{action}}; qz_address={{address}}; qz_hostname={{hostname}}; qz_id={{entryId}}; qz_target=/etc/hosts; qz_marker="# qingzhou:$qz_id"; test ! -L "$qz_target" && test -f "$qz_target"; qz_count=$(awk -v marker="$qz_marker" 'length($0) >= length(marker) && substr($0, length($0) - length(marker) + 1) == marker { count++ } END { print count + 0 }' "$qz_target"); test "$qz_count" -le 1; case "$qz_action" in add) :;; remove) test "$qz_count" -eq 1; qz_owned=$(awk -v marker="$qz_marker" 'length($0) >= length(marker) && substr($0, length($0) - length(marker) + 1) == marker { print; exit }' "$qz_target"); test "$qz_owned" = "$qz_address $qz_hostname $qz_marker";; *) exit 64;; esac; qz_uid=$(stat -Lc %u -- "$qz_target") && qz_gid=$(stat -Lc %g -- "$qz_target") && qz_mode=$(stat -Lc %a -- "$qz_target") || exit; qz_tmp=$(mktemp /etc/.qingzhou-hosts.XXXXXX) || exit; cleanup() { rm -f -- "$qz_tmp"; }; trap cleanup EXIT HUP INT TERM; awk -v marker="$qz_marker" 'length($0) < length(marker) || substr($0, length($0) - length(marker) + 1) != marker { print }' "$qz_target" > "$qz_tmp" || exit; if test "$qz_action" = add; then printf '%s %s %s\n' "$qz_address" "$qz_hostname" "$qz_marker" >> "$qz_tmp"; fi; test "$(wc -c < "$qz_tmp")" -le 1048576; chown "$qz_uid:$qz_gid" "$qz_tmp" && chmod "$qz_mode" "$qz_tmp" && mv -f -- "$qz_tmp" "$qz_target"; qz_tmp=''; trap - EXIT HUP INT TERM"##
+}
+
+fn hosts_verify_command() -> &'static str {
+    r##"qz_action={{action}}; qz_address={{address}}; qz_hostname={{hostname}}; qz_id={{entryId}}; qz_target=/etc/hosts; qz_marker="# qingzhou:$qz_id"; test ! -L "$qz_target" && test -f "$qz_target"; qz_line=$(awk -v marker="$qz_marker" 'length($0) >= length(marker) && substr($0, length($0) - length(marker) + 1) == marker { print }' "$qz_target"); qz_count=$(printf '%s\n' "$qz_line" | awk 'NF { count++ } END { print count + 0 }'); case "$qz_action" in add) test "$qz_count" -eq 1 && test "$qz_line" = "$qz_address $qz_hostname $qz_marker";; remove) test "$qz_count" -eq 0;; *) exit 64;; esac; getent hosts "$qz_hostname" >/dev/null 2>&1 || test "$qz_action" = remove"##
 }
 
 fn ip_change() -> TaskDefinition {

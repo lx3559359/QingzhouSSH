@@ -115,6 +115,20 @@ fn validate_task_constraints(
                 ));
             }
         }
+        "network.hosts_manage" => {
+            let address = string_value("address")
+                .ok_or_else(|| AppError::Validation("主机映射 IP 地址无效".into()))?;
+            if address.parse::<IpAddr>().is_err() {
+                return Err(AppError::Validation(
+                    "主机映射地址必须是有效的 IPv4 或 IPv6 地址".into(),
+                ));
+            }
+            let hostname = string_value("hostname")
+                .ok_or_else(|| AppError::Validation("主机映射名称无效".into()))?;
+            if hostname.parse::<IpAddr>().is_ok() {
+                return Err(AppError::Validation("主机映射名称不能填写 IP 地址".into()));
+            }
+        }
         _ => {}
     }
     Ok(())
