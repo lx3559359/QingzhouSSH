@@ -45,6 +45,8 @@ export interface SystemCapabilities {
   architecture: string;
   shell: string;
   commands: string[];
+  services: string[];
+  containers: string[];
 }
 
 export type ExecutionStatus =

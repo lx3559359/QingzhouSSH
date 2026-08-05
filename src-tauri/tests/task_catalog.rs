@@ -21,6 +21,8 @@ fn capabilities(os_id: &str, family: &str, service: &str, commands: &[&str]) -> 
         architecture: "x86_64".into(),
         shell: "/bin/sh".into(),
         commands: commands.iter().map(|value| (*value).into()).collect(),
+        services: vec!["nginx".into(), "nginx.service".into()],
+        containers: vec!["web".into()],
     }
 }
 

@@ -3,8 +3,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use qingzhou_ssh_lib::core::{
     system_probe::{SystemCapabilities, PROBE_COMMAND},
     tasks::{
-        built_in_catalog, plan_task, ExecutionScope, ParameterKind, RiskLevel, TaskCategory,
-        TaskDefinition,
+        built_in_catalog, plan_task, select_implementation, ExecutionScope, ParameterKind,
+        RiskLevel, TaskCategory, TaskDefinition,
     },
 };
 use serde_json::json;
@@ -142,6 +142,8 @@ fn packet_capture_builds_only_fixed_optional_filters() {
             .into_iter()
             .map(str::to_owned)
             .collect(),
+        services: Vec::new(),
+        containers: Vec::new(),
     };
     let plan = plan_task(
         &catalog["network.packet_capture"],
@@ -188,5 +190,84 @@ fn capability_probe_covers_new_diagnostic_implementations() {
             PROBE_COMMAND.contains(&format!(" {command} ")),
             "能力探针缺少 {command}"
         );
+    }
+}
+
+#[test]
+fn service_web_and_container_targets_follow_discovery() {
+    let catalog = by_id();
+    let systemd = detected_capabilities("systemd", &["systemctl", "head"], &["nginx.service"], &[]);
+    assert_eq!(
+        select_implementation(&catalog["service.inventory"], &systemd)
+            .unwrap()
+            .id,
+        "systemd"
+    );
+    assert!(plan_task(
+        &catalog["service.status"],
+        &systemd,
+        &json!({"service":"nginx.service"})
+    )
+    .is_ok());
+    assert!(plan_task(
+        &catalog["service.status"],
+        &systemd,
+        &json!({"service":"missing.service"})
+    )
+    .is_err());
+
+    let nginx = detected_capabilities("systemd", &["nginx", "ss", "head"], &[], &[]);
+    assert_eq!(
+        select_implementation(&catalog["web.config_check"], &nginx)
+            .unwrap()
+            .id,
+        "nginx"
+    );
+    let apache = detected_capabilities("systemd", &["apachectl", "ss", "head"], &[], &[]);
+    assert_eq!(
+        select_implementation(&catalog["web.config_check"], &apache)
+            .unwrap()
+            .id,
+        "apache"
+    );
+
+    let docker = detected_capabilities("systemd", &["docker", "head"], &[], &["web"]);
+    assert_eq!(
+        select_implementation(&catalog["container.health_storage"], &docker)
+            .unwrap()
+            .id,
+        "docker"
+    );
+    assert!(plan_task(
+        &catalog["container.inspect"],
+        &docker,
+        &json!({"container":"web","action":"logs","lines":100})
+    )
+    .is_ok());
+    assert!(plan_task(
+        &catalog["container.inspect"],
+        &docker,
+        &json!({"container":"database","action":"inspect","lines":100})
+    )
+    .is_err());
+}
+
+fn detected_capabilities(
+    service_manager: &str,
+    commands: &[&str],
+    services: &[&str],
+    containers: &[&str],
+) -> SystemCapabilities {
+    SystemCapabilities {
+        os_id: "openeuler".into(),
+        os_family: "openeuler".into(),
+        version_id: Some("24.03".into()),
+        package_manager: Some("dnf".into()),
+        service_manager: service_manager.into(),
+        architecture: "x86_64".into(),
+        shell: "/bin/sh".into(),
+        commands: commands.iter().map(|value| (*value).into()).collect(),
+        services: services.iter().map(|value| (*value).into()).collect(),
+        containers: containers.iter().map(|value| (*value).into()).collect(),
     }
 }

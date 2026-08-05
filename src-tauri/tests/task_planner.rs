@@ -14,6 +14,8 @@ fn capabilities(os_id: &str, family: &str, service: &str, commands: &[&str]) -> 
         architecture: "x86_64".into(),
         shell: "/bin/sh".into(),
         commands: commands.iter().map(|value| (*value).into()).collect(),
+        services: vec!["nginx".into(), "nginx.service".into()],
+        containers: vec!["web".into()],
     }
 }
 
@@ -31,11 +33,13 @@ fn planner_selects_capability_and_never_exposes_commands() {
     .unwrap();
     assert_eq!(plan.implementation_id, "systemd-status");
     assert_eq!(plan.execution_steps.len(), 1);
-    assert_eq!(plan.execution_steps[0].title, "执行任务");
-    assert_eq!(
-        plan.execution_steps[0].command,
-        "systemctl status -- 'nginx.service'"
-    );
+    assert_eq!(plan.execution_steps[0].title, "采集服务诊断");
+    assert!(plan.execution_steps[0]
+        .command
+        .contains("systemctl show --no-pager"));
+    assert!(plan.execution_steps[0]
+        .command
+        .contains("systemctl status --no-pager --lines=100 -- 'nginx.service'"));
     let public_json = serde_json::to_string(&plan.public_summary()).unwrap();
     for private_value in ["systemctl", "nginx.service", "command"] {
         assert!(!public_json.contains(private_value));

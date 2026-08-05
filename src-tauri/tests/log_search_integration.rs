@@ -17,6 +17,8 @@ fn capabilities(commands: &[&str]) -> SystemCapabilities {
         architecture: "x86_64".into(),
         shell: "/bin/sh".into(),
         commands: commands.iter().map(|value| (*value).into()).collect(),
+        services: Vec::new(),
+        containers: Vec::new(),
     }
 }
 

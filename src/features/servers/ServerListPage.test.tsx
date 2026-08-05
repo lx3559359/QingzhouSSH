@@ -49,6 +49,8 @@ const capabilities: SystemCapabilities = {
   architecture: 'x86_64',
   shell: '/bin/bash',
   commands: ['grep', 'gzip', 'awk', 'systemctl'],
+  services: ['nginx.service', 'sshd.service'],
+  containers: ['web'],
 };
 
 async function submitServer(user: ReturnType<typeof userEvent.setup>) {

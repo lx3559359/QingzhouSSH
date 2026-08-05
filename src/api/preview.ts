@@ -944,6 +944,8 @@ export const previewApi = {
     architecture: 'x86_64',
     shell: '/bin/bash',
     commands: ['grep', 'gzip', 'awk', 'systemctl', 'ps', 'df', 'sh'],
+    services: ['nginx.service', 'sshd.service'],
+    containers: ['web'],
   }),
   listTaskDefinitions: async (_serverId: string) => previewTasks,
   listOperationsTasks: async (_serverId: string) => previewTasks,

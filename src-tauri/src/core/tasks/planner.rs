@@ -6,8 +6,8 @@ use crate::{
         system_probe::SystemCapabilities,
         tasks::{
             model::{
-                ExecutionScope, PrivilegeRequirement, ResultParserKind, RiskLevel, TaskDefinition,
-                TaskStep,
+                ExecutionScope, ParameterKind, PrivilegeRequirement, ResultParserKind, RiskLevel,
+                TaskDefinition, TaskStep,
             },
             parameters::{validate_parameters, ValidatedParameters},
             render::render_task_step_command,
@@ -77,6 +77,7 @@ pub fn plan_task(
     input: &Value,
 ) -> AppResult<PlannedTask> {
     let parameters = validate_parameters(definition, input)?;
+    validate_discovered_targets(definition, capabilities, &parameters)?;
     let implementation = select_implementation(definition, capabilities)?;
     let preflight_steps = render_steps(
         &implementation.preflight_steps,
@@ -107,6 +108,33 @@ pub fn plan_task(
         result_parser: implementation.result_parser,
         estimated_seconds: definition.estimated_seconds,
     })
+}
+
+fn validate_discovered_targets(
+    definition: &TaskDefinition,
+    capabilities: &SystemCapabilities,
+    parameters: &ValidatedParameters,
+) -> AppResult<()> {
+    for parameter in &definition.parameters {
+        let Some(value) = parameters
+            .get(&parameter.name)
+            .and_then(|parameter| parameter.value.as_str())
+        else {
+            continue;
+        };
+        let available = match &parameter.kind {
+            ParameterKind::ServiceName => capabilities.has_service(value),
+            ParameterKind::ContainerName => capabilities.has_container(value),
+            _ => continue,
+        };
+        if !available {
+            return Err(AppError::Compatibility(format!(
+                "目标 {} 未在服务器能力探测结果中发现",
+                parameter.label
+            )));
+        }
+    }
+    Ok(())
 }
 
 pub fn validate_scope(definition: &TaskDefinition, server_count: usize) -> AppResult<()> {

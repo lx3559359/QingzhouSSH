@@ -59,6 +59,8 @@ fn capabilities(service_manager: &str, commands: &[&str]) -> SystemCapabilities 
         architecture: "x86_64".into(),
         shell: "/bin/sh".into(),
         commands: commands.iter().map(|value| (*value).into()).collect(),
+        services: vec!["nginx".into(), "sshd".into()],
+        containers: vec!["web".into()],
     }
 }
 

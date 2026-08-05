@@ -189,6 +189,47 @@ pub(super) fn boolean_parameter(
     )
 }
 
+pub(super) fn service_parameter() -> ParameterDefinition {
+    parameter(
+        "service",
+        "服务",
+        "从服务器已发现的服务中选择",
+        ParameterKind::ServiceName,
+        true,
+        None,
+    )
+}
+
+pub(super) fn container_parameter() -> ParameterDefinition {
+    parameter(
+        "container",
+        "容器",
+        "从服务器已发现的容器中选择",
+        ParameterKind::ContainerName,
+        true,
+        None,
+    )
+}
+
+pub(super) fn enum_parameter(
+    name: &str,
+    label: &str,
+    description: &str,
+    options: &[&str],
+    default: Option<&str>,
+) -> ParameterDefinition {
+    parameter(
+        name,
+        label,
+        description,
+        ParameterKind::Enum {
+            options: options.iter().map(|value| (*value).into()).collect(),
+        },
+        default.is_none(),
+        default.map(|value| json!(value)),
+    )
+}
+
 pub(super) fn parameter(
     name: &str,
     label: &str,

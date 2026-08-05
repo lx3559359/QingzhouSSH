@@ -4,7 +4,7 @@ use serde::Serialize;
 
 use crate::error::{AppError, AppResult};
 
-pub const PROBE_COMMAND: &str = r#"printf '__QZ_OS_BEGIN__\n'; cat /etc/os-release; printf '__QZ_OS_END__\n'; if command -v apt >/dev/null 2>&1; then echo PKG=apt; elif command -v dnf >/dev/null 2>&1; then echo PKG=dnf; elif command -v yum >/dev/null 2>&1; then echo PKG=yum; else echo PKG=; fi; if command -v systemctl >/dev/null 2>&1; then echo SERVICE=systemd; elif command -v service >/dev/null 2>&1; then echo SERVICE=service; else echo SERVICE=unknown; fi; printf 'ARCH='; uname -m; printf 'SHELL='; printf '%s\n' "${SHELL:-unknown}"; printf 'COMMANDS='; first=1; for cmd in find grep gzip awk systemctl service ps head df uptime uname free ip hostname sh sed cat tr tail sort du getent ping curl openssl timeout nc ncat tcpdump wc ss netstat date last lsof iostat vmstat findmnt firewall-cmd ufw nft iptables sshd journalctl dmesg timedatectl chronyc ntpq tracepath dig docker podman nginx apachectl crontab; do if command -v "$cmd" >/dev/null 2>&1; then if [ "$first" -eq 0 ]; then printf ','; fi; printf '%s' "$cmd"; first=0; fi; done; printf '\n'"#;
+pub const PROBE_COMMAND: &str = r#"printf '__QZ_OS_BEGIN__\n'; cat /etc/os-release; printf '__QZ_OS_END__\n'; if command -v apt >/dev/null 2>&1; then echo PKG=apt; elif command -v dnf >/dev/null 2>&1; then echo PKG=dnf; elif command -v yum >/dev/null 2>&1; then echo PKG=yum; else echo PKG=; fi; if command -v systemctl >/dev/null 2>&1; then echo SERVICE=systemd; elif command -v service >/dev/null 2>&1; then echo SERVICE=service; else echo SERVICE=unknown; fi; printf 'ARCH='; uname -m; printf 'SHELL='; printf '%s\n' "${SHELL:-unknown}"; printf 'COMMANDS='; first=1; for cmd in find grep gzip awk systemctl service ps head df uptime uname free ip hostname sh sed cat tr tail sort du getent ping curl openssl timeout nc ncat tcpdump wc ss netstat date last lsof iostat vmstat findmnt firewall-cmd ufw nft iptables sshd journalctl dmesg timedatectl chronyc ntpq tracepath dig docker podman nginx apachectl crontab; do if command -v "$cmd" >/dev/null 2>&1; then if [ "$first" -eq 0 ]; then printf ','; fi; printf '%s' "$cmd"; first=0; fi; done; printf '\n'; printf 'SERVICES='; if command -v systemctl >/dev/null 2>&1; then systemctl list-unit-files --type=service --no-legend --no-pager 2>/dev/null | awk 'NR <= 500 { print $1 }' | while IFS= read -r qz_name; do if [ -n "$qz_name" ]; then printf '%s,' "$qz_name"; fi; done; elif test -d /etc/init.d; then find /etc/init.d -maxdepth 1 -type f -printf '%f\n' 2>/dev/null | head -n 500 | while IFS= read -r qz_name; do if [ -n "$qz_name" ]; then printf '%s,' "$qz_name"; fi; done; fi; printf '\n'; printf 'CONTAINERS='; if command -v docker >/dev/null 2>&1; then docker ps -a --format '{{.Names}}' 2>/dev/null | head -n 500 | while IFS= read -r qz_name; do if [ -n "$qz_name" ]; then printf '%s,' "$qz_name"; fi; done; elif command -v podman >/dev/null 2>&1; then podman ps -a --format '{{.Names}}' 2>/dev/null | head -n 500 | while IFS= read -r qz_name; do if [ -n "$qz_name" ]; then printf '%s,' "$qz_name"; fi; done; fi; printf '\n'"#;
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -17,6 +17,8 @@ pub struct SystemCapabilities {
     pub architecture: String,
     pub shell: String,
     pub commands: Vec<String>,
+    pub services: Vec<String>,
+    pub containers: Vec<String>,
 }
 
 impl SystemCapabilities {
@@ -24,6 +26,16 @@ impl SystemCapabilities {
         self.commands.iter().any(|available| available == command)
             || (command == "systemctl" && self.service_manager == "systemd")
             || (command == "service" && self.service_manager == "service")
+    }
+
+    pub fn has_service(&self, service: &str) -> bool {
+        self.services.iter().any(|available| available == service)
+    }
+
+    pub fn has_container(&self, container: &str) -> bool {
+        self.containers
+            .iter()
+            .any(|available| available == container)
     }
 }
 
@@ -82,14 +94,9 @@ pub fn parse_probe(output: &str) -> AppResult<SystemCapabilities> {
     }
     .to_string();
 
-    let commands = capabilities
-        .remove("COMMANDS")
-        .unwrap_or_default()
-        .split(',')
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(str::to_string)
-        .collect();
+    let commands = take_csv(&mut capabilities, "COMMANDS");
+    let services = take_csv(&mut capabilities, "SERVICES");
+    let containers = take_csv(&mut capabilities, "CONTAINERS");
 
     Ok(SystemCapabilities {
         os_id,
@@ -106,7 +113,23 @@ pub fn parse_probe(output: &str) -> AppResult<SystemCapabilities> {
             .remove("SHELL")
             .unwrap_or_else(|| "unknown".into()),
         commands,
+        services,
+        containers,
     })
+}
+
+fn take_csv(values: &mut HashMap<String, String>, key: &str) -> Vec<String> {
+    let mut parsed = values
+        .remove(key)
+        .unwrap_or_default()
+        .split(',')
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+        .collect::<Vec<_>>();
+    parsed.sort();
+    parsed.dedup();
+    parsed
 }
 
 #[cfg(test)]
@@ -121,6 +144,14 @@ mod tests {
         assert_eq!(result.package_manager.as_deref(), Some("apt"));
         assert_eq!(result.service_manager, "systemd");
         assert_eq!(result.architecture, "x86_64");
+    }
+
+    #[test]
+    fn parses_bounded_service_and_container_discovery() {
+        let output = "__QZ_OS_BEGIN__\nID=openeuler\nVERSION_ID=24.03\n__QZ_OS_END__\nPKG=dnf\nSERVICE=systemd\nARCH=x86_64\nSHELL=/bin/sh\nCOMMANDS=systemctl,docker\nSERVICES=sshd.service,nginx.service,sshd.service,\nCONTAINERS=web,database,web,\n";
+        let result = parse_probe(output).unwrap();
+        assert_eq!(result.services, ["nginx.service", "sshd.service"]);
+        assert_eq!(result.containers, ["database", "web"]);
     }
 
     #[test]

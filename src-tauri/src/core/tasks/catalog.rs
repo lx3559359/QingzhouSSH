@@ -10,11 +10,14 @@ use crate::core::tasks::model::{
 
 const SUPPORTED_FAMILIES: [&str; 3] = ["debian", "rhel", "openeuler"];
 
+mod containers;
 mod helpers;
 mod network;
 mod security;
+mod services;
 mod storage;
 mod system;
+mod web;
 
 pub fn built_in_catalog() -> Vec<TaskDefinition> {
     let mut catalog = legacy_catalog();
@@ -22,12 +25,15 @@ pub fn built_in_catalog() -> Vec<TaskDefinition> {
         !matches!(
             definition.category,
             TaskCategory::System | TaskCategory::Storage
-        )
+        ) && definition.id != "service.status"
     });
     catalog.extend(system::tasks());
     catalog.extend(storage::tasks());
     catalog.extend(network::tasks());
     catalog.extend(security::tasks());
+    catalog.extend(services::tasks());
+    catalog.extend(web::tasks());
+    catalog.extend(containers::tasks());
 
     let mut ids = BTreeSet::new();
     catalog.retain(|definition| {
