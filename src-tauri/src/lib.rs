@@ -65,6 +65,8 @@ pub fn run() {
             commands::operations::start_operation_batch,
             commands::operations::cancel_operation_batch,
             commands::operations::get_operation_batch,
+            commands::operations::export_operation_report,
+            commands::operations::export_operation_batch_report,
             commands::workflows::list_workflows,
             commands::workflows::get_workflow,
             commands::workflows::save_workflow,

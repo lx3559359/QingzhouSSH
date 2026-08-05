@@ -164,6 +164,8 @@ describe('Tauri API wrapper', () => {
     });
     await tauriApi.cancelOperationBatch('batch-1');
     await tauriApi.getOperationBatch('batch-1');
+    await tauriApi.exportOperationReport('run-1', 'json');
+    await tauriApi.exportOperationBatchReport('batch-1', 'txt');
 
     expect(invoke.mock.calls.map(([command, args]) => [command, args && Object.keys(args)])).toEqual([
       ['list_operations_tasks', ['serverId']],
@@ -175,6 +177,8 @@ describe('Tauri API wrapper', () => {
       ['start_operation_batch', ['request']],
       ['cancel_operation_batch', ['batchId']],
       ['get_operation_batch', ['batchId']],
+      ['export_operation_report', ['runId', 'format']],
+      ['export_operation_batch_report', ['batchId', 'format']],
     ]);
     expect(JSON.stringify(invoke.mock.calls)).not.toContain('commandTemplate');
     expect(JSON.stringify(invoke.mock.calls)).not.toContain('"command"');

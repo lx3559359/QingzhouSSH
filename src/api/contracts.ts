@@ -368,6 +368,8 @@ export interface OperationBatchDetails {
   items: OperationBatchItemRecord[];
 }
 
+export type ReportFormat = 'json' | 'txt';
+
 export type OperationEvent = ExecutionEvent;
 
 type ExecutionEventBase = { sequence: number; emittedAt: number };

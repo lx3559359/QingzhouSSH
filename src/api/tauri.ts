@@ -18,6 +18,7 @@ import type {
   OperationFilter,
   OperationBatchDetails,
   OperationBatchRequest,
+  ReportFormat,
   OperationPreflightRequest,
   OperationPreview,
   OperationRunDetails,
@@ -167,6 +168,10 @@ export const tauriApi = {
     invoke<void>('cancel_operation_batch', { batchId }),
   getOperationBatch: (batchId: string) =>
     invoke<OperationBatchDetails | null>('get_operation_batch', { batchId }),
+  exportOperationReport: (runId: string, format: ReportFormat) =>
+    invoke<ExecutionFile>('export_operation_report', { runId, format }),
+  exportOperationBatchReport: (batchId: string, format: ReportFormat) =>
+    invoke<ExecutionFile>('export_operation_batch_report', { batchId, format }),
   listWorkflows: () => invoke<WorkflowSummary[]>('list_workflows'),
   getWorkflow: (workflowId: string, version: number | null) =>
     invoke<WorkflowDefinition | null>('get_workflow', { workflowId, version }),

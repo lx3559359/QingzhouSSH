@@ -38,6 +38,7 @@ use crate::{
         },
         log_service::LogService,
         operation_batch_service::OperationBatchService,
+        operation_report_service::OperationReportService,
         operation_service::OperationService,
         restore_point_service::RestorePointService,
         server_connector::ServerConnector,
@@ -73,6 +74,7 @@ pub struct AppServices {
     executions: ExecutionService,
     operations: OperationService,
     operation_batches: OperationBatchService,
+    operation_reports: OperationReportService,
     logs: LogService,
     transfers: TransferService,
     workflows: WorkflowRepository,
@@ -115,12 +117,21 @@ impl AppServices {
             connector.clone(),
             registry.clone(),
         );
-        let operations =
-            OperationService::new(operation_repository, executions.clone(), connector.clone());
+        let operations = OperationService::new(
+            operation_repository.clone(),
+            executions.clone(),
+            connector.clone(),
+        );
         let operation_batches = OperationBatchService::new(
-            operation_batch_repository,
+            operation_batch_repository.clone(),
             servers.clone(),
             operations.clone(),
+        );
+        let operation_reports = OperationReportService::new(
+            root.to_path_buf(),
+            operation_repository,
+            operation_batch_repository,
+            connector.clone(),
         );
         let logs = LogService::new(
             root.to_path_buf(),
@@ -154,6 +165,7 @@ impl AppServices {
             executions,
             operations,
             operation_batches,
+            operation_reports,
             logs,
             transfers,
             workflows: workflow_repository,
@@ -177,6 +189,10 @@ impl AppServices {
 
     pub fn operation_batch_service(&self) -> OperationBatchService {
         self.operation_batches.clone()
+    }
+
+    pub fn operation_report_service(&self) -> OperationReportService {
+        self.operation_reports.clone()
     }
 
     pub fn log_service(&self) -> LogService {

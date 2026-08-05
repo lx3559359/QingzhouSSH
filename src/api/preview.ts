@@ -11,6 +11,7 @@ import type {
   OperationFilter,
   OperationBatchDetails,
   OperationBatchRequest,
+  ReportFormat,
   OperationPreflightRequest,
   OperationPreview,
   OperationRunDetails,
@@ -1052,6 +1053,23 @@ export const previewApi = {
     const details = previewOperationBatches.get(batchId);
     return details ? clone(details) : null;
   },
+  exportOperationReport: async (runId: string, format: ReportFormat): Promise<ExecutionFile> => ({
+    id: crypto.randomUUID(),
+    relativePath: `downloads/reports/operation-${runId}.${format}`,
+    purpose: 'operation_report',
+    sizeBytes: 0,
+    sha256: 'preview-report-sha256',
+  }),
+  exportOperationBatchReport: async (
+    batchId: string,
+    format: ReportFormat,
+  ): Promise<ExecutionFile> => ({
+    id: crypto.randomUUID(),
+    relativePath: `downloads/reports/batch-${batchId}.${format}`,
+    purpose: 'operation_batch_report',
+    sizeBytes: 0,
+    sha256: 'preview-batch-report-sha256',
+  }),
   startTaskExecution: async (
     serverId: string,
     request: TaskExecutionRequest,

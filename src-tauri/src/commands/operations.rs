@@ -4,12 +4,14 @@ use uuid::Uuid;
 use crate::{
     domain::{
         events::ExecutionEvent,
+        execution::ExecutionFile,
         operation::{OperationDetails, OperationFilter, OperationRunRecord},
         operation_batch::{OperationBatchDetails, OperationBatchRequest},
     },
     error::AppResult,
     services::{
         execution_service::TaskAvailability,
+        operation_report_service::ReportFormat,
         operation_service::{OperationPreflightRequest, OperationPreview, OperationStartRequest},
     },
     state::AppState,
@@ -122,6 +124,32 @@ pub async fn get_operation_batch(
         .await
 }
 
+#[tauri::command]
+pub async fn export_operation_report(
+    run_id: Uuid,
+    format: ReportFormat,
+    state: State<'_, AppState>,
+) -> AppResult<ExecutionFile> {
+    services(&state)
+        .await?
+        .operation_report_service()
+        .export_run(run_id, format)
+        .await
+}
+
+#[tauri::command]
+pub async fn export_operation_batch_report(
+    batch_id: Uuid,
+    format: ReportFormat,
+    state: State<'_, AppState>,
+) -> AppResult<ExecutionFile> {
+    services(&state)
+        .await?
+        .operation_report_service()
+        .export_batch(batch_id, format)
+        .await
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -156,5 +184,7 @@ mod tests {
             "concurrency":20
         }));
         assert!(invalid_batch.is_err());
+        assert!(serde_json::from_value::<ReportFormat>(serde_json::json!("json")).is_ok());
+        assert!(serde_json::from_value::<ReportFormat>(serde_json::json!("../report")).is_err());
     }
 }

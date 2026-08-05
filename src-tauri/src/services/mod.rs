@@ -3,6 +3,7 @@ pub mod event_sink;
 pub mod execution_service;
 pub mod log_service;
 pub mod operation_batch_service;
+pub mod operation_report_service;
 pub mod operation_service;
 pub mod restore_point_service;
 pub mod server_connector;
