@@ -89,6 +89,7 @@ pub enum ParameterKind {
         options: Vec<String>,
     },
     AbsolutePath,
+    Timezone,
     ServiceName,
     TimeRange,
     Host,

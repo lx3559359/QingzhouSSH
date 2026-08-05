@@ -1,8 +1,10 @@
 use std::collections::BTreeMap;
 
 use qingzhou_ssh_lib::core::tasks::{
-    built_in_catalog, BackupItemKind, ExecutionScope, PrivilegeRequirement, RiskLevel,
+    built_in_catalog, validate_parameters, BackupItemKind, ExecutionScope, PrivilegeRequirement,
+    RiskLevel,
 };
+use serde_json::json;
 
 const REQUIRED_DANGEROUS_IDS: &[&str] = &[
     "system.hostname_change",
@@ -135,6 +137,88 @@ fn previews_are_distinct_from_mutating_and_rollback_commands() {
                 .join("\n");
             assert_ne!(preview, execution, "{}", task.id);
             assert_ne!(preview, rollback, "{}", task.id);
+        }
+    }
+}
+
+#[test]
+fn system_storage_permissions_reject_unsafe_targets_before_execution() {
+    let catalog = built_in_catalog()
+        .into_iter()
+        .map(|task| (task.id.clone(), task))
+        .collect::<BTreeMap<_, _>>();
+
+    let hostname = &catalog["system.hostname_change"];
+    for invalid in ["bad name", "-leading.example", "name;id"] {
+        assert!(validate_parameters(hostname, &json!({"hostname": invalid})).is_err());
+    }
+
+    let timezone = &catalog["system.timezone_change"];
+    for invalid in ["../UTC", "Asia/Shanghai;id", "/etc/localtime", "A B"] {
+        assert!(validate_parameters(timezone, &json!({"timezone": invalid})).is_err());
+    }
+    assert!(validate_parameters(timezone, &json!({"timezone": "Asia/Shanghai"})).is_ok());
+
+    let swap = &catalog["storage.swap_manage"];
+    for invalid in ["/", "/etc/swapfile", "/tmp/swapfile", "/var/lib/qingzhou/swap/../escape"] {
+        assert!(validate_parameters(
+            swap,
+            &json!({"action":"create", "path":invalid, "sizeMiB":1024})
+        )
+        .is_err());
+    }
+    assert!(validate_parameters(
+        swap,
+        &json!({"action":"create", "path":"/swapfile", "sizeMiB":64})
+    )
+    .is_ok());
+
+    let permissions = &catalog["security.file_permissions"];
+    for invalid in ["/", "/etc", "/usr", "/var", "/home"] {
+        assert!(validate_parameters(
+            permissions,
+            &json!({"path":invalid, "mode":"0644", "uid":0, "gid":0})
+        )
+        .is_err());
+    }
+    assert!(validate_parameters(
+        permissions,
+        &json!({"path":"/etc/nginx/nginx.conf", "mode":"0644", "uid":0, "gid":0})
+    )
+    .is_ok());
+}
+
+#[test]
+fn system_storage_permission_previews_are_read_only() {
+    let forbidden = [
+        "set-hostname",
+        "set-timezone",
+        "fallocate",
+        "mkswap",
+        "swapoff",
+        " chown ",
+        " chmod ",
+        " rm ",
+    ];
+    for task in built_in_catalog().into_iter().filter(|task| {
+        matches!(
+            task.id.as_str(),
+            "system.hostname_change"
+                | "system.timezone_change"
+                | "storage.swap_manage"
+                | "security.file_permissions"
+        )
+    }) {
+        for implementation in task.implementations {
+            let preview = implementation
+                .preview_steps
+                .iter()
+                .map(|step| step.command_template.as_str())
+                .collect::<Vec<_>>()
+                .join(" ");
+            for fragment in forbidden {
+                assert!(!preview.contains(fragment), "{}: {fragment}", task.id);
+            }
         }
     }
 }

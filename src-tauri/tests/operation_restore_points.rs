@@ -51,7 +51,7 @@ fn task_backup_paths_are_confined_to_the_project_data_root() {
         PathBuf::from("backups/tasks/00000000-0000-0000-0000-000000000000")
     );
     let relative = task_restore_item_relative_path(run_id, 0, "/etc/hosts").unwrap();
-    assert!(relative.starts_with(&task_restore_dir(run_id)));
+    assert!(relative.starts_with(task_restore_dir(run_id)));
     assert_eq!(
         resolve_task_restore_path(Path::new("D:/Qingzhou/data"), &relative).unwrap(),
         Path::new("D:/Qingzhou/data").join(relative)

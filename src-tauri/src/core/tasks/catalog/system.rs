@@ -208,12 +208,13 @@ fn timezone_change() -> TaskDefinition {
         "修改时区",
         "保存原时区后修改，并核验系统报告的时区值",
         45,
-        vec![string_parameter(
+        vec![parameter(
             "timezone",
             "新时区",
             "IANA 时区名称，例如 Asia/Shanghai",
-            1,
-            128,
+            ParameterKind::Timezone,
+            true,
+            None,
         )],
         vec![dangerous_implementation(
             "timedatectl",

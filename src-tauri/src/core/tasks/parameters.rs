@@ -1,7 +1,6 @@
 use std::{
     collections::{BTreeMap, BTreeSet},
     net::IpAddr,
-    path::Path,
 };
 
 use serde_json::Value;
@@ -75,7 +74,50 @@ pub fn validate_parameters(
             },
         );
     }
+    validate_task_constraints(definition, &values)?;
     Ok(ValidatedParameters { values })
+}
+
+fn validate_task_constraints(
+    definition: &TaskDefinition,
+    values: &BTreeMap<String, ValidatedParameter>,
+) -> AppResult<()> {
+    let string_value = |name: &str| {
+        values
+            .get(name)
+            .and_then(|parameter| parameter.value.as_str())
+    };
+
+    match definition.id.as_str() {
+        "storage.swap_manage" => {
+            let path = string_value("path")
+                .ok_or_else(|| AppError::Validation("Swap 文件路径无效".into()))?;
+            let managed_path = path == "/swapfile"
+                || path
+                    .strip_prefix("/var/lib/qingzhou/swap/")
+                    .is_some_and(is_safe_relative_path);
+            if !managed_path {
+                return Err(AppError::Validation(
+                    "Swap 文件只允许使用 /swapfile 或 /var/lib/qingzhou/swap/ 下的路径".into(),
+                ));
+            }
+        }
+        "security.file_permissions" => {
+            let path = string_value("path")
+                .ok_or_else(|| AppError::Validation("目标路径无效".into()))?;
+            const PROTECTED_PATHS: &[&str] = &[
+                "/", "/bin", "/boot", "/dev", "/etc", "/home", "/lib", "/lib64", "/proc",
+                "/run", "/sbin", "/sys", "/usr", "/var",
+            ];
+            if PROTECTED_PATHS.contains(&path) || !is_normalized_absolute_path(path) {
+                return Err(AppError::Validation(
+                    "不能直接修改系统顶层目录；请选择具体文件或下级目录".into(),
+                ));
+            }
+        }
+        _ => {}
+    }
+    Ok(())
 }
 
 fn validate_value(parameter: &ParameterDefinition, value: &Value) -> AppResult<String> {
@@ -115,7 +157,14 @@ fn validate_value(parameter: &ParameterDefinition, value: &Value) -> AppResult<S
         ParameterKind::AbsolutePath => {
             let value = required_string(parameter, value)?;
             reject_nul(parameter, value)?;
-            if !value.starts_with('/') || !Path::new(value).is_absolute() {
+            if !value.starts_with('/') {
+                return Err(invalid(parameter));
+            }
+            Ok(shell_quote(value))
+        }
+        ParameterKind::Timezone => {
+            let value = required_string(parameter, value)?;
+            if !is_timezone(value) {
                 return Err(invalid(parameter));
             }
             Ok(shell_quote(value))
@@ -256,6 +305,35 @@ fn is_service_name(value: &str) -> bool {
         && value
             .bytes()
             .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-' | b'.' | b'@'))
+}
+
+fn is_timezone(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 128
+        && value.split('/').all(|segment| {
+            !segment.is_empty()
+                && segment != "."
+                && segment != ".."
+                && segment.bytes().all(|byte| {
+                    byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'+' | b'-')
+                })
+        })
+}
+
+fn is_safe_relative_path(value: &str) -> bool {
+    !value.is_empty()
+        && !value.starts_with('/')
+        && value
+            .split('/')
+            .all(|segment| !segment.is_empty() && segment != "." && segment != "..")
+}
+
+fn is_normalized_absolute_path(value: &str) -> bool {
+    value.starts_with('/')
+        && (value == "/"
+            || value[1..]
+                .split('/')
+                .all(|segment| !segment.is_empty() && segment != "." && segment != ".."))
 }
 
 pub fn script_parameter_env_name(name: &str) -> AppResult<String> {
