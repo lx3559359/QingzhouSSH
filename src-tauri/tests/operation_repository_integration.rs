@@ -150,3 +150,41 @@ async fn migration_rejects_unknown_operation_status() {
     .await;
     assert!(result.is_err());
 }
+
+#[tokio::test]
+async fn structured_operation_result_is_persisted_only_for_active_run() {
+    let (_root, database, server) = harness().await;
+    let repo = OperationRepository::new(database.pool().clone());
+    let run = repo
+        .create(NewOperationRun {
+            server_id: server.id,
+            task_id: "system.overview".into(),
+            task_version: 2,
+            risk_level: RiskLevel::Safe,
+            parameters_summary: None,
+        })
+        .await
+        .unwrap();
+    repo.transition(run.id, OperationStatus::Preflighting)
+        .await
+        .unwrap();
+    repo.transition(run.id, OperationStatus::Running)
+        .await
+        .unwrap();
+    repo.set_result(
+        run.id,
+        &serde_json::json!({"status":"normal","summary":"检查完成"}),
+    )
+    .await
+    .unwrap();
+    let details = repo.get(run.id).await.unwrap().unwrap();
+    assert_eq!(details.run.result.unwrap()["status"], "normal");
+
+    repo.transition(run.id, OperationStatus::Succeeded)
+        .await
+        .unwrap();
+    assert!(repo
+        .set_result(run.id, &serde_json::json!({"status":"warning"}))
+        .await
+        .is_err());
+}

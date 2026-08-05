@@ -1,3 +1,4 @@
+use serde::Serialize;
 use sqlx::{sqlite::SqliteRow, Row, SqlitePool};
 use uuid::Uuid;
 
@@ -179,7 +180,25 @@ impl OperationRepository {
         .await?
         .iter()
         .map(map_run)
-        .collect()
+            .collect()
+    }
+
+    pub async fn set_result<T: Serialize>(&self, id: Uuid, result: &T) -> AppResult<()> {
+        const MAX_RESULT_BYTES: usize = 256 * 1024;
+        let encoded = serde_json::to_string(result)
+            .map_err(|error| AppError::Serialization(error.to_string()))?;
+        if encoded.len() > MAX_RESULT_BYTES {
+            return Err(AppError::Validation("运维结构化结果超过大小上限".into()));
+        }
+        let updated = sqlx::query(
+            "UPDATE operation_runs SET result_json=?,updated_at=? WHERE id=? AND status IN ('running','verifying')",
+        )
+        .bind(encoded)
+        .bind(now_millis())
+        .bind(id.to_string())
+        .execute(&self.pool)
+        .await?;
+        ensure_changed(updated.rows_affected(), "只能为执行中的运维任务保存结果")
     }
 
     pub async fn recover_interrupted(&self) -> AppResult<u64> {

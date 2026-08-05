@@ -107,13 +107,19 @@ fn redact_private_key_blocks(input: &str) -> String {
 }
 
 fn redact_named_assignments(input: &str) -> String {
-    const MARKERS: [&str; 6] = [
+    const MARKERS: [&str; 12] = [
         "password=",
         "password:",
         "passphrase=",
         "passphrase:",
         "token=",
         "token:",
+        "secret=",
+        "secret:",
+        "credential=",
+        "credential:",
+        "private_key=",
+        "private_key:",
     ];
     let mut output = input.to_string();
     for marker in MARKERS {

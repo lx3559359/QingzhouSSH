@@ -4,15 +4,17 @@ use uuid::Uuid;
 
 use crate::{
     core::{
+        redaction::Redactor,
         ssh::executor::EventSink,
         system_probe::SystemCapabilities,
         tasks::{
-            built_in_catalog, plan_task, select_implementation, task_version_is_compatible,
-            validate_parameters, ExecutionScope, PlannedTask, PrivilegeRequirement, RiskLevel,
-            TaskDefinition, ValidatedParameters,
+            built_in_catalog, parse_result, plan_task, select_implementation,
+            task_version_is_compatible, validate_parameters, ExecutionScope, PlannedTask,
+            PrivilegeRequirement, RiskLevel, TaskDefinition, ValidatedParameters,
         },
     },
     domain::{
+        events::{ExecutionEvent, ExecutionEventPayload},
         execution::{now_millis, ExecutionParameter, ExecutionStatus},
         operation::{
             FinishOperationStep, NewOperationRun, NewOperationStep, OperationDetails,
@@ -183,23 +185,26 @@ impl OperationService {
             .transition(preview_id, OperationStatus::Running)
             .await?;
         let history_parameters = history_parameters(&plan.parameters);
+        let mut operation_output = String::new();
 
         for (index, step) in plan.execution_steps.iter().enumerate() {
             self.repository
                 .mark_step_running(preview_id, OperationPhase::Execute, index, now_millis())
                 .await?;
-            let execution = self
-                .executions
-                .execute_planned_step(
-                    server_id,
-                    &definition.id,
-                    definition.version,
-                    definition.category.as_str(),
-                    step,
-                    &history_parameters,
-                    events,
-                )
-                .await;
+            let execution = {
+                let mut capture = OperationOutputSink::new(events, &mut operation_output);
+                self.executions
+                    .execute_planned_step(
+                        server_id,
+                        &definition.id,
+                        definition.version,
+                        definition.category.as_str(),
+                        step,
+                        &history_parameters,
+                        &mut capture,
+                    )
+                    .await
+            };
             let details = match execution {
                 Ok(details) => details,
                 Err(error) => {
@@ -238,6 +243,15 @@ impl OperationService {
                 self.repository.transition(preview_id, run_status).await?;
                 return self.require_details(preview_id).await;
             }
+        }
+
+        let result = parse_result(plan.result_parser, &operation_output, &Redactor::default())?;
+        if let Err(error) = self.repository.set_result(preview_id, &result).await {
+            let _ = self
+                .repository
+                .transition(preview_id, OperationStatus::Failed)
+                .await;
+            return Err(error);
         }
 
         self.repository
@@ -403,6 +417,46 @@ impl OperationService {
     }
 }
 
+const MAX_CAPTURED_OPERATION_OUTPUT: usize = 1024 * 1024;
+
+struct OperationOutputSink<'a, E: EventSink> {
+    inner: &'a mut E,
+    output: &'a mut String,
+}
+
+impl<'a, E: EventSink> OperationOutputSink<'a, E> {
+    fn new(inner: &'a mut E, output: &'a mut String) -> Self {
+        Self { inner, output }
+    }
+
+    fn append(&mut self, text: &str) {
+        if self.output.len() >= MAX_CAPTURED_OPERATION_OUTPUT {
+            return;
+        }
+        let remaining = MAX_CAPTURED_OPERATION_OUTPUT - self.output.len();
+        if text.len() <= remaining {
+            self.output.push_str(text);
+            return;
+        }
+        let mut boundary = remaining;
+        while !text.is_char_boundary(boundary) {
+            boundary -= 1;
+        }
+        self.output.push_str(&text[..boundary]);
+    }
+}
+
+impl<E: EventSink> EventSink for OperationOutputSink<'_, E> {
+    fn send(&mut self, event: ExecutionEvent) -> AppResult<()> {
+        match &event.payload {
+            ExecutionEventPayload::Stdout { text, .. }
+            | ExecutionEventPayload::Stderr { text, .. } => self.append(text),
+            _ => {}
+        }
+        self.inner.send(event)
+    }
+}
+
 fn resolve_definition(task_id: &str, requested_version: i32) -> AppResult<TaskDefinition> {
     let definition = built_in_catalog()
         .into_iter()
@@ -478,4 +532,41 @@ fn history_parameters(parameters: &ValidatedParameters) -> Vec<ExecutionParamete
             sensitive: parameter.sensitive,
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::core::ssh::executor::VecEventSink;
+
+    #[test]
+    fn operation_output_sink_forwards_events_and_caps_utf8_capture() {
+        let mut forwarded = VecEventSink::default();
+        let mut output = String::new();
+        {
+            let mut sink = OperationOutputSink::new(&mut forwarded, &mut output);
+            sink.send(ExecutionEvent {
+                sequence: 1,
+                emitted_at: 1,
+                payload: ExecutionEventPayload::Stdout {
+                    text: "正常\n".into(),
+                    total_bytes: 7,
+                },
+            })
+            .unwrap();
+            sink.send(ExecutionEvent {
+                sequence: 2,
+                emitted_at: 2,
+                payload: ExecutionEventPayload::Stderr {
+                    text: "错".repeat(MAX_CAPTURED_OPERATION_OUTPUT),
+                    total_bytes: u64::try_from(MAX_CAPTURED_OPERATION_OUTPUT).unwrap(),
+                },
+            })
+            .unwrap();
+        }
+        assert_eq!(forwarded.events.len(), 2);
+        assert!(output.starts_with("正常\n"));
+        assert!(output.len() <= MAX_CAPTURED_OPERATION_OUTPUT);
+        assert!(output.is_char_boundary(output.len()));
+    }
 }

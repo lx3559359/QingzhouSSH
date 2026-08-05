@@ -3,6 +3,7 @@ mod model;
 mod parameters;
 mod planner;
 mod render;
+mod result;
 
 pub use catalog::built_in_catalog;
 pub use model::{
@@ -16,6 +17,9 @@ pub use parameters::{
 };
 pub use planner::{plan_task, validate_scope, PlannedTask, PublicTaskPlan, RenderedTaskStep};
 pub use render::render_command;
+pub use result::{
+    parse_result, FindingLevel, OperationConclusion, OperationFinding, OperationResult,
+};
 
 use crate::{
     core::system_probe::SystemCapabilities,
