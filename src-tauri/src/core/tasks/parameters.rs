@@ -103,11 +103,11 @@ fn validate_task_constraints(
             }
         }
         "security.file_permissions" => {
-            let path = string_value("path")
-                .ok_or_else(|| AppError::Validation("目标路径无效".into()))?;
+            let path =
+                string_value("path").ok_or_else(|| AppError::Validation("目标路径无效".into()))?;
             const PROTECTED_PATHS: &[&str] = &[
-                "/", "/bin", "/boot", "/dev", "/etc", "/home", "/lib", "/lib64", "/proc",
-                "/run", "/sbin", "/sys", "/usr", "/var",
+                "/", "/bin", "/boot", "/dev", "/etc", "/home", "/lib", "/lib64", "/proc", "/run",
+                "/sbin", "/sys", "/usr", "/var",
             ];
             if PROTECTED_PATHS.contains(&path) || !is_normalized_absolute_path(path) {
                 return Err(AppError::Validation(
@@ -314,9 +314,9 @@ fn is_timezone(value: &str) -> bool {
             !segment.is_empty()
                 && segment != "."
                 && segment != ".."
-                && segment.bytes().all(|byte| {
-                    byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'+' | b'-')
-                })
+                && segment
+                    .bytes()
+                    .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'+' | b'-'))
         })
 }
 

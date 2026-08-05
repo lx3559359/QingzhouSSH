@@ -8,6 +8,7 @@ use qingzhou_ssh_lib::{
         },
     },
     domain::operation::OperationStatus,
+    services::operation_restore_service::privileged_backup_command,
 };
 
 fn output(stdout: &str, stderr: &str, exit_status: i32) -> CommandOutput {
@@ -56,6 +57,26 @@ fn privilege_probe_and_elevation_use_only_noninteractive_fixed_commands() {
         assert!(!PRIVILEGE_UID_COMMAND.contains(forbidden));
         assert!(!PASSWORDLESS_SUDO_PROBE_COMMAND.contains(forbidden));
     }
+}
+
+#[test]
+fn command_snapshots_use_the_probed_privilege_mode() {
+    let command = privileged_backup_command(
+        BackupItemKind::RuntimeState,
+        "timedatectl show -p Timezone --value",
+        PrivilegeMode::PasswordlessSudo,
+    )
+    .unwrap()
+    .unwrap();
+    assert!(command.starts_with("sudo -n -- sh -c "));
+    assert!(!command.contains("sudo -S"));
+    assert!(privileged_backup_command(
+        BackupItemKind::RemoteFile,
+        "/etc/fstab",
+        PrivilegeMode::PasswordlessSudo,
+    )
+    .unwrap()
+    .is_none());
 }
 
 #[test]

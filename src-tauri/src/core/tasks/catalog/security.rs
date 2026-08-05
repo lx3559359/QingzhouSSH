@@ -80,7 +80,7 @@ fn file_permissions() -> TaskDefinition {
             vec![backup_item(
                 "metadata-before",
                 BackupItemKind::RuntimeState,
-                "stat -Lc '%u %g %a' -- {{path}}",
+                r#"test ! -L {{path}} && stat -Lc 'path=%n\nuid=%u\ngid=%g\nmode=%a' -- {{path}}"#,
             )],
             "test ! -L {{path}} && chown -- {{uid}}:{{gid}} {{path}} && chmod -- {{mode}} {{path}}",
             "test ! -L {{path}}; test \"$(stat -Lc '%u:%g:%a' -- {{path}})\" = {{uid}}:{{gid}}:{{mode}}",

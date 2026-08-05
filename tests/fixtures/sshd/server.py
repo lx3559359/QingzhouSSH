@@ -5,6 +5,7 @@ import asyncio
 import gzip
 import logging
 import os
+import re
 from pathlib import Path
 
 import asyncssh
@@ -21,7 +22,7 @@ PKG=apt
 SERVICE=systemd
 ARCH=x86_64
 SHELL=/bin/bash
-COMMANDS=grep,gzip,awk,systemctl,service,ps,head,df,uptime,uname,free,ip,hostname,sh
+COMMANDS=grep,gzip,awk,systemctl,service,ps,head,df,uptime,uname,free,ip,hostname,hostnamectl,timedatectl,swapon,swapoff,mkswap,stat,chmod,chown,fallocate,sha256sum,mktemp,cat,mv,rm,mkdir,sh
 """
 
 DISK_OUTPUT = """Filesystem 1024-blocks Used Available Capacity Mounted on
@@ -51,6 +52,7 @@ LOG_RECORDS = (
 )
 
 FAILURE_MARKERS = ("workflow-fail.service", "workflow-fail-script", "workflow-fail.log")
+REMOTE_ROOT: Path | None = None
 
 
 class FixtureServer(asyncssh.SSHServer):
@@ -66,6 +68,33 @@ def command_result(command: str) -> tuple[str, str, int]:
         return "", "workflow fixture injected failure\n", 73
     if "__QZ_OS_BEGIN__" in command:
         return PROBE_OUTPUT, "", 0
+    if command.strip() == "id -u":
+        return "0\n", "", 0
+    if command.strip() == "sudo -n true":
+        return "", "", 0
+    if "printf 'hostname=%s\\n'" in command:
+        return f"hostname={read_state('hostname')}\n", "", 0
+    if "hostnamectl set-hostname --" in command:
+        match = re.search(r"hostnamectl set-hostname -- '([^']+)'", command)
+        if not match:
+            return "", "fixture rejected malformed hostname command\n", 64
+        write_state("hostname", match.group(1))
+        return "hostname updated\n", "", 0
+    if 'test "$(hostname)" =' in command:
+        match = re.search(r'test "\$\(hostname\)" = \'([^\']+)\'', command)
+        if not match:
+            return "", "fixture rejected malformed hostname verification\n", 64
+        expected = match.group(1)
+        if expected == "fixture-verify-failure":
+            return "", "fixture injected hostname verification failure\n", 74
+        return ("hostname verified\n", "", 0) if read_state("hostname") == expected else (
+            "",
+            "hostname does not match\n",
+            1,
+        )
+    if command.startswith("hostnamectl status --static"):
+        hostname = read_state("hostname")
+        return f"{hostname}\n{hostname}\n", "", 0
     if command.strip() == "df -P -B1":
         return DISK_OUTPUT, "", 0
     if command.startswith("systemctl status -- qingzhou-fixture.service"):
@@ -113,6 +142,9 @@ def prepare_remote_root(remote_root: Path) -> None:
     temp_root.mkdir(parents=True, exist_ok=True)
     deploy_root.mkdir(parents=True, exist_ok=True)
     service_root.mkdir(parents=True, exist_ok=True)
+    (remote_root / "etc").mkdir(parents=True, exist_ok=True)
+    (remote_root / "etc" / "fstab").write_text("# fixture fstab\n", encoding="utf-8")
+    write_state("hostname", "qingzhou-fixture", remote_root)
     content = (
         "2026-08-03T09:59:59 fixture ready\n"
         "2026-08-03T10:00:00 ERROR fixture failure\n"
@@ -126,6 +158,8 @@ def prepare_remote_root(remote_root: Path) -> None:
 
 
 async def serve(host_key: Path, authorized_keys: Path, remote_root: Path) -> None:
+    global REMOTE_ROOT
+    REMOTE_ROOT = remote_root
     prepare_remote_root(remote_root)
     server = await asyncssh.create_server(
         FixtureServer,
@@ -143,6 +177,23 @@ async def serve(host_key: Path, authorized_keys: Path, remote_root: Path) -> Non
     )
     async with server:
         await server.wait_closed()
+
+
+def read_state(name: str) -> str:
+    if REMOTE_ROOT is None:
+        raise RuntimeError("fixture remote root is not initialized")
+    return (REMOTE_ROOT / "run" / "qingzhou-fixture" / f"{name}.state").read_text(
+        encoding="utf-8"
+    ).strip()
+
+
+def write_state(name: str, value: str, remote_root: Path | None = None) -> None:
+    root = remote_root or REMOTE_ROOT
+    if root is None:
+        raise RuntimeError("fixture remote root is not initialized")
+    state_root = root / "run" / "qingzhou-fixture"
+    state_root.mkdir(parents=True, exist_ok=True)
+    (state_root / f"{name}.state").write_text(f"{value}\n", encoding="utf-8")
 
 
 def parse_args() -> argparse.Namespace:

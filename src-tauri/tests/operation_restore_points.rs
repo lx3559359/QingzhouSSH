@@ -26,7 +26,10 @@ use qingzhou_ssh_lib::{
         operation_restore_repository::OperationRestoreRepository,
         server_repository::ServerRepository,
     },
-    services::{app_services::AppServices, operation_service::OperationPreflightRequest},
+    services::{
+        app_services::AppServices, operation_restore_service::build_snapshot_rollback_command,
+        operation_service::OperationPreflightRequest,
+    },
 };
 use serde_json::json;
 use uuid::Uuid;
@@ -65,6 +68,62 @@ fn task_backup_paths_are_confined_to_the_project_data_root() {
         Path::new("backups/workflows/00000000-0000-0000-0000-000000000000/file"),
     ] {
         assert!(validate_restore_relative_path(unsafe_path).is_err());
+    }
+}
+
+#[test]
+fn task5_snapshots_build_fixed_rollback_and_verification_commands() {
+    let hostname = build_snapshot_rollback_command(
+        "system.hostname_change",
+        "stdout:\nhostname=node-1\nstderr:\n",
+    )
+    .unwrap();
+    assert!(hostname.command.contains("set-hostname"));
+    assert!(hostname.verify.contains("node-1"));
+
+    let timezone = build_snapshot_rollback_command(
+        "system.timezone_change",
+        "stdout:\ntimezone=Asia/Shanghai\nstderr:\n",
+    )
+    .unwrap();
+    assert!(timezone.command.contains("set-timezone"));
+
+    let permissions = build_snapshot_rollback_command(
+        "security.file_permissions",
+        "stdout:\npath=/etc/nginx/nginx.conf\nuid=100\ngid=101\nmode=640\nstderr:\n",
+    )
+    .unwrap();
+    assert!(permissions.command.contains("chown -- 100:101"));
+    assert!(permissions.command.contains("chmod -- 0640"));
+    assert!(!permissions.command.contains("-R"));
+
+    let swap = build_snapshot_rollback_command(
+        "storage.swap_manage",
+        "stdout:\npath=/swapfile\nexists=true\nactive=false\nsize=1073741824\nstderr:\n",
+    )
+    .unwrap();
+    assert!(swap.command.contains("1073741824"));
+    assert!(swap.verify.contains("/swapfile"));
+}
+
+#[test]
+fn rollback_snapshot_data_cannot_escape_task5_safety_boundaries() {
+    for snapshot in [
+        "stdout:\npath=/\nuid=0\ngid=0\nmode=755\nstderr:\n",
+        "stdout:\npath=/tmp/swapfile\nexists=false\nactive=false\nsize=0\nstderr:\n",
+        "stdout:\ntimezone=Asia/Shanghai;id\nstderr:\n",
+        "stdout:\nhostname=node;id\nstderr:\n",
+    ] {
+        let task_id = if snapshot.contains("uid=") {
+            "security.file_permissions"
+        } else if snapshot.contains("exists=") {
+            "storage.swap_manage"
+        } else if snapshot.contains("timezone=") {
+            "system.timezone_change"
+        } else {
+            "system.hostname_change"
+        };
+        assert!(build_snapshot_rollback_command(task_id, snapshot).is_err());
     }
 }
 

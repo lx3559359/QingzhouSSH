@@ -190,7 +190,7 @@ fn hostname_change() -> TaskDefinition {
             vec![backup_item(
                 "hostname-before",
                 BackupItemKind::RuntimeState,
-                "hostname",
+                r#"printf 'hostname=%s\n' "$(hostname)""#,
             )],
             "hostnamectl set-hostname -- {{hostname}}",
             "test \"$(hostname)\" = {{hostname}}; hostnamectl status --static",
@@ -224,7 +224,7 @@ fn timezone_change() -> TaskDefinition {
             vec![backup_item(
                 "timezone-before",
                 BackupItemKind::RuntimeState,
-                "timedatectl show -p Timezone --value",
+                r#"printf 'timezone=%s\n' "$(timedatectl show -p Timezone --value)""#,
             )],
             "timedatectl set-timezone -- {{timezone}}",
             "test \"$(timedatectl show -p Timezone --value)\" = {{timezone}}; timedatectl status",

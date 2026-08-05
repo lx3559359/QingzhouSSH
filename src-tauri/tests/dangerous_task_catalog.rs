@@ -1,8 +1,9 @@
 use std::collections::BTreeMap;
 
+use qingzhou_ssh_lib::core::system_probe::SystemCapabilities;
 use qingzhou_ssh_lib::core::tasks::{
-    built_in_catalog, validate_parameters, BackupItemKind, ExecutionScope, PrivilegeRequirement,
-    RiskLevel,
+    built_in_catalog, plan_task, validate_parameters, BackupItemKind, ExecutionScope,
+    PrivilegeRequirement, RiskLevel,
 };
 use serde_json::json;
 
@@ -160,7 +161,12 @@ fn system_storage_permissions_reject_unsafe_targets_before_execution() {
     assert!(validate_parameters(timezone, &json!({"timezone": "Asia/Shanghai"})).is_ok());
 
     let swap = &catalog["storage.swap_manage"];
-    for invalid in ["/", "/etc/swapfile", "/tmp/swapfile", "/var/lib/qingzhou/swap/../escape"] {
+    for invalid in [
+        "/",
+        "/etc/swapfile",
+        "/tmp/swapfile",
+        "/var/lib/qingzhou/swap/../escape",
+    ] {
         assert!(validate_parameters(
             swap,
             &json!({"action":"create", "path":invalid, "sizeMiB":1024})
@@ -220,5 +226,62 @@ fn system_storage_permission_previews_are_read_only() {
                 assert!(!preview.contains(fragment), "{}: {fragment}", task.id);
             }
         }
+    }
+}
+
+#[test]
+fn system_storage_permission_plans_carry_every_recovery_phase() {
+    let capabilities = SystemCapabilities {
+        os_id: "openeuler".into(),
+        os_family: "openeuler".into(),
+        version_id: Some("24.03".into()),
+        package_manager: Some("dnf".into()),
+        service_manager: "systemd".into(),
+        architecture: "x86_64".into(),
+        shell: "/bin/sh".into(),
+        commands: [
+            "hostnamectl",
+            "hostname",
+            "timedatectl",
+            "swapon",
+            "swapoff",
+            "mkswap",
+            "stat",
+            "chmod",
+            "chown",
+        ]
+        .into_iter()
+        .map(str::to_owned)
+        .collect(),
+        services: Vec::new(),
+        containers: Vec::new(),
+    };
+    let cases = [
+        ("system.hostname_change", json!({"hostname":"node-2"})),
+        (
+            "system.timezone_change",
+            json!({"timezone":"Asia/Shanghai"}),
+        ),
+        (
+            "storage.swap_manage",
+            json!({"action":"create", "path":"/swapfile", "sizeMiB":1024}),
+        ),
+        (
+            "security.file_permissions",
+            json!({"path":"/etc/nginx/nginx.conf", "mode":"0644", "uid":0, "gid":0}),
+        ),
+    ];
+    let catalog = built_in_catalog()
+        .into_iter()
+        .map(|task| (task.id.clone(), task))
+        .collect::<BTreeMap<_, _>>();
+
+    for (id, parameters) in cases {
+        let plan = plan_task(&catalog[id], &capabilities, &parameters).unwrap();
+        assert!(!plan.preview_steps.is_empty(), "{id}");
+        assert!(plan.backup_plan.is_some(), "{id}");
+        assert!(!plan.execution_steps.is_empty(), "{id}");
+        assert!(!plan.verify_steps.is_empty(), "{id}");
+        assert!(plan.rollback_plan.is_some(), "{id}");
     }
 }

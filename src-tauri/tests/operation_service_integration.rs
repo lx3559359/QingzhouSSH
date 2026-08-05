@@ -6,7 +6,7 @@ use qingzhou_ssh_lib::{
         system_probe::SystemCapabilities, tasks::RiskLevel,
     },
     domain::{
-        operation::{OperationFilter, OperationStatus, OperationStepStatus},
+        operation::{OperationFilter, OperationPhase, OperationStatus, OperationStepStatus},
         server::{CreateServerRequest, CredentialInput, ServerProfile},
     },
     error::AppResult,
@@ -297,6 +297,122 @@ async fn preview_ready_operations_can_be_filtered_and_cancelled() {
     operations.cancel(preview.preview_id).await.unwrap();
     let details = operations.get(preview.preview_id).await.unwrap().unwrap();
     assert_eq!(details.run.status, OperationStatus::Cancelled);
+}
+
+#[tokio::test]
+async fn dangerous_preview_persists_backup_verify_and_rollback_steps() {
+    let (_root, services, server) = fixture().await;
+    let operations = services.operation_service();
+    let preview = operations
+        .preflight_with_capabilities(
+            &server.id,
+            OperationPreflightRequest {
+                task_id: "system.timezone_change".into(),
+                task_version: 2,
+                parameters: json!({"timezone":"Asia/Shanghai"}),
+            },
+            &capabilities("systemd", &["timedatectl"]),
+        )
+        .await
+        .unwrap();
+    let details = operations.get(preview.preview_id).await.unwrap().unwrap();
+
+    for phase in [
+        OperationPhase::Preflight,
+        OperationPhase::Backup,
+        OperationPhase::Execute,
+        OperationPhase::Verify,
+        OperationPhase::Rollback,
+    ] {
+        assert!(
+            details.steps.iter().any(|step| step.phase == phase),
+            "{phase:?}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn dangerous_backup_failure_stops_before_any_mutation() {
+    let (root, services, server) = fixture().await;
+    let operations = services.operation_service();
+    let capabilities = capabilities("systemd", &["timedatectl"]);
+    let request = OperationPreflightRequest {
+        task_id: "system.timezone_change".into(),
+        task_version: 2,
+        parameters: json!({"timezone":"Asia/Shanghai"}),
+    };
+    let preview = operations
+        .preflight_with_capabilities(&server.id, request.clone(), &capabilities)
+        .await
+        .unwrap();
+    let mut events = VecEventSink::default();
+    let details = operations
+        .start_with_capabilities(
+            &server.id,
+            OperationStartRequest {
+                task_id: request.task_id,
+                task_version: request.task_version,
+                parameters: request.parameters,
+                confirmed_preview_id: Some(preview.preview_id),
+            },
+            &capabilities,
+            &mut events,
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(details.run.status, OperationStatus::Failed);
+    assert!(details.steps.iter().any(|step| {
+        step.phase == OperationPhase::Backup && step.status == OperationStepStatus::Failed
+    }));
+    let database = Database::open(root.path()).await.unwrap();
+    let executions: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM executions")
+        .fetch_one(database.pool())
+        .await
+        .unwrap();
+    assert_eq!(executions, 0);
+}
+
+#[tokio::test]
+async fn dangerous_tasks_without_a_rollback_executor_remain_blocked() {
+    let (root, services, server) = fixture().await;
+    let operations = services.operation_service();
+    let capabilities = capabilities("systemd", &["systemctl"]);
+    let preview = operations
+        .preflight_with_capabilities(
+            &server.id,
+            OperationPreflightRequest {
+                task_id: "service.restart".into(),
+                task_version: 2,
+                parameters: json!({"service":"nginx"}),
+            },
+            &capabilities,
+        )
+        .await
+        .unwrap();
+    let mut events = VecEventSink::default();
+    let result = operations
+        .start_with_capabilities(
+            &server.id,
+            OperationStartRequest {
+                task_id: "service.restart".into(),
+                task_version: 2,
+                parameters: json!({"service":"nginx"}),
+                confirmed_preview_id: Some(preview.preview_id),
+            },
+            &capabilities,
+            &mut events,
+        )
+        .await;
+    assert!(result.is_err());
+    let details = operations.get(preview.preview_id).await.unwrap().unwrap();
+    assert_eq!(details.run.status, OperationStatus::PreviewReady);
+    let database = Database::open(root.path()).await.unwrap();
+    let executions: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM executions")
+        .fetch_one(database.pool())
+        .await
+        .unwrap();
+    assert_eq!(executions, 0);
 }
 
 #[test]

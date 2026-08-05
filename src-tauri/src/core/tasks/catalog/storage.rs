@@ -113,11 +113,11 @@ fn swap_manage() -> TaskDefinition {
                 backup_item(
                     "swap-state-before",
                     BackupItemKind::CommandSnapshot,
-                    r#"swapon --show --bytes; if test -e {{path}}; then stat -- {{path}}; fi"#,
+                    r#"test ! -L {{path}}; printf 'path=%s\n' {{path}}; if test -e {{path}}; then test -f {{path}}; printf 'exists=true\nsize=%s\n' "$(stat -Lc %s -- {{path}})"; else printf 'exists=false\nsize=0\n'; fi; if swapon --show=NAME --noheadings | grep -Fx -- {{path}} >/dev/null 2>&1; then printf 'active=true\n'; else printf 'active=false\n'; fi"#,
                 ),
                 backup_item("fstab-before", BackupItemKind::RemoteFile, "/etc/fstab"),
             ],
-            r#"case {{action}} in 'create') fallocate -l {{sizeMiB}}M -- {{path}} && chmod 0600 -- {{path}} && mkswap -- {{path}} && swapon -- {{path}};; 'enable') swapon -- {{path}};; 'disable') swapoff -- {{path}};; 'remove') swapoff -- {{path}} 2>/dev/null || true; rm -f -- {{path}};; *) exit 64;; esac"#,
+            r#"test ! -L {{path}} && case {{action}} in 'create') test ! -e {{path}} && case {{path}} in '/var/lib/qingzhou/swap/'*) mkdir -p -- '/var/lib/qingzhou/swap';; esac && fallocate -l {{sizeMiB}}M -- {{path}} && chmod 0600 -- {{path}} && mkswap -- {{path}} && swapon -- {{path}};; 'enable') test -f {{path}} && swapon -- {{path}};; 'disable') test -f {{path}} && swapoff -- {{path}};; 'remove') test -f {{path}} && (swapoff -- {{path}} 2>/dev/null || true) && rm -f -- {{path}};; *) exit 64;; esac"#,
             r#"swapon --show --bytes; if test {{action}} = 'enable' -o {{action}} = 'create'; then swapon --show=NAME --noheadings | grep -Fx -- {{path}}; else ! swapon --show=NAME --noheadings | grep -Fx -- {{path}}; fi"#,
             "{{restore:swap-state-before}}; {{restore:file:fstab-before}}",
             ResultParserKind::KeyValue,

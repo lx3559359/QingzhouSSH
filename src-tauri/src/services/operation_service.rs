@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tokio_util::sync::CancellationToken;
@@ -6,12 +8,13 @@ use uuid::Uuid;
 use crate::{
     core::{
         redaction::Redactor,
-        ssh::executor::EventSink,
+        ssh::{executor::EventSink, transport::execute_authenticated},
         system_probe::SystemCapabilities,
         tasks::{
-            built_in_catalog, parse_result, plan_task, probe_privilege, select_implementation,
-            task_version_is_compatible, validate_parameters, ExecutionScope, PlannedTask,
-            PrivilegeRequirement, RiskLevel, TaskCategory, TaskDefinition, ValidatedParameters,
+            built_in_catalog, elevate_fixed_command, parse_result, plan_task, probe_privilege,
+            select_implementation, task_version_is_compatible, validate_parameters, ExecutionScope,
+            OperationConclusion, OperationResult, PlannedTask, PrivilegeMode, PrivilegeRequirement,
+            RenderedTaskStep, RiskLevel, TaskCategory, TaskDefinition, ValidatedParameters,
         },
     },
     domain::{
@@ -22,10 +25,14 @@ use crate::{
             OperationFilter, OperationPhase, OperationRunRecord, OperationStatus,
             OperationStepStatus,
         },
+        operation_restore::OperationRestorePointStatus,
     },
     error::{AppError, AppResult},
     repositories::operation_repository::OperationRepository,
-    services::{execution_service::ExecutionService, server_connector::ServerConnector},
+    services::{
+        execution_service::ExecutionService, operation_restore_service::OperationRestoreService,
+        server_connector::ServerConnector,
+    },
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -65,6 +72,7 @@ pub struct OperationPreview {
 pub struct OperationService {
     repository: OperationRepository,
     executions: ExecutionService,
+    restores: OperationRestoreService,
     connector: ServerConnector,
 }
 
@@ -72,11 +80,13 @@ impl OperationService {
     pub fn new(
         repository: OperationRepository,
         executions: ExecutionService,
+        restores: OperationRestoreService,
         connector: ServerConnector,
     ) -> Self {
         Self {
             repository,
             executions,
+            restores,
             connector,
         }
     }
@@ -94,8 +104,35 @@ impl OperationService {
                 return Err(error);
             }
         };
-        if definition.privilege == PrivilegeRequirement::RootOrPasswordlessSudo {
-            if let Err(error) = probe_privilege(&connected.session).await {
+        let privilege_mode = if definition.privilege == PrivilegeRequirement::RootOrPasswordlessSudo
+        {
+            match probe_privilege(&connected.session).await {
+                Ok(mode) => Some(mode),
+                Err(error) => {
+                    self.mark_preflight_failed(run.id).await;
+                    connected.session.disconnect().await;
+                    return Err(error);
+                }
+            }
+        } else {
+            None
+        };
+        if definition.risk_level == RiskLevel::Dangerous {
+            let plan = match plan_task(&definition, &connected.capabilities, &request.parameters) {
+                Ok(plan) => plan,
+                Err(error) => {
+                    self.mark_preflight_failed(run.id).await;
+                    connected.session.disconnect().await;
+                    return Err(error);
+                }
+            };
+            if let Err(error) = run_dangerous_preview(
+                &connected.session,
+                &plan.preview_steps,
+                privilege_mode.unwrap_or(PrivilegeMode::Root),
+            )
+            .await
+            {
                 self.mark_preflight_failed(run.id).await;
                 connected.session.disconnect().await;
                 return Err(error);
@@ -150,9 +187,28 @@ impl OperationService {
             connected = self.connector.connect(server_id) => connected?,
         };
         let capabilities = connected.capabilities.clone();
+        let privilege_mode = if definition.privilege == PrivilegeRequirement::RootOrPasswordlessSudo
+        {
+            match probe_privilege(&connected.session).await {
+                Ok(mode) => Some(mode),
+                Err(error) => {
+                    connected.session.disconnect().await;
+                    return Err(error);
+                }
+            }
+        } else {
+            None
+        };
         connected.session.disconnect().await;
-        self.start_with_capabilities_and_cancel(server_id, request, &capabilities, events, &cancel)
-            .await
+        self.start_with_capabilities_and_cancel(
+            server_id,
+            request,
+            &capabilities,
+            privilege_mode,
+            events,
+            &cancel,
+        )
+        .await
     }
 
     #[doc(hidden)]
@@ -167,6 +223,7 @@ impl OperationService {
             server_id,
             request,
             capabilities,
+            None,
             events,
             &CancellationToken::new(),
         )
@@ -178,6 +235,7 @@ impl OperationService {
         server_id: &str,
         request: OperationStartRequest,
         capabilities: &SystemCapabilities,
+        privilege_mode: Option<PrivilegeMode>,
         events: &mut E,
         cancel: &CancellationToken,
     ) -> AppResult<OperationDetails> {
@@ -207,20 +265,27 @@ impl OperationService {
             }
         };
 
+        let implementation = select_implementation(&definition, capabilities)?;
+        let plan = plan_task(&definition, capabilities, &request.parameters)?;
         if definition.risk_level == RiskLevel::Dangerous {
-            self.repository
-                .transition(preview_id, OperationStatus::WaitingConfirmation)
-                .await?;
-            return self.require_details(preview_id).await;
+            return self
+                .run_dangerous(
+                    preview_id,
+                    server_id,
+                    &definition,
+                    &plan,
+                    privilege_mode.unwrap_or(PrivilegeMode::Root),
+                    events,
+                    cancel,
+                )
+                .await;
         }
 
-        let implementation = select_implementation(&definition, capabilities)?;
         if implementation.backup_plan.is_some() {
             return Err(AppError::Validation(
                 "该任务需要备份与恢复流程，当前阶段不能直接运行".into(),
             ));
         }
-        let plan = plan_task(&definition, capabilities, &request.parameters)?;
         if cancel.is_cancelled() {
             self.repository
                 .transition(preview_id, OperationStatus::Cancelled)
@@ -315,7 +380,11 @@ impl OperationService {
             }
         }
 
-        let result = parse_result(plan.result_parser, &operation_output, &Redactor::default())?;
+        let result = match parse_result(plan.result_parser, &operation_output, &Redactor::default())
+        {
+            Ok(result) => result,
+            Err(error) => parser_warning_result("远程任务已执行成功", error),
+        };
         if let Err(error) = self.repository.set_result(preview_id, &result).await {
             let _ = self
                 .repository
@@ -328,6 +397,349 @@ impl OperationService {
             .transition(preview_id, OperationStatus::Succeeded)
             .await?;
         self.require_details(preview_id).await
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn run_dangerous<E: EventSink>(
+        &self,
+        run_id: Uuid,
+        server_id: &str,
+        definition: &TaskDefinition,
+        plan: &PlannedTask,
+        privilege_mode: PrivilegeMode,
+        events: &mut E,
+        cancel: &CancellationToken,
+    ) -> AppResult<OperationDetails> {
+        if !matches!(
+            definition.id.as_str(),
+            "system.hostname_change"
+                | "system.timezone_change"
+                | "storage.swap_manage"
+                | "security.file_permissions"
+        ) {
+            return Err(AppError::Validation(
+                "该危险任务的恢复执行器尚未完成，服务器未发生修改".into(),
+            ));
+        }
+        let backup_plan = plan
+            .backup_plan
+            .as_ref()
+            .ok_or_else(|| AppError::Validation("危险任务缺少恢复点声明".into()))?;
+        if plan.verify_steps.is_empty() || plan.rollback_plan.is_none() {
+            return Err(AppError::Validation(
+                "危险任务缺少验证或回滚声明，已阻止运行".into(),
+            ));
+        }
+        self.repository
+            .transition(run_id, OperationStatus::WaitingConfirmation)
+            .await?;
+        if cancel.is_cancelled() {
+            self.repository
+                .transition(run_id, OperationStatus::Cancelled)
+                .await?;
+            return self.require_details(run_id).await;
+        }
+        self.repository
+            .transition(run_id, OperationStatus::BackingUp)
+            .await?;
+        self.repository
+            .mark_step_running(run_id, OperationPhase::Backup, 0, now_millis())
+            .await?;
+        let restore = match self
+            .restores
+            .capture(
+                run_id,
+                server_id,
+                &definition.id,
+                &plan.implementation_id,
+                backup_plan,
+                &plan.parameters,
+                cancel.child_token(),
+            )
+            .await
+        {
+            Ok(restore) => restore,
+            Err(error) => {
+                self.repository
+                    .finish_step(FinishOperationStep {
+                        run_id,
+                        phase: OperationPhase::Backup,
+                        step_index: 0,
+                        status: OperationStepStatus::Failed,
+                        execution_id: None,
+                        output_summary: None,
+                        error_message: Some(error.to_string()),
+                        finished_at: now_millis(),
+                    })
+                    .await?;
+                self.repository
+                    .skip_pending_steps(run_id, OperationPhase::Backup, 1)
+                    .await?;
+                self.repository
+                    .transition(
+                        run_id,
+                        if matches!(error, AppError::Cancelled) {
+                            OperationStatus::Cancelled
+                        } else {
+                            OperationStatus::Failed
+                        },
+                    )
+                    .await?;
+                return self.require_details(run_id).await;
+            }
+        };
+        for index in 0..backup_plan.items.len() {
+            if index > 0 {
+                self.repository
+                    .mark_step_running(run_id, OperationPhase::Backup, index, now_millis())
+                    .await?;
+            }
+            self.repository
+                .finish_step(FinishOperationStep {
+                    run_id,
+                    phase: OperationPhase::Backup,
+                    step_index: index,
+                    status: OperationStepStatus::Succeeded,
+                    execution_id: None,
+                    output_summary: Some("恢复项已校验并保存在项目数据目录".into()),
+                    error_message: None,
+                    finished_at: now_millis(),
+                })
+                .await?;
+        }
+
+        let history_parameters = history_parameters(&plan.parameters);
+        let execution_steps = elevate_steps(&plan.execution_steps, privilege_mode)?;
+        let verify_steps = elevate_steps(&plan.verify_steps, privilege_mode)?;
+        let mut operation_output = String::new();
+
+        self.repository
+            .transition(run_id, OperationStatus::Running)
+            .await?;
+        if let Some(status) = self
+            .run_phase(
+                run_id,
+                server_id,
+                definition,
+                OperationPhase::Execute,
+                &execution_steps,
+                &history_parameters,
+                events,
+                cancel,
+                &mut operation_output,
+            )
+            .await?
+        {
+            return self
+                .finish_dangerous_failure(run_id, restore.point.id, status)
+                .await;
+        }
+
+        self.repository
+            .transition(run_id, OperationStatus::Verifying)
+            .await?;
+        if let Some(status) = self
+            .run_phase(
+                run_id,
+                server_id,
+                definition,
+                OperationPhase::Verify,
+                &verify_steps,
+                &history_parameters,
+                events,
+                cancel,
+                &mut operation_output,
+            )
+            .await?
+        {
+            return self
+                .finish_dangerous_failure(run_id, restore.point.id, status)
+                .await;
+        }
+
+        let result = match parse_result(plan.result_parser, &operation_output, &Redactor::default())
+        {
+            Ok(result) => result,
+            Err(error) => parser_warning_result("远程目标状态已验证成功", error),
+        };
+        self.repository.set_result(run_id, &result).await?;
+        self.repository
+            .transition(run_id, OperationStatus::Succeeded)
+            .await?;
+        self.require_details(run_id).await
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn run_phase<E: EventSink>(
+        &self,
+        run_id: Uuid,
+        server_id: &str,
+        definition: &TaskDefinition,
+        phase: OperationPhase,
+        steps: &[RenderedTaskStep],
+        history_parameters: &[ExecutionParameter],
+        events: &mut E,
+        cancel: &CancellationToken,
+        operation_output: &mut String,
+    ) -> AppResult<Option<OperationStatus>> {
+        for (index, step) in steps.iter().enumerate() {
+            if cancel.is_cancelled() {
+                self.repository
+                    .skip_pending_steps(run_id, phase, index)
+                    .await?;
+                return Ok(Some(OperationStatus::Cancelled));
+            }
+            self.repository
+                .mark_step_running(run_id, phase, index, now_millis())
+                .await?;
+            let execution = {
+                let mut capture = OperationOutputSink::new(events, operation_output);
+                self.executions
+                    .execute_planned_step_with_cancel(
+                        server_id,
+                        &definition.id,
+                        definition.version,
+                        execution_history_category(definition.category),
+                        step,
+                        history_parameters,
+                        &mut capture,
+                        cancel,
+                    )
+                    .await
+            };
+            let details = match execution {
+                Ok(details) => details,
+                Err(error) => {
+                    self.repository
+                        .finish_step(FinishOperationStep {
+                            run_id,
+                            phase,
+                            step_index: index,
+                            status: OperationStepStatus::Failed,
+                            execution_id: None,
+                            output_summary: None,
+                            error_message: Some(error.to_string()),
+                            finished_at: now_millis(),
+                        })
+                        .await?;
+                    self.repository
+                        .skip_pending_steps(run_id, phase, index.saturating_add(1))
+                        .await?;
+                    return Ok(Some(operation_status_for_error(&error)));
+                }
+            };
+            let (step_status, mut run_status) = statuses_for_execution(details.record.status);
+            if run_status == Some(OperationStatus::Failed)
+                && details
+                    .record
+                    .error_category
+                    .as_deref()
+                    .is_some_and(|category| {
+                        matches!(
+                            category,
+                            "ssh" | "io" | "transfer" | "remote_state_uncertain"
+                        )
+                    })
+            {
+                run_status = Some(OperationStatus::Uncertain);
+            }
+            self.repository
+                .finish_step(FinishOperationStep {
+                    run_id,
+                    phase,
+                    step_index: index,
+                    status: step_status,
+                    execution_id: Some(details.record.id),
+                    output_summary: details.record.output_summary.clone(),
+                    error_message: details.record.error_message.clone(),
+                    finished_at: details.record.finished_at.unwrap_or_else(now_millis),
+                })
+                .await?;
+            if let Some(status) = run_status {
+                self.repository
+                    .skip_pending_steps(run_id, phase, index.saturating_add(1))
+                    .await?;
+                return Ok(Some(status));
+            }
+        }
+        Ok(None)
+    }
+
+    async fn finish_dangerous_failure(
+        &self,
+        run_id: Uuid,
+        restore_point_id: Uuid,
+        failure_status: OperationStatus,
+    ) -> AppResult<OperationDetails> {
+        if failure_status == OperationStatus::Uncertain {
+            self.repository
+                .transition(run_id, OperationStatus::Uncertain)
+                .await?;
+            return self.require_details(run_id).await;
+        }
+        self.repository
+            .transition(run_id, OperationStatus::RollbackAvailable)
+            .await?;
+        self.repository
+            .transition(run_id, OperationStatus::RollingBack)
+            .await?;
+        self.repository
+            .mark_step_running(run_id, OperationPhase::Rollback, 0, now_millis())
+            .await?;
+        let rollback = self
+            .restores
+            .rollback(restore_point_id, CancellationToken::new())
+            .await;
+        let (step_status, run_status, message) = match rollback {
+            Ok(details) => match details.point.status {
+                OperationRestorePointStatus::RolledBack => (
+                    OperationStepStatus::Succeeded,
+                    OperationStatus::RolledBack,
+                    None,
+                ),
+                OperationRestorePointStatus::Partial => (
+                    OperationStepStatus::Failed,
+                    OperationStatus::RollbackPartial,
+                    Some("只恢复了部分项目，请查看恢复点详情".into()),
+                ),
+                _ => (
+                    OperationStepStatus::Failed,
+                    OperationStatus::RollbackFailed,
+                    Some("自动回滚失败，恢复点仍保留".into()),
+                ),
+            },
+            Err(error) => {
+                let uncertain = operation_status_for_error(&error) == OperationStatus::Uncertain;
+                (
+                    if uncertain {
+                        OperationStepStatus::Uncertain
+                    } else {
+                        OperationStepStatus::Failed
+                    },
+                    if uncertain {
+                        OperationStatus::Uncertain
+                    } else {
+                        OperationStatus::RollbackFailed
+                    },
+                    Some(error.to_string()),
+                )
+            }
+        };
+        self.repository
+            .finish_step(FinishOperationStep {
+                run_id,
+                phase: OperationPhase::Rollback,
+                step_index: 0,
+                status: step_status,
+                execution_id: None,
+                output_summary: (step_status == OperationStepStatus::Succeeded)
+                    .then(|| "已核验恢复到修改前状态".into()),
+                error_message: message,
+                finished_at: now_millis(),
+            })
+            .await?;
+        self.repository.transition(run_id, run_status).await?;
+        self.require_details(run_id).await
     }
 
     pub async fn get(&self, id: Uuid) -> AppResult<Option<OperationDetails>> {
@@ -433,6 +845,19 @@ impl OperationService {
                 })
                 .await?;
         }
+        if let Some(backup_plan) = &plan.backup_plan {
+            for (index, item) in backup_plan.items.iter().enumerate() {
+                self.repository
+                    .create_step(NewOperationStep {
+                        run_id,
+                        phase: OperationPhase::Backup,
+                        step_index: index,
+                        step_id: item.id.clone(),
+                        title: format!("创建恢复项：{}", item.id),
+                    })
+                    .await?;
+            }
+        }
         for (index, step) in plan.execution_steps.iter().enumerate() {
             self.repository
                 .create_step(NewOperationStep {
@@ -443,6 +868,30 @@ impl OperationService {
                     title: step.title.clone(),
                 })
                 .await?;
+        }
+        for (index, step) in plan.verify_steps.iter().enumerate() {
+            self.repository
+                .create_step(NewOperationStep {
+                    run_id,
+                    phase: OperationPhase::Verify,
+                    step_index: index,
+                    step_id: step.id.clone(),
+                    title: step.title.clone(),
+                })
+                .await?;
+        }
+        if let Some(rollback_plan) = &plan.rollback_plan {
+            for (index, step) in rollback_plan.steps.iter().enumerate() {
+                self.repository
+                    .create_step(NewOperationStep {
+                        run_id,
+                        phase: OperationPhase::Rollback,
+                        step_index: index,
+                        step_id: step.id.clone(),
+                        title: step.title.clone(),
+                    })
+                    .await?;
+            }
         }
         Ok(())
     }
@@ -567,6 +1016,61 @@ fn statuses_for_execution(
             (OperationStepStatus::Failed, Some(OperationStatus::Failed))
         }
     }
+}
+
+fn operation_status_for_error(error: &AppError) -> OperationStatus {
+    match error {
+        AppError::Cancelled => OperationStatus::Cancelled,
+        AppError::RemoteStateUncertain(_)
+        | AppError::Ssh(_)
+        | AppError::Io(_)
+        | AppError::Transfer(_) => OperationStatus::Uncertain,
+        _ => OperationStatus::Failed,
+    }
+}
+
+fn parser_warning_result(summary: &str, error: AppError) -> OperationResult {
+    OperationResult {
+        status: OperationConclusion::Warning,
+        summary: summary.into(),
+        findings: Vec::new(),
+        suggestions: vec!["结果已完成，但结构化展示失败；可查看执行记录。".into()],
+        technical_details: error.to_string(),
+    }
+}
+
+fn elevate_steps(
+    steps: &[RenderedTaskStep],
+    privilege_mode: PrivilegeMode,
+) -> AppResult<Vec<RenderedTaskStep>> {
+    steps
+        .iter()
+        .map(|step| {
+            let mut elevated = step.clone();
+            elevated.command = elevate_fixed_command(&step.command, privilege_mode)?;
+            Ok(elevated)
+        })
+        .collect()
+}
+
+async fn run_dangerous_preview(
+    session: &crate::core::ssh::transport::AuthenticatedSshSession,
+    steps: &[RenderedTaskStep],
+    privilege_mode: PrivilegeMode,
+) -> AppResult<()> {
+    for step in steps {
+        let command = elevate_fixed_command(&step.command, privilege_mode)?;
+        let output = tokio::time::timeout(
+            Duration::from_secs(step.timeout_seconds),
+            execute_authenticated(session, &command),
+        )
+        .await
+        .map_err(|_| AppError::RemoteStateUncertain("危险任务只读预演超时".into()))??;
+        if output.exit_status != 0 {
+            return Err(AppError::ssh_command(output.exit_status, output.stderr));
+        }
+    }
+    Ok(())
 }
 
 fn execution_history_category(category: TaskCategory) -> &'static str {

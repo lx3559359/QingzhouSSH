@@ -6,8 +6,8 @@ use crate::{
         system_probe::SystemCapabilities,
         tasks::{
             model::{
-                ExecutionScope, ParameterKind, PrivilegeRequirement, ResultParserKind, RiskLevel,
-                TaskDefinition, TaskStep,
+                BackupPlan, ExecutionScope, ParameterKind, PrivilegeRequirement, ResultParserKind,
+                RiskLevel, RollbackPlan, TaskDefinition, TaskStep,
             },
             parameters::{validate_parameters, ValidatedParameters},
             render::render_task_step_command,
@@ -26,7 +26,11 @@ pub struct PlannedTask {
     pub privilege: PrivilegeRequirement,
     pub parameters: ValidatedParameters,
     pub preflight_steps: Vec<RenderedTaskStep>,
+    pub preview_steps: Vec<RenderedTaskStep>,
+    pub backup_plan: Option<BackupPlan>,
     pub execution_steps: Vec<RenderedTaskStep>,
+    pub verify_steps: Vec<RenderedTaskStep>,
+    pub rollback_plan: Option<RollbackPlan>,
     pub result_parser: ResultParserKind,
     estimated_seconds: u32,
 }
@@ -84,8 +88,18 @@ pub fn plan_task(
         &implementation.id,
         &parameters,
     )?;
+    let preview_steps = render_steps(
+        &implementation.preview_steps,
+        &implementation.id,
+        &parameters,
+    )?;
     let execution_steps = render_steps(
         &implementation.execution_steps,
+        &implementation.id,
+        &parameters,
+    )?;
+    let verify_steps = render_steps(
+        &implementation.verify_steps,
         &implementation.id,
         &parameters,
     )?;
@@ -104,7 +118,11 @@ pub fn plan_task(
         privilege: definition.privilege,
         parameters,
         preflight_steps,
+        preview_steps,
+        backup_plan: implementation.backup_plan.clone(),
         execution_steps,
+        verify_steps,
+        rollback_plan: implementation.rollback_plan.clone(),
         result_parser: implementation.result_parser,
         estimated_seconds: definition.estimated_seconds,
     })

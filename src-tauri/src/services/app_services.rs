@@ -130,6 +130,7 @@ impl AppServices {
         let operations = OperationService::new(
             operation_repository.clone(),
             executions.clone(),
+            operation_restore_points.clone(),
             connector.clone(),
         );
         let operation_batches = OperationBatchService::new(
