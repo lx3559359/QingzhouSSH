@@ -268,6 +268,12 @@ impl OperationRestoreService {
             let relative = task_restore_item_relative_path(run_id, ordinal, &target)?;
             let (local_relative_path, sha256, original_metadata) = match definition.kind {
                 BackupItemKind::RemoteFile | BackupItemKind::ManagedBlock => {
+                    if definition.kind == BackupItemKind::ManagedBlock
+                        && (task_id != "service.cron_manage"
+                            || target != "/etc/cron.d/qingzhou-managed")
+                    {
+                        return Err(AppError::Security("受控 Cron 恢复目标无效".into()));
+                    }
                     let backup: OperationFileBackup = backup_operation_remote_file(
                         &connected.session,
                         &self.data_root,
@@ -329,7 +335,7 @@ impl OperationRestoreService {
                         connected.redactor.redact(&output.stdout),
                         connected.redactor.redact(&output.stderr)
                     );
-                    if is_task5_dangerous_task(task_id) {
+                    if is_snapshot_rollback_task(task_id) {
                         build_snapshot_rollback_command(task_id, &snapshot)?;
                     }
                     let asset =
@@ -390,9 +396,15 @@ impl OperationRestoreService {
                 self.restore_remote_file(item, connected, privilege_mode, cancel)
                     .await
             }
-            BackupItemKind::ManagedBlock => Err(AppError::Validation(
-                "该任务的受控文本块回滚尚未启用".into(),
-            )),
+            BackupItemKind::ManagedBlock => {
+                if task_id != "service.cron_manage"
+                    || item.remote_target != "/etc/cron.d/qingzhou-managed"
+                {
+                    return Err(AppError::Security("受控 Cron 恢复目标无效".into()));
+                }
+                self.restore_remote_file(item, connected, privilege_mode, cancel)
+                    .await
+            }
         }
     }
 
@@ -534,13 +546,18 @@ async fn verify_local_restore_asset(
     Ok(())
 }
 
-fn is_task5_dangerous_task(task_id: &str) -> bool {
+fn is_snapshot_rollback_task(task_id: &str) -> bool {
     matches!(
         task_id,
         "system.hostname_change"
             | "system.timezone_change"
             | "storage.swap_manage"
             | "security.file_permissions"
+            | "service.start"
+            | "service.stop"
+            | "service.restart"
+            | "service.boot_policy"
+            | "container.action"
     )
 }
 
@@ -630,8 +647,175 @@ pub fn build_snapshot_rollback_command(
             })
         }
         "storage.swap_manage" => build_swap_rollback(&values),
+        "service.start" | "service.stop" | "service.restart" => {
+            build_service_action_rollback(&values)
+        }
+        "service.boot_policy" => build_service_policy_rollback(&values),
+        "container.action" => build_container_rollback(&values),
         _ => Err(AppError::Validation("该任务尚未实现受控快照回滚".into())),
     }
+}
+
+fn build_service_action_rollback(
+    values: &BTreeMap<String, String>,
+) -> AppResult<SnapshotRollbackCommand> {
+    let manager = required_snapshot_value(values, "manager")?;
+    let service = required_snapshot_value(values, "service")?;
+    let active = required_snapshot_value(values, "active")?;
+    let enabled = required_snapshot_value(values, "enabled")?;
+    if !is_safe_service_name(service) {
+        return Err(AppError::Integrity("恢复点中的服务名无效".into()));
+    }
+    if !matches!(active, "active" | "inactive") {
+        return Err(AppError::Integrity(
+            "服务原状态无法被可靠恢复，已在修改前阻止".into(),
+        ));
+    }
+    let service = shell_quote(service);
+    let action = if active == "active" { "start" } else { "stop" };
+    match manager {
+        "systemd" => {
+            if !is_known_systemd_policy(enabled) {
+                return Err(AppError::Integrity("恢复点中的服务开机状态无效".into()));
+            }
+            let enabled = shell_quote(enabled);
+            Ok(SnapshotRollbackCommand {
+                command: format!("systemctl {action} -- {service}"),
+                verify: format!(
+                    "test \"$(systemctl is-active -- {service} 2>/dev/null || true)\" = '{active}' && test \"$(systemctl is-enabled -- {service} 2>/dev/null || true)\" = {enabled}"
+                ),
+            })
+        }
+        "service" if enabled == "unsupported" => Ok(SnapshotRollbackCommand {
+            command: format!("service {service} {action}"),
+            verify: if active == "active" {
+                format!("service {service} status >/dev/null 2>&1")
+            } else {
+                format!("! service {service} status >/dev/null 2>&1")
+            },
+        }),
+        _ => Err(AppError::Integrity("恢复点中的服务管理器无效".into())),
+    }
+}
+
+fn build_service_policy_rollback(
+    values: &BTreeMap<String, String>,
+) -> AppResult<SnapshotRollbackCommand> {
+    if required_snapshot_value(values, "manager")? != "systemd" {
+        return Err(AppError::Integrity("开机策略恢复只支持 systemd".into()));
+    }
+    let service = required_snapshot_value(values, "service")?;
+    if !is_safe_service_name(service) {
+        return Err(AppError::Integrity("恢复点中的服务名无效".into()));
+    }
+    if !matches!(
+        required_snapshot_value(values, "active")?,
+        "active" | "inactive" | "failed"
+    ) {
+        return Err(AppError::Integrity("恢复点中的服务运行状态无效".into()));
+    }
+    let enabled = required_snapshot_value(values, "enabled")?;
+    let service = shell_quote(service);
+    let command = match enabled {
+        "enabled" => format!(
+            "systemctl unmask -- {service} >/dev/null 2>&1 || true; systemctl enable -- {service}"
+        ),
+        "enabled-runtime" => format!(
+            "systemctl unmask --runtime -- {service} >/dev/null 2>&1 || true; systemctl enable --runtime -- {service}"
+        ),
+        "disabled" => format!(
+            "systemctl unmask -- {service} >/dev/null 2>&1 || true; systemctl disable -- {service}"
+        ),
+        "masked" => format!("systemctl mask -- {service}"),
+        "masked-runtime" => format!("systemctl mask --runtime -- {service}"),
+        _ => {
+            return Err(AppError::Integrity(
+                "服务原开机策略无法被可靠恢复，已在修改前阻止".into(),
+            ))
+        }
+    };
+    let enabled = shell_quote(enabled);
+    Ok(SnapshotRollbackCommand {
+        command,
+        verify: format!(
+            "test \"$(systemctl is-enabled -- {service} 2>/dev/null || true)\" = {enabled}"
+        ),
+    })
+}
+
+fn build_container_rollback(
+    values: &BTreeMap<String, String>,
+) -> AppResult<SnapshotRollbackCommand> {
+    let runtime = required_snapshot_value(values, "runtime")?;
+    if !matches!(runtime, "docker" | "podman") {
+        return Err(AppError::Integrity("恢复点中的容器运行时无效".into()));
+    }
+    let container = required_snapshot_value(values, "container")?;
+    if !is_safe_container_name(container) {
+        return Err(AppError::Integrity("恢复点中的容器名无效".into()));
+    }
+    let state = match required_snapshot_value(values, "state")? {
+        "exited" | "stopped" => "stopped",
+        state @ ("running" | "paused") => state,
+        _ => {
+            return Err(AppError::Integrity(
+                "容器原状态无法被可靠恢复，已在修改前阻止".into(),
+            ))
+        }
+    };
+    let container = shell_quote(container);
+    let inspect = format!(
+        "qz_format=$(printf '{{%s}}' '{{.State.Status}}'); {runtime} inspect --format \"$qz_format\" -- {container}"
+    );
+    let command = match state {
+        "running" => format!(
+            "qz_state=$({inspect}) || exit; case \"$qz_state\" in running) :;; paused) {runtime} unpause -- {container};; *) {runtime} start -- {container};; esac"
+        ),
+        "paused" => format!(
+            "qz_state=$({inspect}) || exit; case \"$qz_state\" in paused) :;; running) {runtime} pause -- {container};; *) {runtime} start -- {container} && {runtime} pause -- {container};; esac"
+        ),
+        _ => format!(
+            "qz_state=$({inspect}) || exit; case \"$qz_state\" in exited|stopped) :;; paused) {runtime} unpause -- {container} && {runtime} stop -- {container};; *) {runtime} stop -- {container};; esac"
+        ),
+    };
+    let verify = if state == "stopped" {
+        format!("qz_state=$({inspect}) || exit; test \"$qz_state\" = exited || test \"$qz_state\" = stopped")
+    } else {
+        format!("test \"$({inspect})\" = '{state}'")
+    };
+    Ok(SnapshotRollbackCommand { command, verify })
+}
+
+fn is_known_systemd_policy(value: &str) -> bool {
+    matches!(
+        value,
+        "enabled"
+            | "enabled-runtime"
+            | "disabled"
+            | "masked"
+            | "masked-runtime"
+            | "static"
+            | "indirect"
+            | "generated"
+            | "transient"
+            | "alias"
+    )
+}
+
+fn is_safe_service_name(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 255
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-' | b'.' | b'@'))
+}
+
+fn is_safe_container_name(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 128
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-' | b':'))
 }
 
 fn build_swap_rollback(values: &BTreeMap<String, String>) -> AppResult<SnapshotRollbackCommand> {

@@ -127,6 +127,83 @@ fn rollback_snapshot_data_cannot_escape_task5_safety_boundaries() {
     }
 }
 
+#[test]
+fn task6_snapshots_restore_exact_service_and_container_states() {
+    let running_service = build_snapshot_rollback_command(
+        "service.stop",
+        "stdout:\nmanager=systemd\nservice=nginx.service\nactive=active\nenabled=enabled\nstderr:\n",
+    )
+    .unwrap();
+    assert!(running_service.command.contains("systemctl start"));
+    assert!(running_service.verify.contains("is-active"));
+
+    let stopped_service = build_snapshot_rollback_command(
+        "service.start",
+        "stdout:\nmanager=service\nservice=nginx\nactive=inactive\nenabled=unsupported\nstderr:\n",
+    )
+    .unwrap();
+    assert!(stopped_service.command.contains("service 'nginx' stop"));
+
+    let masked_policy = build_snapshot_rollback_command(
+        "service.boot_policy",
+        "stdout:\nmanager=systemd\nservice=nginx.service\nactive=inactive\nenabled=masked-runtime\nstderr:\n",
+    )
+    .unwrap();
+    assert!(masked_policy.command.contains("mask --runtime"));
+    assert!(masked_policy.verify.contains("masked-runtime"));
+
+    let paused_container = build_snapshot_rollback_command(
+        "container.action",
+        "stdout:\nruntime=podman\ncontainer=web\nstate=paused\nstderr:\n",
+    )
+    .unwrap();
+    assert!(paused_container.command.contains("podman pause"));
+    assert!(paused_container.verify.contains("paused"));
+
+    let exited_container = build_snapshot_rollback_command(
+        "container.action",
+        "stdout:\nruntime=docker\ncontainer=web\nstate=exited\nstderr:\n",
+    )
+    .unwrap();
+    assert!(exited_container.command.contains("docker stop"));
+}
+
+#[test]
+fn task6_snapshots_reject_unrestorable_or_untrusted_states() {
+    for (task_id, snapshot) in [
+        (
+            "service.restart",
+            "stdout:\nmanager=systemd\nservice=nginx;id\nactive=active\nenabled=enabled\nstderr:\n",
+        ),
+        (
+            "service.restart",
+            "stdout:\nmanager=systemd\nservice=nginx\nactive=failed\nenabled=enabled\nstderr:\n",
+        ),
+        (
+            "service.boot_policy",
+            "stdout:\nmanager=systemd\nservice=nginx\nactive=active\nenabled=evil;id\nstderr:\n",
+        ),
+        (
+            "service.boot_policy",
+            "stdout:\nmanager=systemd\nservice=nginx\nactive=unknown\nenabled=enabled\nstderr:\n",
+        ),
+        (
+            "container.action",
+            "stdout:\nruntime=docker;id\ncontainer=web\nstate=running\nstderr:\n",
+        ),
+        (
+            "container.action",
+            "stdout:\nruntime=docker\ncontainer=web$(id)\nstate=running\nstderr:\n",
+        ),
+        (
+            "container.action",
+            "stdout:\nruntime=docker\ncontainer=web\nstate=created\nstderr:\n",
+        ),
+    ] {
+        assert!(build_snapshot_rollback_command(task_id, snapshot).is_err());
+    }
+}
+
 #[tokio::test]
 async fn atomic_restore_asset_is_hashed_and_never_exposes_a_partial_as_available() {
     let root = tempfile::tempdir().unwrap();

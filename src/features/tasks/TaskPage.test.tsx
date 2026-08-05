@@ -76,6 +76,61 @@ const tasks: TaskAvailability[] = [
       outputKind: 'text',
     },
   },
+  {
+    compatible: true,
+    reason: null,
+    definition: {
+      id: 'service.cron_manage',
+      version: 2,
+      category: 'service',
+      title: '管理计划任务',
+      description: '只管理本工具创建的计划任务',
+      riskLevel: 'dangerous',
+      estimatedSeconds: 75,
+      privilege: 'root_or_passwordless_sudo',
+      scope: 'single_server',
+      parameters: [
+        {
+          name: 'action',
+          label: '操作',
+          description: '新增、停用或移除',
+          kind: { type: 'enum', options: ['add', 'disable', 'remove'] },
+          required: true,
+          defaultValue: null,
+          sensitive: false,
+        },
+        {
+          name: 'schedule',
+          label: '执行周期',
+          description: '五段 Cron 表达式',
+          kind: { type: 'cronExpression' },
+          required: false,
+          defaultValue: '0 2 * * *',
+          sensitive: false,
+        },
+        {
+          name: 'entryId',
+          label: '任务标识',
+          description: '由客户端自动生成',
+          kind: { type: 'managedId' },
+          required: true,
+          defaultValue: null,
+          sensitive: false,
+        },
+        {
+          name: 'task',
+          label: '受控任务',
+          description: '仅允许内置任务',
+          kind: { type: 'enum', options: ['system.overview', 'system.disk_usage'] },
+          required: false,
+          defaultValue: 'system.overview',
+          sensitive: false,
+        },
+      ],
+      implementations: [],
+      outputKind: 'text',
+    },
+  },
 ];
 
 function details(taskId: string): ExecutionDetails {
@@ -186,5 +241,17 @@ describe('TaskPage', () => {
     expect(screen.queryByText('[object Object]')).not.toBeInTheDocument();
     await user.click(screen.getByText('查看技术详情'));
     expect(screen.getByText('SSH 操作失败：Connection refused')).toBeVisible();
+  });
+
+  it('generates a read-only ownership id for managed cron entries', async () => {
+    const user = userEvent.setup();
+    render(<TaskPage />);
+    await screen.findByRole('heading', { name: '管理计划任务' });
+
+    await user.click(screen.getByRole('button', { name: '选择任务 管理计划任务' }));
+    await user.selectOptions(screen.getByLabelText('操作'), 'add');
+    const entryId = screen.getByLabelText('任务标识');
+    expect(entryId).toHaveAttribute('readonly');
+    expect((entryId as HTMLInputElement).value).toMatch(/^[0-9a-f-]{36}$/);
   });
 });

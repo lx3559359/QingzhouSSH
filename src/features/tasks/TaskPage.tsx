@@ -61,8 +61,16 @@ export function TaskPage() {
     setParameters(
       Object.fromEntries(
         task.definition.parameters
-          .filter((parameter) => parameter.defaultValue !== null)
-          .map((parameter) => [parameter.name, parameter.defaultValue]),
+          .filter(
+            (parameter) =>
+              parameter.defaultValue !== null || parameter.kind.type === 'managedId',
+          )
+          .map((parameter) => [
+            parameter.name,
+            parameter.kind.type === 'managedId'
+              ? crypto.randomUUID()
+              : parameter.defaultValue,
+          ]),
       ),
     );
     setEvents([]);

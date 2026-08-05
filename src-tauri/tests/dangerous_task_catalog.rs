@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use qingzhou_ssh_lib::core::system_probe::SystemCapabilities;
 use qingzhou_ssh_lib::core::tasks::{
     built_in_catalog, plan_task, validate_parameters, BackupItemKind, ExecutionScope,
-    PrivilegeRequirement, RiskLevel,
+    ParameterKind, PrivilegeRequirement, RiskLevel,
 };
 use serde_json::json;
 
@@ -284,4 +284,160 @@ fn system_storage_permission_plans_carry_every_recovery_phase() {
         assert!(!plan.verify_steps.is_empty(), "{id}");
         assert!(plan.rollback_plan.is_some(), "{id}");
     }
+}
+
+#[test]
+fn service_cron_container_parameters_and_discovered_targets_are_strict() {
+    let catalog = built_in_catalog()
+        .into_iter()
+        .map(|task| (task.id.clone(), task))
+        .collect::<BTreeMap<_, _>>();
+
+    for id in ["service.start", "service.stop", "service.restart"] {
+        assert!(validate_parameters(&catalog[id], &json!({"service":"nginx;id"})).is_err());
+    }
+    assert!(validate_parameters(
+        &catalog["container.action"],
+        &json!({"container":"web$(id)", "action":"start"})
+    )
+    .is_err());
+
+    let cron = &catalog["service.cron_manage"];
+    assert!(cron.parameters.iter().any(|parameter| {
+        parameter.name == "entryId" && parameter.kind == ParameterKind::ManagedId
+    }));
+    for invalid in [
+        json!({"action":"add", "entryId":"not-a-uuid", "schedule":"0 2 * * *", "task":"system.overview"}),
+        json!({"action":"add", "entryId":"00000000-0000-0000-0000-000000000000;id", "schedule":"0 2 * * *", "task":"system.overview"}),
+        json!({"action":"add", "entryId":"9af25f52-72ab-4d53-b793-20f02f38d78a", "schedule":"61 2 * * *", "task":"system.overview"}),
+        json!({"action":"add", "entryId":"9af25f52-72ab-4d53-b793-20f02f38d78a", "schedule":"0 2 * * *", "task":"service.status"}),
+    ] {
+        assert!(validate_parameters(cron, &invalid).is_err(), "{invalid}");
+    }
+}
+
+#[test]
+fn service_cron_container_plans_are_concrete_and_recoverable() {
+    let capabilities = SystemCapabilities {
+        os_id: "openeuler".into(),
+        os_family: "openeuler".into(),
+        version_id: Some("24.03".into()),
+        package_manager: Some("dnf".into()),
+        service_manager: "systemd".into(),
+        architecture: "x86_64".into(),
+        shell: "/bin/sh".into(),
+        commands: [
+            "systemctl",
+            "awk",
+            "sed",
+            "mktemp",
+            "wc",
+            "chown",
+            "chmod",
+            "mv",
+            "rm",
+            "docker",
+        ]
+        .into_iter()
+        .map(str::to_owned)
+        .collect(),
+        services: vec!["nginx.service".into()],
+        containers: vec!["web".into()],
+    };
+    let entry_id = "9af25f52-72ab-4d53-b793-20f02f38d78a";
+    let cases = [
+        ("service.start", json!({"service":"nginx.service"})),
+        (
+            "service.boot_policy",
+            json!({"service":"nginx.service", "policy":"enable"}),
+        ),
+        (
+            "service.cron_manage",
+            json!({"action":"add", "entryId":entry_id, "schedule":"0 2 * * *", "task":"system.overview"}),
+        ),
+        (
+            "container.action",
+            json!({"container":"web", "action":"pause"}),
+        ),
+    ];
+    let catalog = built_in_catalog()
+        .into_iter()
+        .map(|task| (task.id.clone(), task))
+        .collect::<BTreeMap<_, _>>();
+
+    for (id, parameters) in cases {
+        let plan = plan_task(&catalog[id], &capabilities, &parameters).unwrap();
+        assert!(!plan.preview_steps.is_empty(), "{id}");
+        assert!(plan.backup_plan.is_some(), "{id}");
+        assert!(!plan.verify_steps.is_empty(), "{id}");
+        assert!(plan.rollback_plan.is_some(), "{id}");
+        for step in plan.execution_steps.iter().chain(&plan.verify_steps) {
+            assert!(!step.command.contains("{{"), "{id}: {}", step.command);
+            assert!(!step.command.contains("}}"), "{id}: {}", step.command);
+        }
+    }
+
+    let cron = plan_task(
+        &catalog["service.cron_manage"],
+        &capabilities,
+        &json!({"action":"remove", "entryId":entry_id, "schedule":"0 2 * * *", "task":"system.overview"}),
+    )
+    .unwrap();
+    let command = &cron.execution_steps[0].command;
+    assert!(command.contains("qz_marker=\"# qingzhou:$qz_id\""));
+    assert!(command.contains(entry_id));
+    assert!(command.contains("/etc/cron.d/qingzhou-managed"));
+    assert!(!command.contains("rm -rf"));
+
+    let mut missing_cron_tool = capabilities.clone();
+    missing_cron_tool
+        .commands
+        .retain(|command| command != "mktemp");
+    assert!(plan_task(
+        &catalog["service.cron_manage"],
+        &missing_cron_tool,
+        &json!({"action":"add", "entryId":entry_id, "schedule":"0 2 * * *", "task":"system.overview"}),
+    )
+    .is_err());
+}
+
+#[test]
+fn traditional_service_and_podman_are_selected_without_fallback_commands() {
+    let capabilities = SystemCapabilities {
+        os_id: "kylin".into(),
+        os_family: "debian".into(),
+        version_id: Some("10".into()),
+        package_manager: Some("apt".into()),
+        service_manager: "service".into(),
+        architecture: "aarch64".into(),
+        shell: "/bin/sh".into(),
+        commands: ["service", "podman"]
+            .into_iter()
+            .map(str::to_owned)
+            .collect(),
+        services: vec!["nginx".into()],
+        containers: vec!["web".into()],
+    };
+    let catalog = built_in_catalog()
+        .into_iter()
+        .map(|task| (task.id.clone(), task))
+        .collect::<BTreeMap<_, _>>();
+
+    let service = plan_task(
+        &catalog["service.start"],
+        &capabilities,
+        &json!({"service":"nginx"}),
+    )
+    .unwrap();
+    assert_eq!(service.implementation_id, "service-start");
+    assert!(service.execution_steps[0].command.starts_with("service "));
+
+    let container = plan_task(
+        &catalog["container.action"],
+        &capabilities,
+        &json!({"container":"web", "action":"start"}),
+    )
+    .unwrap();
+    assert_eq!(container.implementation_id, "podman");
+    assert!(container.execution_steps[0].command.starts_with("podman "));
 }

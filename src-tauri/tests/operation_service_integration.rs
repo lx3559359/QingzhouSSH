@@ -374,7 +374,7 @@ async fn dangerous_backup_failure_stops_before_any_mutation() {
 }
 
 #[tokio::test]
-async fn dangerous_tasks_without_a_rollback_executor_remain_blocked() {
+async fn newly_enabled_service_tasks_still_stop_before_mutation_when_backup_fails() {
     let (root, services, server) = fixture().await;
     let operations = services.operation_service();
     let capabilities = capabilities("systemd", &["systemctl"]);
@@ -404,9 +404,11 @@ async fn dangerous_tasks_without_a_rollback_executor_remain_blocked() {
             &mut events,
         )
         .await;
-    assert!(result.is_err());
-    let details = operations.get(preview.preview_id).await.unwrap().unwrap();
-    assert_eq!(details.run.status, OperationStatus::PreviewReady);
+    let details = result.unwrap();
+    assert_eq!(details.run.status, OperationStatus::Failed);
+    assert!(details.steps.iter().any(|step| {
+        step.phase == OperationPhase::Backup && step.status == OperationStepStatus::Failed
+    }));
     let database = Database::open(root.path()).await.unwrap();
     let executions: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM executions")
         .fetch_one(database.pool())

@@ -105,9 +105,26 @@ fn system_and_storage_tasks_are_bounded_and_safe() {
             max: 4_194_304
         }
     ));
+    let dangerous = catalog
+        .values()
+        .filter(|item| matches!(item.category, TaskCategory::System | TaskCategory::Storage))
+        .filter(|item| item.risk_level == RiskLevel::Dangerous)
+        .map(|item| item.id.as_str())
+        .collect::<std::collections::BTreeSet<_>>();
+    assert_eq!(
+        dangerous,
+        [
+            "storage.swap_manage",
+            "system.hostname_change",
+            "system.timezone_change",
+        ]
+        .into_iter()
+        .collect()
+    );
     assert!(catalog
         .values()
         .filter(|item| matches!(item.category, TaskCategory::System | TaskCategory::Storage))
+        .filter(|item| !dangerous.contains(item.id.as_str()))
         .all(|item| item.risk_level == RiskLevel::Safe));
     assert!(catalog
         .values()

@@ -22,7 +22,9 @@ PKG=apt
 SERVICE=systemd
 ARCH=x86_64
 SHELL=/bin/bash
-COMMANDS=grep,gzip,awk,systemctl,service,ps,head,df,uptime,uname,free,ip,hostname,hostnamectl,timedatectl,swapon,swapoff,mkswap,stat,chmod,chown,fallocate,sha256sum,mktemp,cat,mv,rm,mkdir,sh
+COMMANDS=grep,gzip,awk,systemctl,service,ps,head,df,uptime,uname,free,ip,hostname,hostnamectl,timedatectl,swapon,swapoff,mkswap,stat,chmod,chown,fallocate,sha256sum,mktemp,cat,mv,rm,mkdir,sh,docker
+SERVICES=qingzhou-fixture.service,qingzhou-verify-fail.service,
+CONTAINERS=fixture-container,
 """
 
 DISK_OUTPUT = """Filesystem 1024-blocks Used Available Capacity Mounted on
@@ -72,6 +74,98 @@ def command_result(command: str) -> tuple[str, str, int]:
         return "0\n", "", 0
     if command.strip() == "sudo -n true":
         return "", "", 0
+    if "printf 'manager=systemd\\nservice=%s\\nactive=%s\\nenabled=%s\\n'" in command:
+        match = re.search(
+            r"systemctl is-active -- '?([A-Za-z0-9_.@-]+)'?", command
+        )
+        if not match or match.group(1) not in {
+            "qingzhou-fixture.service",
+            "qingzhou-verify-fail.service",
+        }:
+            return "", f"fixture rejected service snapshot target: {command}\n", 64
+        service = match.group(1)
+        return (
+            f"manager=systemd\nservice={service}\n"
+            f"active={read_state(service_state_key(service))}\n"
+            f"enabled={read_state(service_policy_key(service))}\n",
+            "",
+            0,
+        )
+    service_action = re.search(
+        r"systemctl (start|stop|restart) -- '(qingzhou-(?:fixture|verify-fail)\.service)'",
+        command,
+    )
+    if service_action:
+        action, service = service_action.groups()
+        write_state(service_state_key(service), "inactive" if action == "stop" else "active")
+        if service == "qingzhou-verify-fail.service" and action == "stop":
+            write_state("service-verify-fail-once", "pending")
+        return "fixture service operation completed\n", "", 0
+    if "systemctl is-active --" in command and command.lstrip().startswith("test "):
+        service_match = re.search(
+            r"systemctl is-active -- '(qingzhou-(?:fixture|verify-fail)\.service)'",
+            command,
+        )
+        expected_match = re.search(r"\)\" = '?([a-z-]+)'?", command)
+        if not service_match or not expected_match:
+            return "", "fixture rejected malformed service verification\n", 64
+        service = service_match.group(1)
+        if (
+            service == "qingzhou-verify-fail.service"
+            and read_optional_state("service-verify-fail-once") == "pending"
+        ):
+            write_state("service-verify-fail-once", "consumed")
+            return "", "fixture injected service verification failure\n", 74
+        expected = expected_match.group(1)
+        actual = read_state(service_state_key(service))
+        return ("service verified\n", "", 0) if actual == expected else (
+            "",
+            f"service state is {actual}, expected {expected}\n",
+            1,
+        )
+    if "printf 'runtime=docker\\ncontainer=%s\\nstate=%s\\n'" in command:
+        match = re.search(r"-- '?(fixture-container)'?", command)
+        if not match:
+            return "", "fixture rejected container snapshot target\n", 64
+        return (
+            f"runtime=docker\ncontainer={match.group(1)}\n"
+            f"state={read_state(container_state_key(match.group(1)))}\n",
+            "",
+            0,
+        )
+    container_action = re.search(
+        r"docker '?(start|stop|restart|pause|unpause)'? -- '(fixture-container)'",
+        command,
+    )
+    if container_action and not command.startswith("qz_action="):
+        action, container = container_action.groups()
+        state = {
+            "start": "running",
+            "stop": "stopped",
+            "restart": "running",
+            "pause": "paused",
+            "unpause": "running",
+        }[action]
+        write_state(container_state_key(container), state)
+        return "fixture container operation completed\n", "", 0
+    if command.startswith("qz_action=") and "docker inspect --format" in command:
+        action_match = re.match(r"qz_action='?([a-z]+)'?;", command)
+        container_match = re.search(r"-- '(fixture-container)'", command)
+        if not action_match or not container_match:
+            return "", "fixture rejected malformed container verification\n", 64
+        expected = {
+            "start": "running",
+            "stop": "stopped",
+            "restart": "running",
+            "pause": "paused",
+            "unpause": "running",
+        }[action_match.group(1)]
+        actual = read_state(container_state_key(container_match.group(1)))
+        return ("container verified\n", "", 0) if actual == expected else (
+            "",
+            f"container state is {actual}, expected {expected}\n",
+            1,
+        )
     if "printf 'hostname=%s\\n'" in command:
         return f"hostname={read_state('hostname')}\n", "", 0
     if "hostnamectl set-hostname --" in command:
@@ -145,6 +239,10 @@ def prepare_remote_root(remote_root: Path) -> None:
     (remote_root / "etc").mkdir(parents=True, exist_ok=True)
     (remote_root / "etc" / "fstab").write_text("# fixture fstab\n", encoding="utf-8")
     write_state("hostname", "qingzhou-fixture", remote_root)
+    for service in ["qingzhou-fixture.service", "qingzhou-verify-fail.service"]:
+        write_state(service_state_key(service), "active", remote_root)
+        write_state(service_policy_key(service), "enabled", remote_root)
+    write_state(container_state_key("fixture-container"), "running", remote_root)
     content = (
         "2026-08-03T09:59:59 fixture ready\n"
         "2026-08-03T10:00:00 ERROR fixture failure\n"
@@ -185,6 +283,25 @@ def read_state(name: str) -> str:
     return (REMOTE_ROOT / "run" / "qingzhou-fixture" / f"{name}.state").read_text(
         encoding="utf-8"
     ).strip()
+
+
+def read_optional_state(name: str) -> str | None:
+    if REMOTE_ROOT is None:
+        raise RuntimeError("fixture remote root is not initialized")
+    path = REMOTE_ROOT / "run" / "qingzhou-fixture" / f"{name}.state"
+    return path.read_text(encoding="utf-8").strip() if path.exists() else None
+
+
+def service_state_key(service: str) -> str:
+    return f"service-{service}"
+
+
+def service_policy_key(service: str) -> str:
+    return f"service-policy-{service}"
+
+
+def container_state_key(container: str) -> str:
+    return f"container-{container}"
 
 
 def write_state(name: str, value: str, remote_root: Path | None = None) -> None:

@@ -99,6 +99,7 @@ pub enum ParameterKind {
     ContainerName,
     FileMode,
     CronExpression,
+    ManagedId,
     MultiSelect {
         options: Vec<String>,
         max_items: usize,

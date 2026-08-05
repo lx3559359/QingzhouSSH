@@ -17,6 +17,8 @@ fn container_action() -> TaskDefinition {
         .map(|runtime| {
             let preview = format!("{runtime} inspect -- {{{{container}}}}");
             let execute = format!("{runtime} {{{{action}}}} -- {{{{container}}}}");
+            let snapshot = container_snapshot_command(runtime);
+            let verify = container_verify_command(runtime);
             dangerous_implementation(
                 runtime,
                 &[],
@@ -25,10 +27,10 @@ fn container_action() -> TaskDefinition {
                 vec![backup_item(
                     "container-state-before",
                     BackupItemKind::RuntimeState,
-                    &preview,
+                    &snapshot,
                 )],
                 &execute,
-                &format!("{{{{managed:container:{runtime}:verify}}}}"),
+                &verify,
                 &format!("{{{{restore:container:{runtime}:container-state-before}}}}"),
                 ResultParserKind::ContainerStatus,
             )
@@ -52,6 +54,18 @@ fn container_action() -> TaskDefinition {
         ],
         implementations,
         OutputKind::KeyValue,
+    )
+}
+
+fn container_snapshot_command(runtime: &str) -> String {
+    format!(
+        r#"qz_format=$(printf '{{%s}}' '{{.State.Status}}'); qz_state=$({runtime} inspect --format "$qz_format" -- {{{{container}}}}) || exit; case "$qz_state" in exited|stopped) qz_state=stopped;; running|paused) :;; *) exit 65;; esac; printf 'runtime={runtime}\ncontainer=%s\nstate=%s\n' {{{{container}}}} "$qz_state""#
+    )
+}
+
+fn container_verify_command(runtime: &str) -> String {
+    format!(
+        r#"qz_action={{{{action}}}}; qz_format=$(printf '{{%s}}' '{{.State.Status}}'); qz_state=$({runtime} inspect --format "$qz_format" -- {{{{container}}}}) || exit; case "$qz_action:$qz_state" in start:running|restart:running|stop:exited|stop:stopped|pause:paused|unpause:running) exit 0;; *) printf 'expected action=%s, actual state=%s\n' "$qz_action" "$qz_state" >&2; exit 1;; esac"#
     )
 }
 

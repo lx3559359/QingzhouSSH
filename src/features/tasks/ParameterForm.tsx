@@ -55,6 +55,21 @@ export function ParameterForm({ definitions, values, onChange }: ParameterFormPr
             </fieldset>
           );
         }
+        if (definition.kind.type === 'managedId') {
+          return (
+            <label key={definition.name}>
+              <span>{definition.label}</span>
+              <input
+                aria-label={definition.label}
+                type="text"
+                value={String(value)}
+                required
+                readOnly
+              />
+              <small>{definition.description}</small>
+            </label>
+          );
+        }
         const numberKind = definition.kind.type === 'integer' ? definition.kind : null;
         return (
           <label key={definition.name}>

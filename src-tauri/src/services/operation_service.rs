@@ -416,6 +416,12 @@ impl OperationService {
                 | "system.timezone_change"
                 | "storage.swap_manage"
                 | "security.file_permissions"
+                | "service.start"
+                | "service.stop"
+                | "service.restart"
+                | "service.boot_policy"
+                | "service.cron_manage"
+                | "container.action"
         ) {
             return Err(AppError::Validation(
                 "该危险任务的恢复执行器尚未完成，服务器未发生修改".into(),

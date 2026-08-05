@@ -155,9 +155,14 @@ fn service_action_implementation(
     } else {
         format!("service {{{{service}}}} {action}")
     };
+    let snapshot = service_snapshot_command(executable);
     let verify: String = match (executable, action) {
-        ("systemctl", "stop") => "! systemctl is-active --quiet -- {{service}}".into(),
-        ("systemctl", _) => "systemctl is-active --quiet -- {{service}}".into(),
+        ("systemctl", "stop") => {
+            "test \"$(systemctl is-active -- {{service}} 2>/dev/null || true)\" = inactive".into()
+        }
+        ("systemctl", _) => {
+            "test \"$(systemctl is-active -- {{service}} 2>/dev/null || true)\" = active".into()
+        }
         (_, "stop") => "! service {{service}} status >/dev/null 2>&1".into(),
         _ => "service {{service}} status".into(),
     };
@@ -169,13 +174,21 @@ fn service_action_implementation(
         vec![backup_item(
             "service-state-before",
             BackupItemKind::RuntimeState,
-            &preview,
+            snapshot,
         )],
         &execute,
         &verify,
         "{{restore:service:service-state-before}}",
         ResultParserKind::ServiceStatus,
     )
+}
+
+fn service_snapshot_command(executable: &str) -> &'static str {
+    if executable == "systemctl" {
+        r#"qz_active=$(systemctl is-active -- {{service}} 2>/dev/null || true); qz_enabled=$(systemctl is-enabled -- {{service}} 2>/dev/null || true); printf 'manager=systemd\nservice=%s\nactive=%s\nenabled=%s\n' {{service}} "$qz_active" "$qz_enabled""#
+    } else {
+        r#"if service {{service}} status >/dev/null 2>&1; then qz_active=active; else qz_active=inactive; fi; printf 'manager=service\nservice=%s\nactive=%s\nenabled=unsupported\n' {{service}} "$qz_active""#
+    }
 }
 
 fn service_boot_policy() -> TaskDefinition {
@@ -203,10 +216,10 @@ fn service_boot_policy() -> TaskDefinition {
             vec![backup_item(
                 "boot-policy-before",
                 BackupItemKind::RuntimeState,
-                "systemctl is-enabled -- {{service}} 2>&1 || true",
+                service_snapshot_command("systemctl"),
             )],
             "systemctl {{policy}} -- {{service}}",
-            "test \"$(systemctl is-enabled -- {{service}})\" = {{policy}}d",
+            r#"qz_policy={{policy}}; case "$qz_policy" in enable) qz_expected=enabled;; disable) qz_expected=disabled;; *) exit 64;; esac; test "$(systemctl is-enabled -- {{service}} 2>/dev/null || true)" = "$qz_expected""#,
             "{{restore:service-policy:boot-policy-before}}",
             ResultParserKind::ServiceStatus,
         )],
@@ -237,31 +250,47 @@ fn cron_manage() -> TaskDefinition {
                 false,
                 Some(json!("0 2 * * *")),
             ),
+            parameter(
+                "entryId",
+                "任务标识",
+                "客户端自动生成，用于确保只修改本工具创建的条目",
+                ParameterKind::ManagedId,
+                true,
+                None,
+            ),
             enum_parameter(
                 "task",
                 "受控任务",
                 "只允许引用内置安全快捷任务",
-                &["system.overview", "system.disk_usage", "service.status"],
+                &["system.overview", "system.disk_usage"],
                 Some("system.overview"),
             ),
         ],
         vec![dangerous_implementation(
             "managed-cron-file",
             &[],
-            &["crontab"],
+            &["awk", "sed", "mktemp", "wc", "chown", "chmod", "mv", "rm"],
             "if test -f /etc/cron.d/qingzhou-managed; then sed -n '1,300p' /etc/cron.d/qingzhou-managed; fi",
             vec![backup_item(
                 "cron-managed-before",
                 BackupItemKind::ManagedBlock,
                 "/etc/cron.d/qingzhou-managed",
             )],
-            "{{managed:cron:action}}",
-            "{{managed:cron:verify}}",
+            cron_action_command(),
+            cron_verify_command(),
             "{{restore:file:cron-managed-before}}",
             ResultParserKind::Text,
         )],
         OutputKind::Text,
     )
+}
+
+fn cron_action_command() -> &'static str {
+    r##"qz_action={{action}}; qz_schedule={{schedule}}; qz_task={{task}}; qz_id={{entryId}}; qz_target=/etc/cron.d/qingzhou-managed; qz_marker="# qingzhou:$qz_id"; test ! -L "$qz_target"; if test -e "$qz_target"; then test -f "$qz_target"; fi; qz_count=$(if test -f "$qz_target"; then awk -v marker="$qz_marker" 'length($0) >= length(marker) && substr($0, length($0) - length(marker) + 1) == marker { count++ } END { print count + 0 }' "$qz_target"; else printf '0\n'; fi); test "$qz_count" -le 1; case "$qz_action" in add) ;; disable|remove) test "$qz_count" -eq 1;; *) exit 64;; esac; case "$qz_task" in system.overview) qz_command='uptime >> /var/log/qingzhou-system-overview.log 2>&1';; system.disk_usage) qz_command='df -hP >> /var/log/qingzhou-disk-usage.log 2>&1';; *) exit 64;; esac; qz_tmp=$(mktemp /etc/cron.d/.qingzhou-managed.XXXXXX) || exit; cleanup() { rm -f -- "$qz_tmp"; }; trap cleanup EXIT HUP INT TERM; if test -f "$qz_target"; then awk -v marker="$qz_marker" 'length($0) < length(marker) || substr($0, length($0) - length(marker) + 1) != marker { print }' "$qz_target" > "$qz_tmp" || exit; fi; case "$qz_action" in add) printf '%s root %s %s\n' "$qz_schedule" "$qz_command" "$qz_marker" >> "$qz_tmp";; disable) qz_line=$(awk -v marker="$qz_marker" 'length($0) >= length(marker) && substr($0, length($0) - length(marker) + 1) == marker { print; exit }' "$qz_target"); case "$qz_line" in '# disabled '*) printf '%s\n' "$qz_line" >> "$qz_tmp";; *) printf '# disabled %s\n' "$qz_line" >> "$qz_tmp";; esac;; remove) :;; esac; test "$(wc -c < "$qz_tmp")" -le 65536; awk 'BEGIN { ok=1 } /^[[:space:]]*($|#)/ { next } /^[A-Z_][A-Z0-9_]*=/ { next } NF < 7 { ok=0 } END { exit ok ? 0 : 1 }' "$qz_tmp"; chown root:root "$qz_tmp" && chmod 0644 "$qz_tmp" && mv -f -- "$qz_tmp" "$qz_target"; qz_tmp=''; trap - EXIT HUP INT TERM"##
+}
+
+fn cron_verify_command() -> &'static str {
+    r##"qz_action={{action}}; qz_id={{entryId}}; qz_target=/etc/cron.d/qingzhou-managed; qz_marker="# qingzhou:$qz_id"; test ! -L "$qz_target" && test -f "$qz_target"; qz_line=$(awk -v marker="$qz_marker" 'length($0) >= length(marker) && substr($0, length($0) - length(marker) + 1) == marker { print }' "$qz_target"); qz_count=$(printf '%s\n' "$qz_line" | awk 'NF { count++ } END { print count + 0 }'); case "$qz_action" in add) test "$qz_count" -eq 1; case "$qz_line" in '#'* ) exit 1;; *) exit 0;; esac;; disable) test "$qz_count" -eq 1; case "$qz_line" in '# disabled '*) exit 0;; *) exit 1;; esac;; remove) test "$qz_count" -eq 0;; *) exit 64;; esac"##
 }
 
 fn scheduled_command(include_timers: bool) -> String {

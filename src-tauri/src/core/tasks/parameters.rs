@@ -251,18 +251,19 @@ fn validate_value(parameter: &ParameterDefinition, value: &Value) -> AppResult<S
         }
         ParameterKind::CronExpression => {
             let value = required_string(parameter, value)?;
-            let fields = value.split_whitespace().collect::<Vec<_>>();
-            if fields.len() != 5
-                || !fields.iter().all(|field| {
-                    !field.is_empty()
-                        && field.bytes().all(|byte| {
-                            byte.is_ascii_digit() || matches!(byte, b'*' | b',' | b'-' | b'/')
-                        })
-                })
-            {
+            if !is_cron_expression(value) {
                 return Err(invalid(parameter));
             }
             Ok(shell_quote(value))
+        }
+        ParameterKind::ManagedId => {
+            let value = required_string(parameter, value)?;
+            let parsed = uuid::Uuid::parse_str(value).map_err(|_| invalid(parameter))?;
+            let canonical = parsed.hyphenated().to_string();
+            if parsed.is_nil() || !value.eq_ignore_ascii_case(&canonical) {
+                return Err(invalid(parameter));
+            }
+            Ok(shell_quote(&canonical))
         }
         ParameterKind::MultiSelect { options, max_items } => {
             let values = value.as_array().ok_or_else(|| invalid(parameter))?;
@@ -305,6 +306,49 @@ fn is_service_name(value: &str) -> bool {
         && value
             .bytes()
             .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-' | b'.' | b'@'))
+}
+
+fn is_cron_expression(value: &str) -> bool {
+    let fields = value.split_whitespace().collect::<Vec<_>>();
+    let bounds = [(0, 59), (0, 23), (1, 31), (1, 12), (0, 7)];
+    fields.len() == bounds.len()
+        && fields
+            .iter()
+            .zip(bounds)
+            .all(|(field, (min, max))| is_cron_field(field, min, max))
+}
+
+fn is_cron_field(field: &str, min: u8, max: u8) -> bool {
+    !field.is_empty()
+        && field.split(',').all(|part| {
+            if part.is_empty() {
+                return false;
+            }
+            let mut step_parts = part.split('/');
+            let base = step_parts.next().unwrap_or_default();
+            let step = step_parts.next();
+            if step_parts.next().is_some()
+                || step.is_some_and(|value| {
+                    value
+                        .parse::<u8>()
+                        .map_or(true, |value| value == 0 || value > max)
+                })
+            {
+                return false;
+            }
+            if base == "*" {
+                return true;
+            }
+            let mut range = base.split('-');
+            let Some(start) = range.next().and_then(|value| value.parse::<u8>().ok()) else {
+                return false;
+            };
+            let end = range.next().and_then(|value| value.parse::<u8>().ok());
+            if range.next().is_some() || !(min..=max).contains(&start) {
+                return false;
+            }
+            end.is_none_or(|end| (start..=max).contains(&end))
+        })
 }
 
 fn is_timezone(value: &str) -> bool {
