@@ -299,6 +299,21 @@ async fn run_command(
     })
 }
 
+pub(crate) async fn execute_authenticated(
+    session: &AuthenticatedSshSession,
+    command: &str,
+) -> AppResult<CommandOutput> {
+    if command.is_empty() || command.contains('\0') {
+        return Err(AppError::Validation(
+            "SSH 命令不能为空或包含无效字符".into(),
+        ));
+    }
+    with_timeout(session.timeout(), "SSH 命令执行或输出读取", async {
+        run_command(&session.handle, command).await
+    })
+    .await
+}
+
 pub async fn execute(
     endpoint: &SshEndpoint,
     username: &str,
@@ -345,10 +360,7 @@ pub async fn connect_authenticated(
 pub async fn probe_authenticated(
     session: &AuthenticatedSshSession,
 ) -> AppResult<SystemCapabilities> {
-    let output = with_timeout(session.timeout(), "系统能力探测", async {
-        run_command(&session.handle, PROBE_COMMAND).await
-    })
-    .await?;
+    let output = execute_authenticated(session, PROBE_COMMAND).await?;
     if output.exit_status != 0 {
         return Err(AppError::ssh_command(output.exit_status, output.stderr));
     }

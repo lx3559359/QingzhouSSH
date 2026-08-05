@@ -212,7 +212,11 @@ fn task(spec: TaskSpec<'_>) -> TaskDefinition {
         description: spec.description.into(),
         risk_level: spec.risk_level,
         estimated_seconds: 30,
-        privilege: PrivilegeRequirement::CurrentUser,
+        privilege: if spec.risk_level == RiskLevel::Dangerous {
+            PrivilegeRequirement::RootOrPasswordlessSudo
+        } else {
+            PrivilegeRequirement::CurrentUser
+        },
         scope,
         parameters: spec.parameters,
         implementations: spec.implementations,

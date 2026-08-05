@@ -48,6 +48,7 @@ pub(super) fn read_only_implementation(
     steps: Vec<TaskStep>,
     result_parser: ResultParserKind,
 ) -> TaskImplementation {
+    let preview_steps = steps.clone();
     TaskImplementation {
         id: id.into(),
         compatibility: CompatibilityPredicate {
@@ -62,7 +63,7 @@ pub(super) fn read_only_implementation(
                 .collect(),
         },
         preflight_steps: Vec::new(),
-        preview_steps: Vec::new(),
+        preview_steps,
         backup_plan: None,
         execution_steps: steps,
         verify_steps: Vec::new(),

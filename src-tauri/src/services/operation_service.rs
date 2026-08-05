@@ -9,7 +9,7 @@ use crate::{
         ssh::executor::EventSink,
         system_probe::SystemCapabilities,
         tasks::{
-            built_in_catalog, parse_result, plan_task, select_implementation,
+            built_in_catalog, parse_result, plan_task, probe_privilege, select_implementation,
             task_version_is_compatible, validate_parameters, ExecutionScope, PlannedTask,
             PrivilegeRequirement, RiskLevel, TaskCategory, TaskDefinition, ValidatedParameters,
         },
@@ -94,6 +94,13 @@ impl OperationService {
                 return Err(error);
             }
         };
+        if definition.privilege == PrivilegeRequirement::RootOrPasswordlessSudo {
+            if let Err(error) = probe_privilege(&connected.session).await {
+                self.mark_preflight_failed(run.id).await;
+                connected.session.disconnect().await;
+                return Err(error);
+            }
+        }
         let result = self
             .complete_preflight(
                 run,

@@ -19,6 +19,8 @@ pub enum AppError {
     Integrity(String),
     #[error("权限不足：{0}")]
     Permission(String),
+    #[error("当前账号不是 root，且未配置免密 sudo；服务器未发生修改")]
+    PasswordlessSudoRequired,
     #[error("磁盘空间不足：{0}")]
     DiskSpace(String),
     #[error("操作已取消")]
@@ -56,6 +58,7 @@ impl AppError {
             Self::Transfer(_) => "transfer",
             Self::Integrity(_) => "integrity",
             Self::Permission(_) => "permission",
+            Self::PasswordlessSudoRequired => "passwordless_sudo_required",
             Self::DiskSpace(_) => "disk_space",
             Self::Cancelled => "cancelled",
             Self::RemoteStateUncertain(_) => "remote_state_uncertain",

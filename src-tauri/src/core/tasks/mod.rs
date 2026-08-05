@@ -2,20 +2,26 @@ mod catalog;
 mod model;
 mod parameters;
 mod planner;
+mod privilege;
 mod render;
 mod result;
 
 pub use catalog::built_in_catalog;
 pub use model::{
     BackupItemDefinition, BackupItemKind, BackupPlan, CompatibilityPredicate, ExecutionScope,
-    OutputKind, ParameterDefinition, ParameterKind, PrivilegeRequirement, ResultParserKind,
-    RiskLevel, RollbackPlan, TaskCategory, TaskDefinition, TaskImplementation, TaskStep,
+    OutputKind, ParameterDefinition, ParameterKind, PrivilegeMode, PrivilegeRequirement,
+    ResultParserKind, RiskLevel, RollbackPlan, TaskCategory, TaskDefinition, TaskImplementation,
+    TaskStep,
 };
 pub use parameters::{
     script_parameter_env_name, shell_quote, validate_parameters, ValidatedParameter,
     ValidatedParameters,
 };
 pub use planner::{plan_task, validate_scope, PlannedTask, PublicTaskPlan, RenderedTaskStep};
+pub use privilege::{
+    elevate_fixed_command, evaluate_privilege_probe, probe_privilege,
+    PASSWORDLESS_SUDO_PROBE_COMMAND, PRIVILEGE_UID_COMMAND,
+};
 pub use render::render_command;
 pub use result::{
     parse_result, FindingLevel, OperationConclusion, OperationFinding, OperationResult,
