@@ -43,6 +43,17 @@ import type {
   UpdateProgressEvent,
   UpdateSource,
   UpdateStatus,
+  ConfirmPersonalScriptRunRequest,
+  CreatePersonalScriptRequest,
+  PersonalScriptDetails,
+  PersonalScriptListFilter,
+  PersonalScriptRunPreview,
+  PersonalScriptRunResult,
+  PersonalScriptSummary,
+  PersonalScriptVersion,
+  SavePersonalScriptVersionRequest,
+  ScriptPackageExport,
+  UpdatePersonalScriptMetadataRequest,
 } from './contracts';
 
 const previewServer: ServerProfile = {
@@ -57,6 +68,9 @@ const previewServer: ServerProfile = {
 
 let previewServers = [previewServer];
 let previewExecutions: ExecutionDetails[] = [];
+let previewPersonalScripts = new Map<string, PersonalScriptDetails>();
+let previewPersonalScriptVersions = new Map<string, PersonalScriptVersion[]>();
+let previewPersonalScriptRuns = new Map<string, PersonalScriptRunPreview>();
 let previewLogTarget: LogSearchRequest['target'] = 'content';
 const previewDataRoot =
   import.meta.env.VITE_QINGZHOU_DATA_ROOT ?? '.local\\dev-data（项目目录内）';
@@ -988,6 +1002,84 @@ const updatePreviewApi = {
   },
 };
 
+function previewScriptVersion(
+  definitionId: string,
+  versionNumber: number,
+  request: SavePersonalScriptVersionRequest,
+): PersonalScriptVersion {
+  const now = Date.now();
+  const bodySha256 = 'a'.repeat(64);
+  const warnings = request.body.includes('rm -rf')
+    ? [{ code: 'recursive_delete', message: '检测到递归删除操作', lineNumber: 1 }]
+    : [];
+  return {
+    id: crypto.randomUUID(),
+    definitionId,
+    versionNumber,
+    body: request.body,
+    bodySha256,
+    parameters: clone(request.parameters),
+    scanSummary: {
+      lineCount: request.body.split('\n').length,
+      characterCount: [...request.body].length,
+      bodySha256,
+      warningCount: warnings.length,
+      warnings,
+    },
+    timeoutSeconds: request.timeoutSeconds,
+    createdAt: now,
+  };
+}
+
+function previewScriptSummary(details: PersonalScriptDetails): PersonalScriptSummary {
+  return {
+    id: details.definition.id,
+    title: details.definition.title,
+    category: details.definition.category,
+    tags: clone(details.definition.tags),
+    isFavorite: details.definition.isFavorite,
+    isEnabled: details.definition.isEnabled,
+    activeVersionId: details.activeVersion.id,
+    activeVersionNumber: details.activeVersion.versionNumber,
+    bodySha256: details.activeVersion.bodySha256,
+    updatedAt: details.definition.updatedAt,
+  };
+}
+
+function requirePreviewScript(scriptId: string): PersonalScriptDetails {
+  const details = previewPersonalScripts.get(scriptId);
+  if (!details) {
+    throw Object.assign(new Error('脚本不存在或已删除。'), { code: 'validation' });
+  }
+  return details;
+}
+
+function createPreviewPersonalScript(
+  request: CreatePersonalScriptRequest,
+): PersonalScriptDetails {
+  const id = crypto.randomUUID();
+  const now = Date.now();
+  const version = previewScriptVersion(id, 1, request);
+  const details: PersonalScriptDetails = {
+    definition: {
+      id,
+      title: request.title,
+      category: request.category,
+      tags: clone(request.tags),
+      isFavorite: false,
+      isEnabled: false,
+      activeVersionId: version.id,
+      createdAt: now,
+      updatedAt: now,
+      deletedAt: null,
+    },
+    activeVersion: version,
+  };
+  previewPersonalScripts.set(id, details);
+  previewPersonalScriptVersions.set(id, [version]);
+  return clone(details);
+}
+
 export const previewApi = {
   ...updatePreviewApi,
   ...workflowPreviewApi,
@@ -1037,6 +1129,154 @@ export const previewApi = {
     services: ['nginx.service', 'sshd.service'],
     containers: ['web'],
   }),
+  listPersonalScripts: async (
+    filter: PersonalScriptListFilter,
+  ): Promise<PersonalScriptSummary[]> =>
+    [...previewPersonalScripts.values()]
+      .filter((details) =>
+        !filter.query ||
+        details.definition.title.includes(filter.query) ||
+        details.definition.category.includes(filter.query),
+      )
+      .filter((details) => !filter.category || details.definition.category === filter.category)
+      .filter((details) => !filter.tag || details.definition.tags.includes(filter.tag))
+      .filter((details) => filter.favorite === undefined || details.definition.isFavorite === filter.favorite)
+      .filter((details) => filter.enabled === undefined || details.definition.isEnabled === filter.enabled)
+      .map(previewScriptSummary),
+  getPersonalScriptForEditor: async (scriptId: string) => {
+    const details = previewPersonalScripts.get(scriptId);
+    return details ? clone(details) : null;
+  },
+  listPersonalScriptVersions: async (scriptId: string) =>
+    clone(previewPersonalScriptVersions.get(scriptId) ?? []),
+  createPersonalScript: async (
+    request: CreatePersonalScriptRequest,
+  ): Promise<PersonalScriptDetails> => createPreviewPersonalScript(request),
+  savePersonalScriptVersion: async (
+    scriptId: string,
+    request: SavePersonalScriptVersionRequest,
+  ): Promise<PersonalScriptVersion> => {
+    const details = requirePreviewScript(scriptId);
+    const versions = previewPersonalScriptVersions.get(scriptId) ?? [];
+    const version = previewScriptVersion(scriptId, versions.length + 1, request);
+    details.activeVersion = version;
+    details.definition.activeVersionId = version.id;
+    details.definition.updatedAt = Date.now();
+    previewPersonalScriptVersions.set(scriptId, [version, ...versions]);
+    return clone(version);
+  },
+  updatePersonalScriptMetadata: async (
+    scriptId: string,
+    request: UpdatePersonalScriptMetadataRequest,
+  ) => {
+    const details = requirePreviewScript(scriptId);
+    details.definition.title = request.title;
+    details.definition.category = request.category;
+    details.definition.tags = clone(request.tags);
+    details.definition.updatedAt = Date.now();
+  },
+  copyPersonalScript: async (scriptId: string): Promise<PersonalScriptDetails> => {
+    const source = requirePreviewScript(scriptId);
+    return createPreviewPersonalScript({
+      title: `${source.definition.title} 副本`.slice(0, 80),
+      category: source.definition.category,
+      tags: clone(source.definition.tags),
+      body: source.activeVersion.body,
+      parameters: clone(source.activeVersion.parameters),
+      timeoutSeconds: source.activeVersion.timeoutSeconds,
+    });
+  },
+  setPersonalScriptFavorite: async (scriptId: string, favorite: boolean) => {
+    const details = requirePreviewScript(scriptId);
+    details.definition.isFavorite = favorite;
+    details.definition.updatedAt = Date.now();
+  },
+  setPersonalScriptEnabled: async (scriptId: string, enabled: boolean) => {
+    const details = requirePreviewScript(scriptId);
+    details.definition.isEnabled = enabled;
+    details.definition.updatedAt = Date.now();
+  },
+  deletePersonalScript: async (scriptId: string) => {
+    requirePreviewScript(scriptId);
+    previewPersonalScripts.delete(scriptId);
+  },
+  importPersonalScript: async (packageJson: string): Promise<PersonalScriptDetails> => {
+    const packageValue = JSON.parse(packageJson) as {
+      schemaVersion?: number;
+      script?: CreatePersonalScriptRequest;
+    };
+    if (packageValue.schemaVersion !== 1 || !packageValue.script) {
+      throw Object.assign(new Error('脚本包版本或结构不受支持。'), {
+        code: 'unsupported_script_package',
+      });
+    }
+    return createPreviewPersonalScript({
+      ...packageValue.script,
+      timeoutSeconds: 300,
+    });
+  },
+  exportPersonalScript: async (scriptId: string): Promise<ScriptPackageExport> => {
+    requirePreviewScript(scriptId);
+    return {
+      relativePath: `downloads/scripts/script-${crypto.randomUUID()}.json`,
+      sha256: 'a'.repeat(64),
+      sizeBytes: 1024,
+    };
+  },
+  previewPersonalScriptRun: async (
+    scriptId: string,
+    serverId: string,
+    _parameterValues: Record<string, unknown>,
+  ): Promise<PersonalScriptRunPreview> => {
+    const details = requirePreviewScript(scriptId);
+    if (!details.definition.isEnabled) {
+      throw Object.assign(new Error('脚本尚未启用。'), { code: 'validation' });
+    }
+    const preview: PersonalScriptRunPreview = {
+      previewId: crypto.randomUUID(),
+      confirmationToken: crypto.randomUUID(),
+      expiresAt: Date.now() + 5 * 60 * 1000,
+      serverId,
+      scriptDefinitionId: scriptId,
+      scriptVersionId: details.activeVersion.id,
+      scriptVersionNumber: details.activeVersion.versionNumber,
+      title: details.definition.title,
+      riskLevel: 'dangerous',
+      automaticRollbackAvailable: false,
+      warning: '不可自动回滚：请确认目标服务器和参数后再运行。',
+      lineCount: details.activeVersion.scanSummary.lineCount,
+      characterCount: details.activeVersion.scanSummary.characterCount,
+      bodySha256: details.activeVersion.bodySha256,
+      parameterNames: details.activeVersion.parameters.map((parameter) => parameter.name),
+      scanWarnings: clone(details.activeVersion.scanSummary.warnings),
+      timeoutSeconds: details.activeVersion.timeoutSeconds,
+    };
+    previewPersonalScriptRuns.set(preview.previewId, preview);
+    return clone(preview);
+  },
+  confirmPersonalScriptRun: async (
+    request: ConfirmPersonalScriptRunRequest,
+    onEvent: (event: ExecutionEvent) => void,
+  ): Promise<PersonalScriptRunResult> => {
+    const preview = previewPersonalScriptRuns.get(request.previewId);
+    if (!preview || preview.confirmationToken !== request.confirmationToken) {
+      throw Object.assign(new Error('脚本运行确认无效。'), {
+        code: 'script_confirmation_required',
+      });
+    }
+    previewPersonalScriptRuns.delete(request.previewId);
+    const execution = createPreviewExecution(preview.serverId, 'script.personal');
+    emitPreview(onEvent, execution);
+    return {
+      operationRunId: preview.previewId,
+      scriptDefinitionId: preview.scriptDefinitionId,
+      scriptVersionId: preview.scriptVersionId,
+      execution,
+    };
+  },
+  cancelPersonalScriptRun: async (operationRunId: string) => {
+    previewPersonalScriptRuns.delete(operationRunId);
+  },
   listTaskDefinitions: async (_serverId: string) => previewTasks,
   listOperationsTasks: async (_serverId: string) => previewTasks,
   preflightOperation: async (serverId: string, request: OperationPreflightRequest) =>

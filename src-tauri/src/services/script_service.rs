@@ -121,6 +121,10 @@ impl ScriptService {
         self.repository.get_for_editor(id).await
     }
 
+    pub async fn list_versions(&self, id: Uuid) -> AppResult<Vec<ScriptVersion>> {
+        self.repository.list_versions(id).await
+    }
+
     pub async fn list(&self, filter: ScriptListFilter) -> AppResult<Vec<ScriptSummary>> {
         self.repository.list(filter).await
     }
@@ -139,6 +143,36 @@ impl ScriptService {
 
     pub async fn delete(&self, id: Uuid) -> AppResult<()> {
         self.repository.soft_delete(id).await
+    }
+
+    pub async fn copy(&self, id: Uuid) -> AppResult<ScriptDetails> {
+        let details = self
+            .repository
+            .get_for_editor(id)
+            .await?
+            .ok_or_else(|| AppError::Validation("脚本不存在或已删除".into()))?;
+        let suffix = " 副本";
+        let title = details
+            .definition
+            .title
+            .chars()
+            .take(80 - suffix.chars().count())
+            .collect::<String>();
+        self.repository
+            .create(NewPersonalScript {
+                title: format!("{title}{suffix}"),
+                category: details.definition.category,
+                tags: details.definition.tags,
+                is_favorite: false,
+                is_enabled: false,
+                version: NewScriptVersion {
+                    body: details.active_version.body,
+                    parameters: details.active_version.parameters,
+                    scan_summary: Value::Null,
+                    timeout_seconds: details.active_version.timeout_seconds,
+                },
+            })
+            .await
     }
 
     pub async fn import(&self, bytes: &[u8]) -> AppResult<ScriptDetails> {

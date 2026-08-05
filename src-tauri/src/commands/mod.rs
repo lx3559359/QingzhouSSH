@@ -2,6 +2,7 @@ pub mod bootstrap;
 pub mod executions;
 pub mod logs;
 pub mod operations;
+pub mod scripts;
 pub mod servers;
 pub mod transfers;
 pub mod updates;

@@ -208,6 +208,70 @@ describe('Tauri API wrapper', () => {
     }
   });
 
+  it('uses bounded personal script IPC without command or path escape hatches', async () => {
+    const draft = {
+      title: '服务巡检',
+      category: '系统维护',
+      tags: ['巡检'],
+      body: "printf '%s\\n' ok",
+      parameters: [],
+      timeoutSeconds: 30,
+    };
+    const metadata = { title: '服务巡检', category: '系统维护', tags: ['巡检'] };
+    const events: number[] = [];
+
+    await tauriApi.listPersonalScripts({ query: '巡检', enabled: true });
+    await tauriApi.getPersonalScriptForEditor('script-1');
+    await tauriApi.listPersonalScriptVersions('script-1');
+    await tauriApi.createPersonalScript(draft);
+    await tauriApi.savePersonalScriptVersion('script-1', {
+      body: draft.body,
+      parameters: [],
+      timeoutSeconds: 45,
+    });
+    await tauriApi.updatePersonalScriptMetadata('script-1', metadata);
+    await tauriApi.copyPersonalScript('script-1');
+    await tauriApi.setPersonalScriptFavorite('script-1', true);
+    await tauriApi.setPersonalScriptEnabled('script-1', true);
+    await tauriApi.deletePersonalScript('script-1');
+    await tauriApi.importPersonalScript('{"schemaVersion":1}');
+    await tauriApi.exportPersonalScript('script-1');
+    await tauriApi.previewPersonalScriptRun('script-1', 'server-1', { TARGET: 'web' });
+    await tauriApi.confirmPersonalScriptRun(
+      { previewId: 'preview-1', confirmationToken: 'token-1' },
+      (event) => events.push(event.sequence),
+    );
+    await tauriApi.cancelPersonalScriptRun('preview-1');
+
+    expect(invoke.mock.calls.map(([command, args]) => [command, args && Object.keys(args)])).toEqual([
+      ['list_personal_scripts', ['filter']],
+      ['get_personal_script_for_editor', ['scriptId']],
+      ['list_personal_script_versions', ['scriptId']],
+      ['create_personal_script', ['request']],
+      ['save_personal_script_version', ['scriptId', 'request']],
+      ['update_personal_script_metadata', ['scriptId', 'request']],
+      ['copy_personal_script', ['scriptId']],
+      ['set_personal_script_favorite', ['scriptId', 'favorite']],
+      ['set_personal_script_enabled', ['scriptId', 'enabled']],
+      ['delete_personal_script', ['scriptId']],
+      ['import_personal_script', ['packageJson']],
+      ['export_personal_script', ['scriptId']],
+      ['preview_personal_script_run', ['scriptId', 'serverId', 'parameterValues']],
+      ['confirm_personal_script_run', ['request', 'onEvent']],
+      ['cancel_personal_script_run', ['operationRunId']],
+    ]);
+    const serialized = JSON.stringify(invoke.mock.calls);
+    for (const forbidden of [
+      'riskLevel',
+      'rollbackAvailable',
+      'commandTemplate',
+      'localPath',
+      'serverIds',
+    ]) {
+      expect(serialized).not.toContain(forbidden);
+    }
+  });
+
   it('uses all workflow command names, camelCase arguments and monotonic channels', async () => {
     const draft = {
       id: null,

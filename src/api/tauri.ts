@@ -44,6 +44,17 @@ import type {
   WorkflowValidationReport,
   UpdateProgressEvent,
   UpdateStatus,
+  ConfirmPersonalScriptRunRequest,
+  CreatePersonalScriptRequest,
+  PersonalScriptDetails,
+  PersonalScriptListFilter,
+  PersonalScriptRunPreview,
+  PersonalScriptRunResult,
+  PersonalScriptSummary,
+  PersonalScriptVersion,
+  SavePersonalScriptVersionRequest,
+  ScriptPackageExport,
+  UpdatePersonalScriptMetadataRequest,
 } from './contracts';
 import { dataRootPreviewApi, previewApi } from './preview';
 export { normalizeAppError as asAppError } from './errors';
@@ -195,6 +206,50 @@ export const tauriApi = {
     invoke<OperationRecoveryResult>('inspect_uncertain_operation', { runId }),
   cleanupOperationRestoreAssets: (restorePointId: string) =>
     invoke<OperationRestoreDetails>('cleanup_operation_restore_assets', { restorePointId }),
+  listPersonalScripts: (filter: PersonalScriptListFilter) =>
+    invoke<PersonalScriptSummary[]>('list_personal_scripts', { filter }),
+  getPersonalScriptForEditor: (scriptId: string) =>
+    invoke<PersonalScriptDetails | null>('get_personal_script_for_editor', { scriptId }),
+  listPersonalScriptVersions: (scriptId: string) =>
+    invoke<PersonalScriptVersion[]>('list_personal_script_versions', { scriptId }),
+  createPersonalScript: (request: CreatePersonalScriptRequest) =>
+    invoke<PersonalScriptDetails>('create_personal_script', { request }),
+  savePersonalScriptVersion: (scriptId: string, request: SavePersonalScriptVersionRequest) =>
+    invoke<PersonalScriptVersion>('save_personal_script_version', { scriptId, request }),
+  updatePersonalScriptMetadata: (
+    scriptId: string,
+    request: UpdatePersonalScriptMetadataRequest,
+  ) => invoke<void>('update_personal_script_metadata', { scriptId, request }),
+  copyPersonalScript: (scriptId: string) =>
+    invoke<PersonalScriptDetails>('copy_personal_script', { scriptId }),
+  setPersonalScriptFavorite: (scriptId: string, favorite: boolean) =>
+    invoke<void>('set_personal_script_favorite', { scriptId, favorite }),
+  setPersonalScriptEnabled: (scriptId: string, enabled: boolean) =>
+    invoke<void>('set_personal_script_enabled', { scriptId, enabled }),
+  deletePersonalScript: (scriptId: string) =>
+    invoke<void>('delete_personal_script', { scriptId }),
+  importPersonalScript: (packageJson: string) =>
+    invoke<PersonalScriptDetails>('import_personal_script', { packageJson }),
+  exportPersonalScript: (scriptId: string) =>
+    invoke<ScriptPackageExport>('export_personal_script', { scriptId }),
+  previewPersonalScriptRun: (
+    scriptId: string,
+    serverId: string,
+    parameterValues: Record<string, unknown>,
+  ) => invoke<PersonalScriptRunPreview>('preview_personal_script_run', {
+    scriptId,
+    serverId,
+    parameterValues,
+  }),
+  confirmPersonalScriptRun: (
+    request: ConfirmPersonalScriptRunRequest,
+    onEvent: ExecutionEventHandler,
+  ) => invoke<PersonalScriptRunResult>('confirm_personal_script_run', {
+    request,
+    onEvent: createEventChannel(onEvent),
+  }),
+  cancelPersonalScriptRun: (operationRunId: string) =>
+    invoke<void>('cancel_personal_script_run', { operationRunId }),
   listWorkflows: () => invoke<WorkflowSummary[]>('list_workflows'),
   getWorkflow: (workflowId: string, version: number | null) =>
     invoke<WorkflowDefinition | null>('get_workflow', { workflowId, version }),

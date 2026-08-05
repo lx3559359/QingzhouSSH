@@ -230,6 +230,130 @@ export interface ExecutionDetails {
   files: ExecutionFile[];
 }
 
+export interface ScriptScanWarning {
+  code: string;
+  message: string;
+  lineNumber: number;
+}
+
+export interface ScriptScanSummary {
+  lineCount: number;
+  characterCount: number;
+  bodySha256: string;
+  warningCount: number;
+  warnings: ScriptScanWarning[];
+}
+
+export interface PersonalScriptDefinition {
+  id: string;
+  title: string;
+  category: string;
+  tags: string[];
+  isFavorite: boolean;
+  isEnabled: boolean;
+  activeVersionId: string;
+  createdAt: number;
+  updatedAt: number;
+  deletedAt: number | null;
+}
+
+export interface PersonalScriptVersion {
+  id: string;
+  definitionId: string;
+  versionNumber: number;
+  body: string;
+  bodySha256: string;
+  parameters: ParameterDefinition[];
+  scanSummary: ScriptScanSummary;
+  timeoutSeconds: number;
+  createdAt: number;
+}
+
+export interface PersonalScriptDetails {
+  definition: PersonalScriptDefinition;
+  activeVersion: PersonalScriptVersion;
+}
+
+export interface PersonalScriptSummary {
+  id: string;
+  title: string;
+  category: string;
+  tags: string[];
+  isFavorite: boolean;
+  isEnabled: boolean;
+  activeVersionId: string;
+  activeVersionNumber: number;
+  bodySha256: string;
+  updatedAt: number;
+}
+
+export interface PersonalScriptListFilter {
+  query?: string;
+  category?: string;
+  tag?: string;
+  favorite?: boolean;
+  enabled?: boolean;
+}
+
+export interface CreatePersonalScriptRequest {
+  title: string;
+  category: string;
+  tags: string[];
+  body: string;
+  parameters: ParameterDefinition[];
+  timeoutSeconds: number;
+}
+
+export interface SavePersonalScriptVersionRequest {
+  body: string;
+  parameters: ParameterDefinition[];
+  timeoutSeconds: number;
+}
+
+export interface UpdatePersonalScriptMetadataRequest {
+  title: string;
+  category: string;
+  tags: string[];
+}
+
+export interface ScriptPackageExport {
+  relativePath: string;
+  sha256: string;
+  sizeBytes: number;
+}
+
+export interface PersonalScriptRunPreview {
+  previewId: string;
+  confirmationToken: string;
+  expiresAt: number;
+  serverId: string;
+  scriptDefinitionId: string;
+  scriptVersionId: string;
+  scriptVersionNumber: number;
+  title: string;
+  riskLevel: 'dangerous';
+  automaticRollbackAvailable: false;
+  warning: string;
+  lineCount: number;
+  characterCount: number;
+  bodySha256: string;
+  parameterNames: string[];
+  scanWarnings: ScriptScanWarning[];
+  timeoutSeconds: number;
+}
+
+export interface ConfirmPersonalScriptRunRequest {
+  previewId: string;
+  confirmationToken: string;
+}
+
+export interface PersonalScriptRunResult {
+  operationRunId: string;
+  scriptDefinitionId: string;
+  scriptVersionId: string;
+  execution: ExecutionDetails;
+}
+
 export type OperationStatus =
   | 'validating'
   | 'preflighting'
