@@ -12,7 +12,7 @@ use crate::{
         ssh::executor::{execute_streaming, CommandRequest, EventSink},
         tasks::{
             built_in_catalog, render_command, select_implementation, validate_parameters,
-            RiskLevel, TaskDefinition, ValidatedParameters,
+            RenderedTaskStep, RiskLevel, TaskDefinition, ValidatedParameters,
         },
     },
     domain::{
@@ -245,6 +245,36 @@ impl ExecutionService {
         .await
     }
 
+    pub(crate) async fn execute_planned_step<E: EventSink>(
+        &self,
+        server_id: &str,
+        task_id: &str,
+        task_version: i32,
+        category: &str,
+        step: &RenderedTaskStep,
+        parameters: &[ExecutionParameter],
+        events: &mut E,
+    ) -> AppResult<ExecutionDetails> {
+        let execution = self
+            .repository
+            .create(NewExecution {
+                server_id: server_id.into(),
+                task_id: task_id.into(),
+                task_version,
+                category: category.into(),
+                parameters: parameters.to_vec(),
+            })
+            .await?;
+        self.run_command_with_limit(
+            execution.id,
+            step.command.clone(),
+            Duration::from_secs(step.timeout_seconds),
+            step.output_limit_bytes,
+            events,
+        )
+        .await
+    }
+
     pub async fn cancel(&self, execution_id: Uuid) -> AppResult<()> {
         self.registry.cancel(execution_id).await
     }
@@ -297,6 +327,7 @@ impl ExecutionService {
             command,
             connected,
             Duration::from_secs(60),
+            DEFAULT_OUTPUT_LIMIT,
             events,
         )
         .await
@@ -307,6 +338,18 @@ impl ExecutionService {
         execution_id: Uuid,
         command: String,
         timeout: Duration,
+        events: &mut E,
+    ) -> AppResult<ExecutionDetails> {
+        self.run_command_with_limit(execution_id, command, timeout, DEFAULT_OUTPUT_LIMIT, events)
+            .await
+    }
+
+    async fn run_command_with_limit<E: EventSink>(
+        &self,
+        execution_id: Uuid,
+        command: String,
+        timeout: Duration,
+        max_output_bytes: u64,
         events: &mut E,
     ) -> AppResult<ExecutionDetails> {
         let server_id = self
@@ -320,8 +363,15 @@ impl ExecutionService {
             Ok(connected) => connected,
             Err(error) => return self.fail_before_run(execution_id, error, events).await,
         };
-        self.run_connected_command(execution_id, command, connected, timeout, events)
-            .await
+        self.run_connected_command(
+            execution_id,
+            command,
+            connected,
+            timeout,
+            max_output_bytes,
+            events,
+        )
+        .await
     }
 
     async fn run_connected_command<E: EventSink>(
@@ -330,6 +380,7 @@ impl ExecutionService {
         command: String,
         connected: crate::services::server_connector::ConnectedServer,
         timeout: Duration,
+        max_output_bytes: u64,
         events: &mut E,
     ) -> AppResult<ExecutionDetails> {
         let started_at = now_millis();
@@ -345,7 +396,7 @@ impl ExecutionService {
                 execution_id,
                 command,
                 timeout,
-                max_output_bytes: DEFAULT_OUTPUT_LIMIT,
+                max_output_bytes,
             },
             &output_path,
             &connected.redactor,

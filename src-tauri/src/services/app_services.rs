@@ -26,8 +26,8 @@ use crate::{
     },
     error::{AppError, AppResult},
     repositories::{
-        execution_repository::ExecutionRepository, server_repository::ServerRepository,
-        workflow_repository::WorkflowRepository,
+        execution_repository::ExecutionRepository, operation_repository::OperationRepository,
+        server_repository::ServerRepository, workflow_repository::WorkflowRepository,
     },
     services::{
         execution_service::{
@@ -35,6 +35,7 @@ use crate::{
             TaskExecutionRequest,
         },
         log_service::LogService,
+        operation_service::OperationService,
         restore_point_service::RestorePointService,
         server_connector::ServerConnector,
         transfer_service::TransferService,
@@ -67,6 +68,7 @@ pub struct AppServices {
     servers: ServerRepository,
     vault: Vault,
     executions: ExecutionService,
+    operations: OperationService,
     logs: LogService,
     transfers: TransferService,
     workflows: WorkflowRepository,
@@ -90,6 +92,8 @@ impl AppServices {
         let vault = Vault::new(root, protector);
         let execution_repository = ExecutionRepository::new(database.pool().clone());
         execution_repository.recover_interrupted().await?;
+        let operation_repository = OperationRepository::new(database.pool().clone());
+        operation_repository.recover_interrupted().await?;
         let workflow_repository = WorkflowRepository::new(database.pool().clone());
         workflow_repository.recover_interrupted().await?;
         let registry = ExecutionRegistry::default();
@@ -105,6 +109,8 @@ impl AppServices {
             connector.clone(),
             registry.clone(),
         );
+        let operations =
+            OperationService::new(operation_repository, executions.clone(), connector.clone());
         let logs = LogService::new(
             root.to_path_buf(),
             execution_repository.clone(),
@@ -135,6 +141,7 @@ impl AppServices {
             servers,
             vault,
             executions,
+            operations,
             logs,
             transfers,
             workflows: workflow_repository,
@@ -150,6 +157,10 @@ impl AppServices {
 
     pub fn execution_service(&self) -> ExecutionService {
         self.executions.clone()
+    }
+
+    pub fn operation_service(&self) -> OperationService {
+        self.operations.clone()
     }
 
     pub fn log_service(&self) -> LogService {
