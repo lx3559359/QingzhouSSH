@@ -304,7 +304,7 @@ impl ScriptService {
         let version_number = i32::try_from(version.version_number)
             .map_err(|_| AppError::Validation("脚本版本超出运行范围".into()))?;
         self.operations
-            .transition(preview_id, OperationStatus::Running)
+            .start_confirmed_unrecoverable_personal_script(preview_id)
             .await?;
         if let Err(error) = self
             .repository

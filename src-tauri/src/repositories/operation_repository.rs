@@ -81,6 +81,45 @@ impl OperationRepository {
         Ok(())
     }
 
+    /// Starts the one operation kind that deliberately has no backup or rollback phase.
+    ///
+    /// Keep this separate from the shared transition graph so ordinary dangerous
+    /// operations cannot skip their mandatory backup state.
+    pub async fn start_confirmed_unrecoverable_personal_script(&self, id: Uuid) -> AppResult<()> {
+        let mut transaction = self.pool.begin().await?;
+        let row = sqlx::query(
+            "SELECT status,task_id,risk_level,EXISTS(SELECT 1 FROM operation_steps WHERE run_id=operation_runs.id) AS has_steps FROM operation_runs WHERE id=?",
+        )
+        .bind(id.to_string())
+        .fetch_optional(&mut *transaction)
+        .await?
+        .ok_or_else(|| AppError::Validation("运维运行不存在".into()))?;
+        let status: String = row.try_get("status")?;
+        let task_id: String = row.try_get("task_id")?;
+        let risk_level: String = row.try_get("risk_level")?;
+        let has_steps: bool = row.try_get("has_steps")?;
+        if status != OperationStatus::WaitingConfirmation.as_str()
+            || task_id != "script.personal"
+            || risk_level != RiskLevel::Dangerous.as_str()
+            || has_steps
+        {
+            return Err(AppError::Validation(
+                "只有已确认且无恢复步骤的个人脚本可以直接开始运行".into(),
+            ));
+        }
+        let now = now_millis();
+        let result = sqlx::query(
+            "UPDATE operation_runs SET status='running',updated_at=? WHERE id=? AND status='waiting_confirmation' AND task_id='script.personal' AND risk_level='dangerous'",
+        )
+        .bind(now)
+        .bind(id.to_string())
+        .execute(&mut *transaction)
+        .await?;
+        ensure_changed(result.rows_affected(), "个人脚本状态已被其他操作修改")?;
+        transaction.commit().await?;
+        Ok(())
+    }
+
     pub async fn create_step(&self, draft: NewOperationStep) -> AppResult<OperationStepRecord> {
         validate_step(&draft)?;
         let step_index = index_to_i64(draft.step_index)?;
