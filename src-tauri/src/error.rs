@@ -33,6 +33,12 @@ pub enum AppError {
     NotReady,
     #[error("安全检查失败：{0}")]
     Security(String),
+    #[error("脚本包版本不受支持：{0}")]
+    UnsupportedScriptPackage(String),
+    #[error("脚本包包含禁止字段：{0}")]
+    ForbiddenScriptField(String),
+    #[error("脚本包安全检查失败：{0}")]
+    UnsafeScriptPackage(String),
     #[error("更新操作失败：{0}")]
     Update(String),
     #[error("I/O 操作失败：{0}")]
@@ -67,6 +73,9 @@ impl AppError {
             Self::RemoteStateUncertain(_) => "remote_state_uncertain",
             Self::NotReady => "not_ready",
             Self::Security(_) => "security",
+            Self::UnsupportedScriptPackage(_) => "unsupported_script_package",
+            Self::ForbiddenScriptField(_) => "forbidden_script_field",
+            Self::UnsafeScriptPackage(_) => "unsafe_script_package",
             Self::Update(_) => "update",
             Self::Io(_) => "io",
             Self::Database(_) => "database",
