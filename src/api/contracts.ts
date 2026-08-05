@@ -324,6 +324,50 @@ export interface OperationFilter {
   createdTo?: number;
 }
 
+export type OperationBatchStatus =
+  | 'queued'
+  | 'running'
+  | 'succeeded'
+  | 'partial'
+  | 'failed'
+  | 'cancelled';
+
+export type OperationBatchItemStatus =
+  | 'queued'
+  | 'running'
+  | 'succeeded'
+  | 'failed'
+  | 'cancelled';
+
+export interface OperationBatchRequest {
+  serverIds: string[];
+  taskId: string;
+  taskVersion: number;
+  parameters: Record<string, unknown>;
+}
+
+export interface OperationBatchRecord {
+  id: string;
+  taskId: string;
+  taskVersion: number;
+  status: OperationBatchStatus;
+  createdAt: number;
+  finishedAt: number | null;
+}
+
+export interface OperationBatchItemRecord {
+  batchId: string;
+  serverId: string;
+  operationRunId: string | null;
+  status: OperationBatchItemStatus;
+  errorMessage: string | null;
+}
+
+export interface OperationBatchDetails {
+  batch: OperationBatchRecord;
+  items: OperationBatchItemRecord[];
+}
+
 export type OperationEvent = ExecutionEvent;
 
 type ExecutionEventBase = { sequence: number; emittedAt: number };

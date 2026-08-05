@@ -9,6 +9,8 @@ import type {
   ExecutionFilter,
   LogSearchRequest,
   OperationFilter,
+  OperationBatchDetails,
+  OperationBatchRequest,
   OperationPreflightRequest,
   OperationPreview,
   OperationRunDetails,
@@ -194,6 +196,7 @@ function emitPreview(onEvent: (event: ExecutionEvent) => void, details: Executio
 
 let previewOperationCounter = 0;
 let previewOperations = new Map<string, OperationRunDetails>();
+let previewOperationBatches = new Map<string, OperationBatchDetails>();
 
 function operationTask(taskId: string, taskVersion: number) {
   const task = previewTasks.find((item) => item.definition.id === taskId)?.definition;
@@ -1009,6 +1012,46 @@ export const previewApi = {
       .filter((run) => !filter.taskId || run.taskId === filter.taskId)
       .filter((run) => !filter.status || run.status === filter.status)
       .map(clone),
+  startOperationBatch: async (
+    request: OperationBatchRequest,
+  ): Promise<OperationBatchDetails> => {
+    const id = crypto.randomUUID();
+    const now = Date.now();
+    const details: OperationBatchDetails = {
+      batch: {
+        id,
+        taskId: request.taskId,
+        taskVersion: request.taskVersion,
+        status: 'succeeded',
+        createdAt: now,
+        finishedAt: now,
+      },
+      items: request.serverIds.map((serverId) => ({
+        batchId: id,
+        serverId,
+        operationRunId: null,
+        status: 'succeeded',
+        errorMessage: null,
+      })),
+    };
+    previewOperationBatches.set(id, details);
+    return clone(details);
+  },
+  cancelOperationBatch: async (batchId: string) => {
+    const details = previewOperationBatches.get(batchId);
+    if (!details) throw Object.assign(new Error('批量任务不存在。'), { code: 'validation' });
+    details.batch.status = 'cancelled';
+    details.batch.finishedAt = Date.now();
+    details.items = details.items.map((item) =>
+      item.status === 'queued' || item.status === 'running'
+        ? { ...item, status: 'cancelled' }
+        : item,
+    );
+  },
+  getOperationBatch: async (batchId: string) => {
+    const details = previewOperationBatches.get(batchId);
+    return details ? clone(details) : null;
+  },
   startTaskExecution: async (
     serverId: string,
     request: TaskExecutionRequest,

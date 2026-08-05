@@ -26,8 +26,10 @@ use crate::{
     },
     error::{AppError, AppResult},
     repositories::{
-        execution_repository::ExecutionRepository, operation_repository::OperationRepository,
-        server_repository::ServerRepository, workflow_repository::WorkflowRepository,
+        execution_repository::ExecutionRepository,
+        operation_batch_repository::OperationBatchRepository,
+        operation_repository::OperationRepository, server_repository::ServerRepository,
+        workflow_repository::WorkflowRepository,
     },
     services::{
         execution_service::{
@@ -35,6 +37,7 @@ use crate::{
             TaskExecutionRequest,
         },
         log_service::LogService,
+        operation_batch_service::OperationBatchService,
         operation_service::OperationService,
         restore_point_service::RestorePointService,
         server_connector::ServerConnector,
@@ -69,6 +72,7 @@ pub struct AppServices {
     vault: Vault,
     executions: ExecutionService,
     operations: OperationService,
+    operation_batches: OperationBatchService,
     logs: LogService,
     transfers: TransferService,
     workflows: WorkflowRepository,
@@ -94,6 +98,8 @@ impl AppServices {
         execution_repository.recover_interrupted().await?;
         let operation_repository = OperationRepository::new(database.pool().clone());
         operation_repository.recover_interrupted().await?;
+        let operation_batch_repository = OperationBatchRepository::new(database.pool().clone());
+        operation_batch_repository.recover_interrupted().await?;
         let workflow_repository = WorkflowRepository::new(database.pool().clone());
         workflow_repository.recover_interrupted().await?;
         let registry = ExecutionRegistry::default();
@@ -111,6 +117,11 @@ impl AppServices {
         );
         let operations =
             OperationService::new(operation_repository, executions.clone(), connector.clone());
+        let operation_batches = OperationBatchService::new(
+            operation_batch_repository,
+            servers.clone(),
+            operations.clone(),
+        );
         let logs = LogService::new(
             root.to_path_buf(),
             execution_repository.clone(),
@@ -142,6 +153,7 @@ impl AppServices {
             vault,
             executions,
             operations,
+            operation_batches,
             logs,
             transfers,
             workflows: workflow_repository,
@@ -161,6 +173,10 @@ impl AppServices {
 
     pub fn operation_service(&self) -> OperationService {
         self.operations.clone()
+    }
+
+    pub fn operation_batch_service(&self) -> OperationBatchService {
+        self.operation_batches.clone()
     }
 
     pub fn log_service(&self) -> LogService {

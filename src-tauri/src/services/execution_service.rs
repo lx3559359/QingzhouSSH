@@ -98,11 +98,26 @@ pub struct ExecutionRegistry {
 
 impl ExecutionRegistry {
     pub async fn register(&self, id: Uuid) -> AppResult<CancellationToken> {
+        self.register_token(id, CancellationToken::new()).await
+    }
+
+    pub async fn register_child(
+        &self,
+        id: Uuid,
+        parent: &CancellationToken,
+    ) -> AppResult<CancellationToken> {
+        self.register_token(id, parent.child_token()).await
+    }
+
+    async fn register_token(
+        &self,
+        id: Uuid,
+        token: CancellationToken,
+    ) -> AppResult<CancellationToken> {
         let mut tokens = self.tokens.lock().await;
         if tokens.contains_key(&id) {
             return Err(AppError::Validation("执行标识已经在运行".into()));
         }
-        let token = CancellationToken::new();
         tokens.insert(id, token.clone());
         Ok(token)
     }
@@ -246,7 +261,7 @@ impl ExecutionService {
     }
 
     #[allow(clippy::too_many_arguments)]
-    pub(crate) async fn execute_planned_step<E: EventSink>(
+    pub(crate) async fn execute_planned_step_with_cancel<E: EventSink>(
         &self,
         server_id: &str,
         task_id: &str,
@@ -255,6 +270,32 @@ impl ExecutionService {
         step: &RenderedTaskStep,
         parameters: &[ExecutionParameter],
         events: &mut E,
+        cancel: &CancellationToken,
+    ) -> AppResult<ExecutionDetails> {
+        self.execute_planned_step_inner(
+            server_id,
+            task_id,
+            task_version,
+            category,
+            step,
+            parameters,
+            events,
+            Some(cancel),
+        )
+        .await
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn execute_planned_step_inner<E: EventSink>(
+        &self,
+        server_id: &str,
+        task_id: &str,
+        task_version: i32,
+        category: &str,
+        step: &RenderedTaskStep,
+        parameters: &[ExecutionParameter],
+        events: &mut E,
+        cancel: Option<&CancellationToken>,
     ) -> AppResult<ExecutionDetails> {
         let execution = self
             .repository
@@ -266,12 +307,13 @@ impl ExecutionService {
                 parameters: parameters.to_vec(),
             })
             .await?;
-        self.run_command_with_limit(
+        self.run_command_with_limit_and_cancel(
             execution.id,
             step.command.clone(),
             Duration::from_secs(step.timeout_seconds),
             step.output_limit_bytes,
             events,
+            cancel,
         )
         .await
     }
@@ -330,6 +372,7 @@ impl ExecutionService {
             Duration::from_secs(60),
             DEFAULT_OUTPUT_LIMIT,
             events,
+            None,
         )
         .await
     }
@@ -353,6 +396,26 @@ impl ExecutionService {
         max_output_bytes: u64,
         events: &mut E,
     ) -> AppResult<ExecutionDetails> {
+        self.run_command_with_limit_and_cancel(
+            execution_id,
+            command,
+            timeout,
+            max_output_bytes,
+            events,
+            None,
+        )
+        .await
+    }
+
+    async fn run_command_with_limit_and_cancel<E: EventSink>(
+        &self,
+        execution_id: Uuid,
+        command: String,
+        timeout: Duration,
+        max_output_bytes: u64,
+        events: &mut E,
+        cancel: Option<&CancellationToken>,
+    ) -> AppResult<ExecutionDetails> {
         let server_id = self
             .repository
             .get(execution_id)
@@ -360,7 +423,14 @@ impl ExecutionService {
             .ok_or_else(|| AppError::Validation("执行记录不存在".into()))?
             .record
             .server_id;
-        let connected = match self.connector.connect(&server_id).await {
+        let connected_result = match cancel {
+            Some(cancel) => tokio::select! {
+                _ = cancel.cancelled() => Err(AppError::Cancelled),
+                result = self.connector.connect(&server_id) => result,
+            },
+            None => self.connector.connect(&server_id).await,
+        };
+        let connected = match connected_result {
             Ok(connected) => connected,
             Err(error) => return self.fail_before_run(execution_id, error, events).await,
         };
@@ -371,10 +441,12 @@ impl ExecutionService {
             timeout,
             max_output_bytes,
             events,
+            cancel,
         )
         .await
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn run_connected_command<E: EventSink>(
         &self,
         execution_id: Uuid,
@@ -383,12 +455,16 @@ impl ExecutionService {
         timeout: Duration,
         max_output_bytes: u64,
         events: &mut E,
+        parent_cancel: Option<&CancellationToken>,
     ) -> AppResult<ExecutionDetails> {
         let started_at = now_millis();
         self.repository
             .mark_running(execution_id, started_at)
             .await?;
-        let cancel = self.registry.register(execution_id).await?;
+        let cancel = match parent_cancel {
+            Some(parent) => self.registry.register_child(execution_id, parent).await?,
+            None => self.registry.register(execution_id).await?,
+        };
         let output_path = self.execution_log_path(execution_id);
         let mut sequenced = MonotonicEventSink::new(events);
         let outcome = execute_streaming(
@@ -571,4 +647,22 @@ pub(crate) fn relative_to(root: &std::path::Path, path: &std::path::Path) -> App
 
 pub(crate) fn elapsed(started_at: i64, finished_at: i64) -> u64 {
     u64::try_from(finished_at.saturating_sub(started_at)).unwrap_or(0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn registered_child_execution_inherits_parent_cancellation() {
+        let registry = ExecutionRegistry::default();
+        let parent = CancellationToken::new();
+        let child = registry
+            .register_child(Uuid::new_v4(), &parent)
+            .await
+            .unwrap();
+        assert!(!child.is_cancelled());
+        parent.cancel();
+        assert!(child.is_cancelled());
+    }
 }

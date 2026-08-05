@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
 use crate::{
@@ -123,13 +124,27 @@ impl OperationService {
         request: OperationStartRequest,
         events: &mut E,
     ) -> AppResult<OperationDetails> {
+        self.start_with_cancel(server_id, request, events, CancellationToken::new())
+            .await
+    }
+
+    pub(crate) async fn start_with_cancel<E: EventSink>(
+        &self,
+        server_id: &str,
+        request: OperationStartRequest,
+        events: &mut E,
+        cancel: CancellationToken,
+    ) -> AppResult<OperationDetails> {
         let definition = resolve_definition(&request.task_id, request.task_version)?;
         validate_parameters(&definition, &request.parameters)?;
         require_dangerous_preview(&definition, request.confirmed_preview_id)?;
-        let connected = self.connector.connect(server_id).await?;
+        let connected = tokio::select! {
+            _ = cancel.cancelled() => return Err(AppError::Cancelled),
+            connected = self.connector.connect(server_id) => connected?,
+        };
         let capabilities = connected.capabilities.clone();
         connected.session.disconnect().await;
-        self.start_with_capabilities(server_id, request, &capabilities, events)
+        self.start_with_capabilities_and_cancel(server_id, request, &capabilities, events, &cancel)
             .await
     }
 
@@ -140,6 +155,24 @@ impl OperationService {
         request: OperationStartRequest,
         capabilities: &SystemCapabilities,
         events: &mut E,
+    ) -> AppResult<OperationDetails> {
+        self.start_with_capabilities_and_cancel(
+            server_id,
+            request,
+            capabilities,
+            events,
+            &CancellationToken::new(),
+        )
+        .await
+    }
+
+    async fn start_with_capabilities_and_cancel<E: EventSink>(
+        &self,
+        server_id: &str,
+        request: OperationStartRequest,
+        capabilities: &SystemCapabilities,
+        events: &mut E,
+        cancel: &CancellationToken,
     ) -> AppResult<OperationDetails> {
         let definition = resolve_definition(&request.task_id, request.task_version)?;
         let validated = validate_parameters(&definition, &request.parameters)?;
@@ -181,6 +214,12 @@ impl OperationService {
             ));
         }
         let plan = plan_task(&definition, capabilities, &request.parameters)?;
+        if cancel.is_cancelled() {
+            self.repository
+                .transition(preview_id, OperationStatus::Cancelled)
+                .await?;
+            return self.require_details(preview_id).await;
+        }
         self.repository
             .transition(preview_id, OperationStatus::Running)
             .await?;
@@ -188,13 +227,22 @@ impl OperationService {
         let mut operation_output = String::new();
 
         for (index, step) in plan.execution_steps.iter().enumerate() {
+            if cancel.is_cancelled() {
+                self.repository
+                    .skip_pending_steps(preview_id, OperationPhase::Execute, index)
+                    .await?;
+                self.repository
+                    .transition(preview_id, OperationStatus::Cancelled)
+                    .await?;
+                return self.require_details(preview_id).await;
+            }
             self.repository
                 .mark_step_running(preview_id, OperationPhase::Execute, index, now_millis())
                 .await?;
             let execution = {
                 let mut capture = OperationOutputSink::new(events, &mut operation_output);
                 self.executions
-                    .execute_planned_step(
+                    .execute_planned_step_with_cancel(
                         server_id,
                         &definition.id,
                         definition.version,
@@ -202,6 +250,7 @@ impl OperationService {
                         step,
                         &history_parameters,
                         &mut capture,
+                        cancel,
                     )
                     .await
             };

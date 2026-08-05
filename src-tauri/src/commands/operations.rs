@@ -5,6 +5,7 @@ use crate::{
     domain::{
         events::ExecutionEvent,
         operation::{OperationDetails, OperationFilter, OperationRunRecord},
+        operation_batch::{OperationBatchDetails, OperationBatchRequest},
     },
     error::AppResult,
     services::{
@@ -88,6 +89,39 @@ pub async fn list_operations(
         .await
 }
 
+#[tauri::command]
+pub async fn start_operation_batch(
+    request: OperationBatchRequest,
+    state: State<'_, AppState>,
+) -> AppResult<OperationBatchDetails> {
+    services(&state)
+        .await?
+        .operation_batch_service()
+        .start_background(request)
+        .await
+}
+
+#[tauri::command]
+pub async fn cancel_operation_batch(batch_id: Uuid, state: State<'_, AppState>) -> AppResult<()> {
+    services(&state)
+        .await?
+        .operation_batch_service()
+        .cancel(batch_id)
+        .await
+}
+
+#[tauri::command]
+pub async fn get_operation_batch(
+    batch_id: Uuid,
+    state: State<'_, AppState>,
+) -> AppResult<Option<OperationBatchDetails>> {
+    services(&state)
+        .await?
+        .operation_batch_service()
+        .get(batch_id)
+        .await
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -113,5 +147,14 @@ mod tests {
             "command":"id"
         }));
         assert!(invalid.is_err());
+
+        let invalid_batch = serde_json::from_value::<OperationBatchRequest>(serde_json::json!({
+            "serverIds":["server-1"],
+            "taskId":"system.overview",
+            "taskVersion":2,
+            "parameters":{},
+            "concurrency":20
+        }));
+        assert!(invalid_batch.is_err());
     }
 }

@@ -156,6 +156,14 @@ describe('Tauri API wrapper', () => {
     await tauriApi.cancelOperation('run-1');
     await tauriApi.getOperation('run-1');
     await tauriApi.listOperations({ serverId: 'server-1', status: 'failed' });
+    await tauriApi.startOperationBatch({
+      serverIds: ['server-1', 'server-2'],
+      taskId: 'system.overview',
+      taskVersion: 2,
+      parameters: {},
+    });
+    await tauriApi.cancelOperationBatch('batch-1');
+    await tauriApi.getOperationBatch('batch-1');
 
     expect(invoke.mock.calls.map(([command, args]) => [command, args && Object.keys(args)])).toEqual([
       ['list_operations_tasks', ['serverId']],
@@ -164,6 +172,9 @@ describe('Tauri API wrapper', () => {
       ['cancel_operation', ['runId']],
       ['get_operation', ['runId']],
       ['list_operations', ['filter']],
+      ['start_operation_batch', ['request']],
+      ['cancel_operation_batch', ['batchId']],
+      ['get_operation_batch', ['batchId']],
     ]);
     expect(JSON.stringify(invoke.mock.calls)).not.toContain('commandTemplate');
     expect(JSON.stringify(invoke.mock.calls)).not.toContain('"command"');
