@@ -21,6 +21,8 @@ pub enum AppError {
     Permission(String),
     #[error("当前账号不是 root，且未配置免密 sudo；服务器未发生修改")]
     PasswordlessSudoRequired,
+    #[error("该恢复点已经完成回滚，不能重复使用")]
+    RestorePointAlreadyConsumed,
     #[error("磁盘空间不足：{0}")]
     DiskSpace(String),
     #[error("操作已取消")]
@@ -59,6 +61,7 @@ impl AppError {
             Self::Integrity(_) => "integrity",
             Self::Permission(_) => "permission",
             Self::PasswordlessSudoRequired => "passwordless_sudo_required",
+            Self::RestorePointAlreadyConsumed => "restore_point_already_consumed",
             Self::DiskSpace(_) => "disk_space",
             Self::Cancelled => "cancelled",
             Self::RemoteStateUncertain(_) => "remote_state_uncertain",

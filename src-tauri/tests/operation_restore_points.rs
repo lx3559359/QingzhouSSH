@@ -1,0 +1,226 @@
+use qingzhou_ssh_lib::{
+    core::database::Database,
+    core::tasks::BackupItemKind,
+    domain::{
+        operation::{NewOperationRun, OperationStatus},
+        operation_restore::{
+            NewOperationRestoreItem, NewOperationRestorePoint, OperationRestoreItemStatus,
+            OperationRestorePointStatus,
+        },
+        server::{AuthKind, ServerProfile},
+    },
+    repositories::{
+        operation_repository::OperationRepository,
+        operation_restore_repository::OperationRestoreRepository,
+        server_repository::ServerRepository,
+    },
+};
+use serde_json::json;
+use uuid::Uuid;
+
+struct Fixture {
+    _root: tempfile::TempDir,
+    database: Database,
+    repository: OperationRestoreRepository,
+    run_id: Uuid,
+    server_id: String,
+}
+
+async fn fixture() -> Fixture {
+    let root = tempfile::tempdir().unwrap();
+    let database = Database::open(root.path()).await.unwrap();
+    let servers = ServerRepository::new(database.pool().clone());
+    let server = ServerProfile::new(
+        "restore fixture",
+        "127.0.0.1",
+        22,
+        "tester",
+        AuthKind::Password,
+        "restore-credential",
+    );
+    servers.insert(&server).await.unwrap();
+    let operations = OperationRepository::new(database.pool().clone());
+    let run = operations
+        .create(NewOperationRun {
+            server_id: server.id.clone(),
+            task_id: "system.hostname.set".into(),
+            task_version: 2,
+            risk_level: qingzhou_ssh_lib::core::tasks::RiskLevel::Dangerous,
+            parameters_summary: Some("hostname=app-01".into()),
+        })
+        .await
+        .unwrap();
+    Fixture {
+        _root: root,
+        repository: OperationRestoreRepository::new(database.pool().clone()),
+        database,
+        run_id: run.id,
+        server_id: server.id,
+    }
+}
+
+fn point(fixture: &Fixture) -> NewOperationRestorePoint {
+    NewOperationRestorePoint {
+        operation_run_id: fixture.run_id,
+        server_id: fixture.server_id.clone(),
+        task_id: "system.hostname.set".into(),
+        local_relative_dir: format!("backups/tasks/{}", fixture.run_id),
+        remote_asset_id: None,
+        expires_at: None,
+    }
+}
+
+fn item(
+    restore_point_id: Uuid,
+    run_id: Uuid,
+    ordinal: usize,
+    kind: BackupItemKind,
+) -> NewOperationRestoreItem {
+    NewOperationRestoreItem {
+        restore_point_id,
+        ordinal,
+        item_kind: kind,
+        remote_target: format!("/etc/qingzhou-{ordinal}.conf"),
+        local_relative_path: Some(format!("backups/tasks/{run_id}/{ordinal}.bin")),
+        sha256: Some("a".repeat(64)),
+        original_metadata: json!({"mode": "0644", "owner": "root"}),
+        status: OperationRestoreItemStatus::Available,
+        error_summary: None,
+    }
+}
+
+#[tokio::test]
+async fn restore_point_and_items_survive_database_reopen() {
+    let fixture = fixture().await;
+    let created = fixture.repository.create(point(&fixture)).await.unwrap();
+    assert_eq!(created.status, OperationRestorePointStatus::Creating);
+    fixture
+        .repository
+        .add_item(item(
+            created.id,
+            fixture.run_id,
+            0,
+            BackupItemKind::RemoteFile,
+        ))
+        .await
+        .unwrap();
+    fixture
+        .repository
+        .add_item(item(
+            created.id,
+            fixture.run_id,
+            1,
+            BackupItemKind::CommandSnapshot,
+        ))
+        .await
+        .unwrap();
+    fixture.repository.mark_available(created.id).await.unwrap();
+
+    let reopened = Database::open(fixture._root.path()).await.unwrap();
+    let repository = OperationRestoreRepository::new(reopened.pool().clone());
+    let details = repository.get(created.id).await.unwrap().unwrap();
+    assert_eq!(details.point.status, OperationRestorePointStatus::Available);
+    assert_eq!(details.items.len(), 2);
+    assert_eq!(details.items[0].ordinal, 0);
+    assert_eq!(details.items[1].item_kind, BackupItemKind::CommandSnapshot);
+
+    let by_run = repository.list_by_run(fixture.run_id).await.unwrap();
+    assert_eq!(by_run.len(), 1);
+    assert_eq!(by_run[0].point.id, created.id);
+}
+
+#[tokio::test]
+async fn consumed_restore_point_cannot_be_rolled_back_twice() {
+    let fixture = fixture().await;
+    let created = fixture.repository.create(point(&fixture)).await.unwrap();
+    fixture
+        .repository
+        .add_item(item(
+            created.id,
+            fixture.run_id,
+            0,
+            BackupItemKind::RuntimeState,
+        ))
+        .await
+        .unwrap();
+    fixture.repository.mark_available(created.id).await.unwrap();
+    fixture.repository.begin_rollback(created.id).await.unwrap();
+    fixture
+        .repository
+        .finish_rollback(created.id, OperationRestorePointStatus::RolledBack, None)
+        .await
+        .unwrap();
+
+    let error = fixture
+        .repository
+        .begin_rollback(created.id)
+        .await
+        .unwrap_err();
+    assert_eq!(error.code(), "restore_point_already_consumed");
+}
+
+#[tokio::test]
+async fn rollback_claim_is_atomic_and_only_one_caller_wins() {
+    let fixture = fixture().await;
+    let created = fixture.repository.create(point(&fixture)).await.unwrap();
+    fixture
+        .repository
+        .add_item(item(
+            created.id,
+            fixture.run_id,
+            0,
+            BackupItemKind::ManagedBlock,
+        ))
+        .await
+        .unwrap();
+    fixture.repository.mark_available(created.id).await.unwrap();
+
+    let left = fixture.repository.clone();
+    let right = fixture.repository.clone();
+    let (left, right) = tokio::join!(
+        left.begin_rollback(created.id),
+        right.begin_rollback(created.id)
+    );
+    assert_eq!(usize::from(left.is_ok()) + usize::from(right.is_ok()), 1);
+}
+
+#[tokio::test]
+async fn local_paths_are_relative_and_operation_deletion_is_restricted() {
+    let fixture = fixture().await;
+    let mut invalid = point(&fixture);
+    invalid.local_relative_dir = r#"C:\escape"#.into();
+    assert!(fixture.repository.create(invalid).await.is_err());
+
+    let created = fixture.repository.create(point(&fixture)).await.unwrap();
+    fixture
+        .repository
+        .add_item(item(
+            created.id,
+            fixture.run_id,
+            0,
+            BackupItemKind::RemoteFile,
+        ))
+        .await
+        .unwrap();
+    fixture.repository.mark_available(created.id).await.unwrap();
+
+    let deletion = sqlx::query("DELETE FROM operation_runs WHERE id=?")
+        .bind(fixture.run_id.to_string())
+        .execute(fixture.database.pool())
+        .await;
+    assert!(deletion.is_err());
+
+    let bad_status =
+        sqlx::query("UPDATE operation_restore_points SET status='invented' WHERE id=?")
+            .bind(created.id.to_string())
+            .execute(fixture.database.pool())
+            .await;
+    assert!(bad_status.is_err());
+
+    let operation = OperationRepository::new(fixture.database.pool().clone())
+        .get(fixture.run_id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(operation.run.status, OperationStatus::Validating);
+}
