@@ -126,6 +126,35 @@ impl OperationRestoreRepository {
         )
     }
 
+    pub async fn attach_remote_asset(
+        &self,
+        id: Uuid,
+        remote_asset_id: &str,
+        expires_at: i64,
+    ) -> AppResult<()> {
+        if remote_asset_id.is_empty()
+            || remote_asset_id.len() > 256
+            || remote_asset_id.starts_with('/')
+            || remote_asset_id.contains(['\\', '\0'])
+            || remote_asset_id
+                .split('/')
+                .any(|segment| segment.is_empty() || segment == "." || segment == "..")
+            || expires_at <= 0
+        {
+            return Err(AppError::Validation("远程恢复资产元数据无效".into()));
+        }
+        let result = sqlx::query(
+            "UPDATE operation_restore_points SET remote_asset_id=?,expires_at=?,updated_at=? WHERE id=? AND status='available' AND remote_asset_id IS NULL",
+        )
+        .bind(remote_asset_id)
+        .bind(expires_at)
+        .bind(now_millis())
+        .bind(id.to_string())
+        .execute(&self.pool)
+        .await?;
+        ensure_one(result.rows_affected(), "恢复点无法登记远程恢复资产")
+    }
+
     pub async fn mark_creation_failed(&self, id: Uuid) -> AppResult<()> {
         let result = sqlx::query(
             "UPDATE operation_restore_points SET status='failed',updated_at=? WHERE id=? AND status='creating'",

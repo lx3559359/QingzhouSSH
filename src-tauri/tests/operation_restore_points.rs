@@ -403,11 +403,25 @@ async fn restore_point_and_items_survive_database_reopen() {
         .await
         .unwrap();
     fixture.repository.mark_available(created.id).await.unwrap();
+    fixture
+        .repository
+        .attach_remote_asset(
+            created.id,
+            &format!("qingzhou-recovery/{}", fixture.run_id),
+            4_102_444_800_000,
+        )
+        .await
+        .unwrap();
 
     let reopened = Database::open(fixture._root.path()).await.unwrap();
     let repository = OperationRestoreRepository::new(reopened.pool().clone());
     let details = repository.get(created.id).await.unwrap().unwrap();
     assert_eq!(details.point.status, OperationRestorePointStatus::Available);
+    assert_eq!(
+        details.point.remote_asset_id.as_deref(),
+        Some(format!("qingzhou-recovery/{}", fixture.run_id).as_str())
+    );
+    assert_eq!(details.point.expires_at, Some(4_102_444_800_000));
     assert_eq!(details.items.len(), 2);
     assert_eq!(details.items[0].ordinal, 0);
     assert_eq!(details.items[1].item_kind, BackupItemKind::CommandSnapshot);

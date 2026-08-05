@@ -30,7 +30,12 @@ use crate::{
     error::{AppError, AppResult},
     repositories::operation_repository::OperationRepository,
     services::{
-        execution_service::ExecutionService, operation_restore_service::OperationRestoreService,
+        execution_service::ExecutionService,
+        operation_restore_service::OperationRestoreService,
+        remote_recovery_service::{
+            build_ip_change_recovery_plan, parse_ip_recovery_state, IpRecoveryState,
+            RemoteRecoveryService,
+        },
         server_connector::ServerConnector,
     },
 };
@@ -73,6 +78,7 @@ pub struct OperationService {
     repository: OperationRepository,
     executions: ExecutionService,
     restores: OperationRestoreService,
+    remote_recovery: RemoteRecoveryService,
     connector: ServerConnector,
 }
 
@@ -81,12 +87,14 @@ impl OperationService {
         repository: OperationRepository,
         executions: ExecutionService,
         restores: OperationRestoreService,
+        remote_recovery: RemoteRecoveryService,
         connector: ServerConnector,
     ) -> Self {
         Self {
             repository,
             executions,
             restores,
+            remote_recovery,
             connector,
         }
     }
@@ -424,6 +432,7 @@ impl OperationService {
                 | "container.action"
                 | "network.hosts_manage"
                 | "security.firewall_open_port"
+                | "network.ip_change"
         ) {
             return Err(AppError::Validation(
                 "该危险任务的恢复执行器尚未完成，服务器未发生修改".into(),
@@ -517,7 +526,49 @@ impl OperationService {
         }
 
         let history_parameters = history_parameters(&plan.parameters);
-        let execution_steps = elevate_steps(&plan.execution_steps, privilege_mode)?;
+        let ip_recovery = if definition.id == "network.ip_change" {
+            let recovery = build_ip_change_recovery_plan(
+                run_id,
+                &plan.implementation_id,
+                required_parameter_str(&plan.parameters, "interface")?,
+                required_parameter_str(&plan.parameters, "cidr")?,
+                required_parameter_str(&plan.parameters, "gateway")?,
+                required_parameter_u64(&plan.parameters, "rollbackSeconds")?,
+            )?;
+            self.restores
+                .attach_remote_asset(
+                    restore.point.id,
+                    &format!("qingzhou-recovery/{run_id}"),
+                    now_millis() + 24 * 60 * 60 * 1_000,
+                )
+                .await?;
+            Some(recovery)
+        } else {
+            None
+        };
+        let network_steps;
+        let execution_steps = if let Some(recovery) = &ip_recovery {
+            network_steps = vec![
+                RenderedTaskStep {
+                    id: "arm-rollback".into(),
+                    title: "安排超时自动恢复".into(),
+                    command: elevate_fixed_command(&recovery.arm_command, privilege_mode)?,
+                    timeout_seconds: 45,
+                    output_limit_bytes: 64 * 1024,
+                },
+                RenderedTaskStep {
+                    id: "apply-network".into(),
+                    title: "暂存新网络地址".into(),
+                    command: elevate_fixed_command(&recovery.apply_command, privilege_mode)?,
+                    timeout_seconds: 45,
+                    output_limit_bytes: 64 * 1024,
+                },
+            ];
+            network_steps.as_slice()
+        } else {
+            network_steps = elevate_steps(&plan.execution_steps, privilege_mode)?;
+            network_steps.as_slice()
+        };
         let verify_steps = elevate_steps(&plan.verify_steps, privilege_mode)?;
         let mut operation_output = String::new();
 
@@ -530,7 +581,7 @@ impl OperationService {
                 server_id,
                 definition,
                 OperationPhase::Execute,
-                &execution_steps,
+                execution_steps,
                 &history_parameters,
                 events,
                 cancel,
@@ -546,7 +597,105 @@ impl OperationService {
         self.repository
             .transition(run_id, OperationStatus::Verifying)
             .await?;
-        if let Some(status) = self
+        if let Some(recovery) = &ip_recovery {
+            self.repository
+                .mark_step_running(run_id, OperationPhase::Verify, 0, now_millis())
+                .await?;
+            if cancel.is_cancelled() {
+                self.repository
+                    .finish_step(FinishOperationStep {
+                        run_id,
+                        phase: OperationPhase::Verify,
+                        step_index: 0,
+                        status: OperationStepStatus::Uncertain,
+                        execution_id: None,
+                        output_summary: None,
+                        error_message: Some(
+                            "已安排远端自动恢复；取消后等待服务器恢复原网络".into(),
+                        ),
+                        finished_at: now_millis(),
+                    })
+                    .await?;
+                return self
+                    .finish_dangerous_failure(run_id, restore.point.id, OperationStatus::Uncertain)
+                    .await;
+            }
+            let finalized = self
+                .remote_recovery
+                .finalize_ip_change(
+                    server_id,
+                    &recovery.target_host,
+                    &recovery.finalize_command,
+                    privilege_mode,
+                )
+                .await;
+            match finalized {
+                Ok(output) => {
+                    operation_output.push_str(&output.stdout);
+                    if let Err(error) = self
+                        .connector
+                        .commit_verified_host_change(server_id, &recovery.target_host)
+                        .await
+                    {
+                        self.repository
+                            .finish_step(FinishOperationStep {
+                                run_id,
+                                phase: OperationPhase::Verify,
+                                step_index: 0,
+                                status: OperationStepStatus::Uncertain,
+                                execution_id: None,
+                                output_summary: Some(
+                                    "新 IP 已验证，但本地服务器地址更新失败".into(),
+                                ),
+                                error_message: Some(error.to_string()),
+                                finished_at: now_millis(),
+                            })
+                            .await?;
+                        self.repository
+                            .transition(run_id, OperationStatus::Uncertain)
+                            .await?;
+                        return self.require_details(run_id).await;
+                    }
+                    self.repository
+                        .finish_step(FinishOperationStep {
+                            run_id,
+                            phase: OperationPhase::Verify,
+                            step_index: 0,
+                            status: OperationStepStatus::Succeeded,
+                            execution_id: None,
+                            output_summary: Some(
+                                "已通过新 IP 建立独立 SSH 连接并核验地址、路由和主机指纹".into(),
+                            ),
+                            error_message: None,
+                            finished_at: now_millis(),
+                        })
+                        .await?;
+                }
+                Err(error) => {
+                    self.repository
+                        .finish_step(FinishOperationStep {
+                            run_id,
+                            phase: OperationPhase::Verify,
+                            step_index: 0,
+                            status: OperationStepStatus::Uncertain,
+                            execution_id: None,
+                            output_summary: Some(
+                                "未能通过新 IP 完成独立验证；远端定时恢复保持有效".into(),
+                            ),
+                            error_message: Some(error.to_string()),
+                            finished_at: now_millis(),
+                        })
+                        .await?;
+                    return self
+                        .finish_dangerous_failure(
+                            run_id,
+                            restore.point.id,
+                            OperationStatus::Uncertain,
+                        )
+                        .await;
+                }
+            }
+        } else if let Some(status) = self
             .run_phase(
                 run_id,
                 server_id,
@@ -747,6 +896,151 @@ impl OperationService {
             })
             .await?;
         self.repository.transition(run_id, run_status).await?;
+        self.require_details(run_id).await
+    }
+
+    pub async fn reconcile_ip_change(&self, run_id: Uuid) -> AppResult<OperationDetails> {
+        let details = self
+            .repository
+            .get(run_id)
+            .await?
+            .ok_or_else(|| AppError::Validation("运维运行不存在".into()))?;
+        if details.run.task_id != "network.ip_change"
+            || details.run.status != OperationStatus::Uncertain
+        {
+            return Err(AppError::Validation(
+                "只有状态未确认的 IP 修改可以重新连接核验".into(),
+            ));
+        }
+        let parameters = parse_network_parameter_summary(
+            details
+                .run
+                .parameters_summary
+                .as_deref()
+                .ok_or_else(|| AppError::Integrity("IP 修改运行缺少参数摘要".into()))?,
+        )?;
+        let target = parameters
+            .get("cidr")
+            .and_then(Value::as_str)
+            .and_then(|cidr| cidr.split_once('/').map(|(address, _)| address))
+            .ok_or_else(|| AppError::Integrity("IP 修改运行的新地址无效".into()))?;
+
+        let current = self.connector.connect(&details.run.server_id).await;
+        let (capabilities, privilege_mode, inspect_current) = match current {
+            Ok(connected) => {
+                let capabilities = connected.capabilities.clone();
+                let privilege_mode = probe_privilege(&connected.session).await?;
+                connected.session.disconnect().await;
+                (capabilities, privilege_mode, true)
+            }
+            Err(_) => {
+                let connected = self
+                    .connector
+                    .connect_at_verified_ip(&details.run.server_id, target)
+                    .await?;
+                let capabilities = connected.capabilities.clone();
+                let privilege_mode = probe_privilege(&connected.session).await?;
+                connected.session.disconnect().await;
+                (capabilities, privilege_mode, false)
+            }
+        };
+        let definition = resolve_definition("network.ip_change", details.run.task_version)?;
+        let planned = plan_task(&definition, &capabilities, &parameters)?;
+        let validated = validate_parameters(&definition, &parameters)?;
+        let recovery = build_ip_change_recovery_plan(
+            run_id,
+            &planned.implementation_id,
+            required_parameter_str(&validated, "interface")?,
+            required_parameter_str(&validated, "cidr")?,
+            required_parameter_str(&validated, "gateway")?,
+            required_parameter_u64(&validated, "rollbackSeconds")?,
+        )?;
+        let observation = if inspect_current {
+            self.remote_recovery
+                .inspect_ip_change_current(
+                    &details.run.server_id,
+                    &recovery.inspect_command,
+                    privilege_mode,
+                )
+                .await?
+        } else {
+            self.remote_recovery
+                .inspect_ip_change(
+                    &details.run.server_id,
+                    &recovery.target_host,
+                    &recovery.inspect_command,
+                    privilege_mode,
+                )
+                .await?
+        };
+        let mut state =
+            parse_ip_recovery_state(&observation.stdout, &recovery.rollback_script_sha256)?;
+        if state == IpRecoveryState::Staged
+            && self
+                .remote_recovery
+                .finalize_ip_change(
+                    &details.run.server_id,
+                    &recovery.target_host,
+                    &recovery.finalize_command,
+                    privilege_mode,
+                )
+                .await
+                .is_ok()
+        {
+            state = IpRecoveryState::Committed;
+        }
+        match state {
+            IpRecoveryState::Committed => {
+                self.connector
+                    .commit_verified_host_change(&details.run.server_id, &recovery.target_host)
+                    .await?;
+                let result = OperationResult {
+                    status: OperationConclusion::Normal,
+                    summary: "已重新连接新 IP，并确认地址、路由和主机指纹".into(),
+                    findings: Vec::new(),
+                    suggestions: Vec::new(),
+                    technical_details: "reconciled=committed".into(),
+                };
+                self.repository.set_result(run_id, &result).await?;
+                if details.steps.iter().any(|step| {
+                    step.phase == OperationPhase::Verify
+                        && step.step_index == 0
+                        && step.status == OperationStepStatus::Uncertain
+                }) {
+                    self.repository
+                        .finish_step(FinishOperationStep {
+                            run_id,
+                            phase: OperationPhase::Verify,
+                            step_index: 0,
+                            status: OperationStepStatus::Succeeded,
+                            execution_id: None,
+                            output_summary: Some("重新连接后核验成功".into()),
+                            error_message: None,
+                            finished_at: now_millis(),
+                        })
+                        .await?;
+                }
+                self.repository
+                    .transition(run_id, OperationStatus::Succeeded)
+                    .await?;
+            }
+            IpRecoveryState::RolledBack => {
+                let result = OperationResult {
+                    status: OperationConclusion::Warning,
+                    summary: "远端超时保护已把网络恢复到修改前状态".into(),
+                    findings: Vec::new(),
+                    suggestions: vec!["确认旧地址连接正常后，再重新发起 IP 修改。".into()],
+                    technical_details: "reconciled=rolled_back".into(),
+                };
+                self.repository.set_result(run_id, &result).await?;
+                self.repository
+                    .transition(run_id, OperationStatus::RolledBack)
+                    .await?;
+            }
+            IpRecoveryState::Armed | IpRecoveryState::Staged => {
+                return self.require_details(run_id).await;
+            }
+        }
         self.require_details(run_id).await
     }
 
@@ -1077,6 +1371,53 @@ fn elevate_steps(
             Ok(elevated)
         })
         .collect()
+}
+
+fn required_parameter_str<'a>(
+    parameters: &'a ValidatedParameters,
+    name: &str,
+) -> AppResult<&'a str> {
+    parameters
+        .get(name)
+        .and_then(|parameter| parameter.value.as_str())
+        .ok_or_else(|| AppError::Validation(format!("缺少受保护网络参数：{name}")))
+}
+
+fn required_parameter_u64(parameters: &ValidatedParameters, name: &str) -> AppResult<u64> {
+    parameters
+        .get(name)
+        .and_then(|parameter| parameter.value.as_u64())
+        .ok_or_else(|| AppError::Validation(format!("缺少受保护网络参数：{name}")))
+}
+
+fn parse_network_parameter_summary(summary: &str) -> AppResult<Value> {
+    let mut object = serde_json::Map::new();
+    for item in summary.split(", ") {
+        let (name, value) = item
+            .split_once('=')
+            .ok_or_else(|| AppError::Integrity("IP 修改运行参数摘要格式无效".into()))?;
+        if !matches!(name, "interface" | "cidr" | "gateway" | "rollbackSeconds")
+            || object.contains_key(name)
+        {
+            return Err(AppError::Integrity(
+                "IP 修改运行参数摘要包含未知或重复字段".into(),
+            ));
+        }
+        let value = if name == "rollbackSeconds" {
+            Value::from(
+                value
+                    .parse::<u64>()
+                    .map_err(|_| AppError::Integrity("自动恢复等待时间无效".into()))?,
+            )
+        } else {
+            Value::from(value)
+        };
+        object.insert(name.into(), value);
+    }
+    if object.len() != 4 {
+        return Err(AppError::Integrity("IP 修改运行参数摘要不完整".into()));
+    }
+    Ok(Value::Object(object))
 }
 
 async fn run_dangerous_preview(

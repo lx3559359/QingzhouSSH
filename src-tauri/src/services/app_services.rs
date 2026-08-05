@@ -129,13 +129,14 @@ impl AppServices {
             connector.clone(),
             registry.clone(),
         );
+        let remote_recovery = RemoteRecoveryService::new(connector.clone());
         let operations = OperationService::new(
             operation_repository.clone(),
             executions.clone(),
             operation_restore_points.clone(),
+            remote_recovery.clone(),
             connector.clone(),
         );
-        let remote_recovery = RemoteRecoveryService::new(connector.clone());
         let operation_batches = OperationBatchService::new(
             operation_batch_repository.clone(),
             servers.clone(),

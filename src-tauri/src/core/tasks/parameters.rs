@@ -129,6 +129,22 @@ fn validate_task_constraints(
                 return Err(AppError::Validation("主机映射名称不能填写 IP 地址".into()));
             }
         }
+        "network.ip_change" => {
+            let cidr = string_value("cidr")
+                .ok_or_else(|| AppError::Validation("新 IP 地址无效".into()))?;
+            let address = cidr
+                .split_once('/')
+                .and_then(|(address, _)| address.parse::<IpAddr>().ok())
+                .ok_or_else(|| AppError::Validation("新 IP 地址无效".into()))?;
+            let gateway = string_value("gateway")
+                .and_then(|gateway| gateway.parse::<IpAddr>().ok())
+                .ok_or_else(|| AppError::Validation("默认网关必须是有效 IP 地址".into()))?;
+            if address.is_ipv4() != gateway.is_ipv4() {
+                return Err(AppError::Validation(
+                    "新地址与默认网关必须使用相同的 IP 协议版本".into(),
+                ));
+            }
+        }
         _ => {}
     }
     Ok(())

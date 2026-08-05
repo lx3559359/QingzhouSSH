@@ -13,7 +13,8 @@ use qingzhou_ssh_lib::{
         operation_restore_service::build_snapshot_rollback_command,
         operation_service::OperationPreflightRequest,
         remote_recovery_service::{
-            build_remote_recovery_layout, validate_remote_recovery_observation,
+            build_ip_change_recovery_plan, build_remote_recovery_layout, parse_ip_recovery_state,
+            validate_remote_recovery_observation, IpRecoveryState,
         },
     },
 };
@@ -222,5 +223,173 @@ fn remote_recovery_layout_is_private_confined_and_checksum_bound() {
         observation.replace(&sha256, &"b".repeat(64)),
     ] {
         assert!(validate_remote_recovery_observation(run_id, 1000, &sha256, &invalid).is_err());
+    }
+}
+
+#[test]
+fn ip_change_requires_an_explicit_backend_and_rollback_scheduler() {
+    let task = built_in_catalog()
+        .into_iter()
+        .find(|task| task.id == "network.ip_change")
+        .unwrap();
+    let parameters = json!({
+        "interface":"eth0",
+        "cidr":"10.20.30.40/24",
+        "gateway":"10.20.30.1",
+        "rollbackSeconds":120
+    });
+    for (commands, expected) in [
+        (
+            vec![
+                "ip",
+                "awk",
+                "nmcli",
+                "systemd-run",
+                "systemctl",
+                "base64",
+                "sha256sum",
+                "stat",
+                "id",
+                "mkdir",
+                "chmod",
+                "sed",
+                "tr",
+            ],
+            "network-manager-systemd-run",
+        ),
+        (
+            vec![
+                "ip",
+                "awk",
+                "netplan",
+                "at",
+                "atq",
+                "atrm",
+                "base64",
+                "sha256sum",
+                "stat",
+                "id",
+                "mkdir",
+                "chmod",
+                "sed",
+                "mv",
+                "rm",
+            ],
+            "netplan-at",
+        ),
+    ] {
+        let plan = plan_task(&task, &capabilities(&commands), &parameters).unwrap();
+        assert_eq!(plan.implementation_id, expected);
+        assert_eq!(plan.execution_steps.len(), 2);
+        for step in plan.execution_steps.iter().chain(&plan.verify_steps) {
+            assert!(!step.command.contains("{{"));
+            assert!(!step.command.contains("managed:network"));
+        }
+    }
+
+    assert!(plan_task(&task, &capabilities(&["ip", "awk", "nmcli"]), &parameters).is_err());
+}
+
+#[test]
+fn ip_change_plan_arms_before_apply_and_commits_only_after_target_verification() {
+    let run_id = Uuid::new_v4();
+    let plan = build_ip_change_recovery_plan(
+        run_id,
+        "network-manager-systemd-run",
+        "eth0",
+        "10.20.30.40/24",
+        "10.20.30.1",
+        120,
+    )
+    .unwrap();
+    assert!(plan.arm_command.contains("systemd-run"));
+    assert!(plan.arm_command.contains("--on-active=120s"));
+    assert!(plan.arm_command.contains("rollback_armed"));
+    assert!(!plan.arm_command.contains("network_applied"));
+    assert!(plan.apply_command.contains("network_applied"));
+    assert!(!plan.apply_command.contains("rollback_cancelled"));
+    assert!(plan.finalize_command.contains("target_connection_verified"));
+    assert!(plan.finalize_command.contains("rollback_cancelled"));
+    assert!(
+        plan.finalize_command
+            .find("target_connection_verified")
+            .unwrap()
+            < plan.finalize_command.find("rollback_cancelled").unwrap()
+    );
+    assert!(plan.rollback_script_sha256.len() == 64);
+    assert!(!plan.arm_command.contains(".."));
+
+    assert!(build_ip_change_recovery_plan(
+        run_id,
+        "network-manager-systemd-run",
+        "eth0",
+        "10.20.30.40/24",
+        "2001:db8::1",
+        120,
+    )
+    .is_err());
+    assert!(build_ip_change_recovery_plan(
+        run_id,
+        "legacy-ifcfg-systemd-run",
+        "eth0",
+        "2001:db8::40/64",
+        "2001:db8::1",
+        120,
+    )
+    .is_err());
+}
+
+#[test]
+fn ip_change_snapshot_builds_a_fixed_interface_rollback() {
+    let snapshot = "stdout:\ninterface=eth0\naddresses=10.20.30.8/24,2001:db8::8/64\ngatewayfour=10.20.30.1\ngatewaysix=2001:db8::1\nstderr:\n";
+    let rollback = build_snapshot_rollback_command("network.ip_change", snapshot).unwrap();
+    assert!(rollback.command.contains("10.20.30.8/24"));
+    assert!(rollback.command.contains("2001:db8::8/64"));
+    assert!(rollback.command.contains("10.20.30.1"));
+    assert!(!rollback.command.contains("{{"));
+
+    for invalid in [
+        snapshot.replace("interface=eth0", "interface=eth0;reboot"),
+        snapshot.replace("10.20.30.8/24", "10.20.30.8/99"),
+        snapshot.replace("gatewayfour=10.20.30.1", "gatewayfour=bad;gateway"),
+    ] {
+        assert!(build_snapshot_rollback_command("network.ip_change", &invalid).is_err());
+    }
+
+    let nm_snapshot = "stdout:\nbackend=networkmanager\ninterface=eth0\nconnectionb=V2lyZWQgMQ==\nipfourmethodb=bWFudWFs\nipfouraddressesb=MTAuMjAuMzAuOC8yNA==\nipfourgatewayb=MTAuMjAuMzAuMQ==\nipsixmethodb=aWdub3Jl\nipsixaddressesb=\nipsixgatewayb=\nstderr:\n";
+    let nm_rollback = build_snapshot_rollback_command("network.ip_change", nm_snapshot).unwrap();
+    assert!(nm_rollback.command.contains("nmcli connection modify"));
+    assert!(nm_rollback.command.contains("Wired 1"));
+    assert!(!nm_rollback.command.contains("V2lyZWQgMQ=="));
+}
+
+#[test]
+fn ip_change_recovery_state_is_checksum_bound_and_one_way() {
+    let sha256 = "a".repeat(64);
+    assert_eq!(
+        parse_ip_recovery_state(
+            &format!("state=staged\nscriptsha={sha256}\ncommitted=false\n"),
+            &sha256
+        )
+        .unwrap(),
+        IpRecoveryState::Staged
+    );
+    assert_eq!(
+        parse_ip_recovery_state(
+            &format!("state=rolled_back\nscriptsha={sha256}\ncommitted=false\n"),
+            &sha256
+        )
+        .unwrap(),
+        IpRecoveryState::RolledBack
+    );
+    for invalid in [
+        format!("state=committed\nscriptsha={sha256}\ncommitted=false\n"),
+        format!(
+            "state=rolled_back\nscriptsha={}\ncommitted=false\n",
+            "b".repeat(64)
+        ),
+        format!("state=staged\nscriptsha={sha256}\ncommitted=false\nextra=value\n"),
+    ] {
+        assert!(parse_ip_recovery_state(&invalid, &sha256).is_err());
     }
 }

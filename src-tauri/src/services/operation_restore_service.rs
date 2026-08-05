@@ -1,8 +1,10 @@
 use std::{
     collections::BTreeMap,
+    net::IpAddr,
     path::{Path, PathBuf},
 };
 
+use base64::{engine::general_purpose::STANDARD, Engine};
 use serde_json::json;
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
@@ -132,6 +134,17 @@ impl OperationRestoreService {
 
     pub async fn list_by_run(&self, run_id: Uuid) -> AppResult<Vec<OperationRestoreDetails>> {
         self.repository.list_by_run(run_id).await
+    }
+
+    pub async fn attach_remote_asset(
+        &self,
+        restore_point_id: Uuid,
+        remote_asset_id: &str,
+        expires_at: i64,
+    ) -> AppResult<()> {
+        self.repository
+            .attach_remote_asset(restore_point_id, remote_asset_id, expires_at)
+            .await
     }
 
     pub async fn rollback(
@@ -559,6 +572,7 @@ fn is_snapshot_rollback_task(task_id: &str) -> bool {
             | "service.boot_policy"
             | "container.action"
             | "security.firewall_open_port"
+            | "network.ip_change"
     )
 }
 
@@ -654,8 +668,195 @@ pub fn build_snapshot_rollback_command(
         "service.boot_policy" => build_service_policy_rollback(&values),
         "container.action" => build_container_rollback(&values),
         "security.firewall_open_port" => build_firewall_rollback(&values),
+        "network.ip_change" => {
+            if values.contains_key("backend") {
+                build_network_manager_rollback(&values)
+            } else {
+                build_network_rollback(&values)
+            }
+        }
         _ => Err(AppError::Validation("该任务尚未实现受控快照回滚".into())),
     }
+}
+
+fn build_network_manager_rollback(
+    values: &BTreeMap<String, String>,
+) -> AppResult<SnapshotRollbackCommand> {
+    if required_snapshot_value(values, "backend")? != "networkmanager" {
+        return Err(AppError::Integrity("恢复点中的网络管理后端无效".into()));
+    }
+    let interface = required_snapshot_value(values, "interface")?;
+    if interface.is_empty()
+        || interface.len() > 32
+        || !interface
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b':' | b'_' | b'-'))
+    {
+        return Err(AppError::Integrity("恢复点中的网络接口名称无效".into()));
+    }
+    let connection = decode_snapshot_base64(values, "connectionb", false)?;
+    let fields = [
+        ("ipv4.method", "ipfourmethodb", false),
+        ("ipv4.addresses", "ipfouraddressesb", true),
+        ("ipv4.gateway", "ipfourgatewayb", true),
+        ("ipv6.method", "ipsixmethodb", false),
+        ("ipv6.addresses", "ipsixaddressesb", true),
+        ("ipv6.gateway", "ipsixgatewayb", true),
+    ]
+    .into_iter()
+    .map(|(property, key, allow_empty)| {
+        Ok((
+            property,
+            shell_quote(&decode_snapshot_base64(values, key, allow_empty)?),
+        ))
+    })
+    .collect::<AppResult<Vec<_>>>()?;
+    let connection = shell_quote(&connection);
+    let interface = shell_quote(interface);
+    let assignments = fields
+        .iter()
+        .map(|(property, value)| format!("{property} {value}"))
+        .collect::<Vec<_>>()
+        .join(" ");
+    let checks = fields
+        .iter()
+        .map(|(property, value)| {
+            format!("test \"$(nmcli -g {property} connection show {connection})\" = {value}")
+        })
+        .collect::<Vec<_>>()
+        .join(" && ");
+    Ok(SnapshotRollbackCommand {
+        command: format!(
+            "nmcli connection modify {connection} {assignments}; nmcli device reapply {interface}"
+        ),
+        verify: checks,
+    })
+}
+
+fn decode_snapshot_base64(
+    values: &BTreeMap<String, String>,
+    key: &str,
+    allow_empty: bool,
+) -> AppResult<String> {
+    let encoded = values
+        .get(key)
+        .map(String::as_str)
+        .filter(|value| !value.contains('\0'))
+        .ok_or_else(|| AppError::Integrity(format!("恢复点缺少字段：{key}")))?;
+    let decoded = STANDARD
+        .decode(encoded)
+        .map_err(|_| AppError::Integrity(format!("恢复点字段 {key} 编码无效")))?;
+    let decoded = String::from_utf8(decoded)
+        .map_err(|_| AppError::Integrity(format!("恢复点字段 {key} 文本无效")))?;
+    if decoded.len() > 4096
+        || decoded.contains(['\0', '\n', '\r'])
+        || (!allow_empty && decoded.is_empty())
+    {
+        return Err(AppError::Integrity(format!("恢复点字段 {key} 内容无效")));
+    }
+    Ok(decoded)
+}
+
+fn build_network_rollback(values: &BTreeMap<String, String>) -> AppResult<SnapshotRollbackCommand> {
+    let interface = required_snapshot_value(values, "interface")?;
+    if interface.is_empty()
+        || interface.len() > 32
+        || !interface
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b':' | b'_' | b'-'))
+    {
+        return Err(AppError::Integrity("恢复点中的网络接口名称无效".into()));
+    }
+    let addresses = required_snapshot_value(values, "addresses")?;
+    let mut parsed_addresses = Vec::new();
+    if addresses != "none" {
+        for value in addresses.split(',') {
+            let (address, prefix) = parse_snapshot_cidr(value)?;
+            parsed_addresses.push((address, prefix));
+        }
+    }
+    if parsed_addresses.len() > 32 {
+        return Err(AppError::Integrity(
+            "恢复点中的原网络地址数量超出上限".into(),
+        ));
+    }
+    let gateway_four = parse_snapshot_gateway(values, "gatewayfour", true)?;
+    let gateway_six = parse_snapshot_gateway(values, "gatewaysix", false)?;
+    let interface = shell_quote(interface);
+    let mut command = format!(
+        "ip -4 address flush dev {interface} scope global; ip -6 address flush dev {interface} scope global"
+    );
+    let mut verify = String::new();
+    let mut count_four = 0usize;
+    let mut count_six = 0usize;
+    for (address, prefix) in &parsed_addresses {
+        let family = if address.is_ipv4() {
+            count_four += 1;
+            "-4"
+        } else {
+            count_six += 1;
+            "-6"
+        };
+        let cidr = shell_quote(&format!("{address}/{prefix}"));
+        command.push_str(&format!("; ip {family} address add {cidr} dev {interface}"));
+        verify.push_str(&format!(
+            "ip {family} -o address show dev {interface} scope global | awk -v cidr={cidr} '$4 == cidr {{ found=1 }} END {{ exit found ? 0 : 1 }}' && "
+        ));
+    }
+    command.push_str(&format!(
+        "; while ip -4 route del default dev {interface} >/dev/null 2>&1; do :; done; while ip -6 route del default dev {interface} >/dev/null 2>&1; do :; done"
+    ));
+    for (family, gateway) in [("-4", gateway_four), ("-6", gateway_six)] {
+        if let Some(gateway) = gateway {
+            let gateway = shell_quote(&gateway.to_string());
+            command.push_str(&format!(
+                "; ip {family} route replace default via {gateway} dev {interface}"
+            ));
+            verify.push_str(&format!(
+                "ip {family} route show default dev {interface} | awk -v gateway={gateway} '$1 == \"default\" {{ for (i=1; i<=NF; i++) if ($i == \"via\" && $(i+1) == gateway) found=1 }} END {{ exit found ? 0 : 1 }}' && "
+            ));
+        }
+    }
+    verify.push_str(&format!(
+        "test \"$(ip -4 -o address show dev {interface} scope global | awk 'END {{ print NR + 0 }}')\" -eq {count_four} && test \"$(ip -6 -o address show dev {interface} scope global | awk 'END {{ print NR + 0 }}')\" -eq {count_six}"
+    ));
+    Ok(SnapshotRollbackCommand { command, verify })
+}
+
+fn parse_snapshot_cidr(value: &str) -> AppResult<(IpAddr, u8)> {
+    let (address, prefix) = value
+        .split_once('/')
+        .ok_or_else(|| AppError::Integrity("恢复点中的原网络地址无效".into()))?;
+    let address = address
+        .parse::<IpAddr>()
+        .map_err(|_| AppError::Integrity("恢复点中的原网络地址无效".into()))?;
+    let prefix = prefix
+        .parse::<u8>()
+        .map_err(|_| AppError::Integrity("恢复点中的原网络前缀无效".into()))?;
+    if prefix > if address.is_ipv4() { 32 } else { 128 } {
+        return Err(AppError::Integrity("恢复点中的原网络前缀无效".into()));
+    }
+    Ok((address, prefix))
+}
+
+fn parse_snapshot_gateway(
+    values: &BTreeMap<String, String>,
+    key: &str,
+    ipv4: bool,
+) -> AppResult<Option<IpAddr>> {
+    let value = required_snapshot_value(values, key)?;
+    if value == "none" {
+        return Ok(None);
+    }
+    let gateway = value
+        .parse::<IpAddr>()
+        .map_err(|_| AppError::Integrity("恢复点中的原默认网关无效".into()))?;
+    if gateway.is_ipv4() != ipv4 {
+        return Err(AppError::Integrity(
+            "恢复点中的原默认网关协议版本无效".into(),
+        ));
+    }
+    Ok(Some(gateway))
 }
 
 fn build_firewall_rollback(

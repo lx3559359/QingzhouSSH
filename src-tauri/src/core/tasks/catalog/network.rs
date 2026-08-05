@@ -302,22 +302,89 @@ fn ip_change() -> TaskDefinition {
         parameters,
         vec![
             ip_implementation(
-                "network-manager",
-                &["ip", "nmcli", "systemd-run"],
-                vec![backup_item(
-                    "network-before",
-                    BackupItemKind::CommandSnapshot,
-                    "ip -details address show dev {{interface}}; ip route show table main; nmcli -g all connection show",
-                )],
-            ),
-            ip_implementation(
-                "netplan",
-                &["ip", "netplan", "systemd-run"],
+                "network-manager-systemd-run",
+                &[
+                    "ip",
+                    "awk",
+                    "nmcli",
+                    "systemd-run",
+                    "systemctl",
+                    "base64",
+                    "sha256sum",
+                    "stat",
+                    "id",
+                    "mkdir",
+                    "chmod",
+                    "sed",
+                    "tr",
+                ],
                 vec![
                     backup_item(
                         "network-before",
                         BackupItemKind::CommandSnapshot,
-                        "ip -details address show dev {{interface}}; ip route show table main",
+                        network_snapshot_command(),
+                    ),
+                    backup_item(
+                        "network-manager-before",
+                        BackupItemKind::RuntimeState,
+                        network_manager_snapshot_command(),
+                    ),
+                ],
+            ),
+            ip_implementation(
+                "network-manager-at",
+                &[
+                    "ip",
+                    "awk",
+                    "nmcli",
+                    "at",
+                    "atq",
+                    "atrm",
+                    "base64",
+                    "sha256sum",
+                    "stat",
+                    "id",
+                    "mkdir",
+                    "chmod",
+                    "sed",
+                    "tr",
+                ],
+                vec![
+                    backup_item(
+                        "network-before",
+                        BackupItemKind::CommandSnapshot,
+                        network_snapshot_command(),
+                    ),
+                    backup_item(
+                        "network-manager-before",
+                        BackupItemKind::RuntimeState,
+                        network_manager_snapshot_command(),
+                    ),
+                ],
+            ),
+            ip_implementation(
+                "netplan-systemd-run",
+                &[
+                    "ip",
+                    "awk",
+                    "netplan",
+                    "systemd-run",
+                    "systemctl",
+                    "base64",
+                    "sha256sum",
+                    "stat",
+                    "id",
+                    "mkdir",
+                    "chmod",
+                    "sed",
+                    "mv",
+                    "rm",
+                ],
+                vec![
+                    backup_item(
+                        "network-before",
+                        BackupItemKind::CommandSnapshot,
+                        network_snapshot_command(),
                     ),
                     backup_item(
                         "netplan-managed-before",
@@ -327,13 +394,92 @@ fn ip_change() -> TaskDefinition {
                 ],
             ),
             ip_implementation(
-                "legacy-ifcfg",
-                &["ip", "systemd-run"],
+                "netplan-at",
+                &[
+                    "ip",
+                    "awk",
+                    "netplan",
+                    "at",
+                    "atq",
+                    "atrm",
+                    "base64",
+                    "sha256sum",
+                    "stat",
+                    "id",
+                    "mkdir",
+                    "chmod",
+                    "sed",
+                    "mv",
+                    "rm",
+                ],
                 vec![
                     backup_item(
                         "network-before",
                         BackupItemKind::CommandSnapshot,
-                        "ip -details address show dev {{interface}}; ip route show table main",
+                        network_snapshot_command(),
+                    ),
+                    backup_item(
+                        "netplan-managed-before",
+                        BackupItemKind::RemoteFile,
+                        "/etc/netplan/99-qingzhou.yaml",
+                    ),
+                ],
+            ),
+            ip_implementation(
+                "legacy-ifcfg-systemd-run",
+                &[
+                    "ip",
+                    "awk",
+                    "systemd-run",
+                    "systemctl",
+                    "base64",
+                    "sha256sum",
+                    "stat",
+                    "id",
+                    "mkdir",
+                    "chmod",
+                    "sed",
+                    "mv",
+                    "rm",
+                    "chown",
+                ],
+                vec![
+                    backup_item(
+                        "network-before",
+                        BackupItemKind::CommandSnapshot,
+                        network_snapshot_command(),
+                    ),
+                    backup_item(
+                        "ifcfg-before",
+                        BackupItemKind::RemoteFile,
+                        "/etc/sysconfig/network-scripts/ifcfg-{{interface}}",
+                    ),
+                ],
+            ),
+            ip_implementation(
+                "legacy-ifcfg-at",
+                &[
+                    "ip",
+                    "awk",
+                    "at",
+                    "atq",
+                    "atrm",
+                    "base64",
+                    "sha256sum",
+                    "stat",
+                    "id",
+                    "mkdir",
+                    "chmod",
+                    "sed",
+                    "mv",
+                    "rm",
+                    "chown",
+                ],
+                vec![
+                    backup_item(
+                        "network-before",
+                        BackupItemKind::CommandSnapshot,
+                        network_snapshot_command(),
                     ),
                     backup_item(
                         "ifcfg-before",
@@ -352,17 +498,40 @@ fn ip_implementation(
     required_commands: &[&str],
     backup_items: Vec<crate::core::tasks::model::BackupItemDefinition>,
 ) -> TaskImplementation {
-    dangerous_implementation(
+    let mut implementation = dangerous_implementation(
         id,
         &[],
         required_commands,
-        "ip -details address show dev {{interface}}; ip route show table main",
+        network_snapshot_command(),
         backup_items,
-        "{{managed:network:arm-rollback}}; {{managed:network:apply}}",
-        "{{managed:network:verify-independent-connection}}",
+        "printf '%s\n' '__QZ_ERROR__ protected_network_service_required'; exit 65",
+        "printf '%s\n' '__QZ_ERROR__ protected_network_service_required'; exit 65",
         "{{restore:network:network-before}}",
         ResultParserKind::NetworkProbe,
-    )
+    );
+    implementation.execution_steps = vec![
+        bounded_step(
+            "arm-rollback",
+            "安排超时自动恢复",
+            45,
+            "printf '%s\n' '__QZ_ERROR__ protected_network_service_required'; exit 65",
+        ),
+        bounded_step(
+            "apply-network",
+            "暂存新网络地址",
+            45,
+            "printf '%s\n' '__QZ_ERROR__ protected_network_service_required'; exit 65",
+        ),
+    ];
+    implementation
+}
+
+fn network_snapshot_command() -> &'static str {
+    r#"qz_interface={{interface}}; qz_addresses=$(ip -o address show dev "$qz_interface" scope global | awk 'BEGIN { sep="" } { printf "%s%s", sep, $4; sep="," } END { if (sep == "") printf "none" }'); qz_gateway4=$(ip -4 route show default dev "$qz_interface" | awk '{ for (i=1; i<=NF; i++) if ($i == "via") { print $(i+1); found=1; exit } } END { if (!found) print "none" }'); qz_gateway6=$(ip -6 route show default dev "$qz_interface" | awk '{ for (i=1; i<=NF; i++) if ($i == "via") { print $(i+1); found=1; exit } } END { if (!found) print "none" }'); printf 'interface=%s\naddresses=%s\ngatewayfour=%s\ngatewaysix=%s\n' "$qz_interface" "$qz_addresses" "$qz_gateway4" "$qz_gateway6""#
+}
+
+fn network_manager_snapshot_command() -> &'static str {
+    r#"qz_interface={{interface}}; qz_connection=$(nmcli -t -g GENERAL.CONNECTION device show "$qz_interface" | sed -n '1p'); test -n "$qz_connection" && test "$qz_connection" != --; qz_encode() { printf '%s' "$1" | base64 | tr -d '\n'; }; qz_values=$(nmcli -g ipv4.method,ipv4.addresses,ipv4.gateway,ipv6.method,ipv6.addresses,ipv6.gateway connection show "$qz_connection"); printf 'backend=networkmanager\ninterface=%s\nconnectionb=%s\nipfourmethodb=%s\nipfouraddressesb=%s\nipfourgatewayb=%s\nipsixmethodb=%s\nipsixaddressesb=%s\nipsixgatewayb=%s\n' "$qz_interface" "$(qz_encode "$qz_connection")" "$(printf '%s\n' "$qz_values" | sed -n '1p' | base64 | tr -d '\n')" "$(printf '%s\n' "$qz_values" | sed -n '2p' | base64 | tr -d '\n')" "$(printf '%s\n' "$qz_values" | sed -n '3p' | base64 | tr -d '\n')" "$(printf '%s\n' "$qz_values" | sed -n '4p' | base64 | tr -d '\n')" "$(printf '%s\n' "$qz_values" | sed -n '5p' | base64 | tr -d '\n')" "$(printf '%s\n' "$qz_values" | sed -n '6p' | base64 | tr -d '\n')""#
 }
 
 #[allow(clippy::too_many_arguments)]

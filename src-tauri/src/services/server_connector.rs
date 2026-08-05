@@ -1,4 +1,4 @@
-use std::time::Duration;
+use std::{net::IpAddr, time::Duration};
 
 use crate::{
     core::{
@@ -36,9 +36,29 @@ impl ServerConnector {
 
     pub async fn connect(&self, server_id: &str) -> AppResult<ConnectedServer> {
         let profile = self.require_server(server_id).await?;
+        let host = profile.host.clone();
+        self.connect_profile_at_host(profile, &host).await
+    }
+
+    pub async fn connect_at_verified_ip(
+        &self,
+        server_id: &str,
+        host: &str,
+    ) -> AppResult<ConnectedServer> {
+        host.parse::<IpAddr>()
+            .map_err(|_| AppError::Validation("独立验证目标必须是有效 IP 地址".into()))?;
+        let profile = self.require_server(server_id).await?;
+        self.connect_profile_at_host(profile, host).await
+    }
+
+    async fn connect_profile_at_host(
+        &self,
+        profile: ServerProfile,
+        host: &str,
+    ) -> AppResult<ConnectedServer> {
         let trusted = self
             .servers
-            .get_host_key(server_id)
+            .get_host_key(&profile.id)
             .await?
             .ok_or_else(|| AppError::Security("尚未信任服务器主机密钥".into()))?;
         let encrypted_payload = self.vault.get(&profile.credential_id)?;
@@ -46,7 +66,7 @@ impl ServerConnector {
             .map_err(|_| AppError::Security("凭据密文损坏或格式无效".into()))?;
         let redactor = credential_redactor(&credential);
         let endpoint = SshEndpoint {
-            host: profile.host.clone(),
+            host: host.into(),
             port: profile.port,
             timeout: DEFAULT_SSH_TIMEOUT,
         };
@@ -70,6 +90,12 @@ impl ServerConnector {
             capabilities,
             redactor,
         })
+    }
+
+    pub async fn commit_verified_host_change(&self, server_id: &str, host: &str) -> AppResult<()> {
+        host.parse::<IpAddr>()
+            .map_err(|_| AppError::Validation("已验证的新 IP 地址无效".into()))?;
+        self.servers.update_host(server_id, host).await
     }
 
     pub async fn require_server(&self, server_id: &str) -> AppResult<ServerProfile> {

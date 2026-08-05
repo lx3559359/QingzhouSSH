@@ -11,6 +11,7 @@ const LIST_SERVERS: &str =
     "SELECT id,name,host,port,username,auth_kind,credential_id FROM servers ORDER BY name COLLATE NOCASE,id";
 const GET_SERVER: &str =
     "SELECT id,name,host,port,username,auth_kind,credential_id FROM servers WHERE id = ?";
+const UPDATE_SERVER_HOST: &str = "UPDATE servers SET host=? WHERE id=?";
 const UPSERT_HOST_KEY: &str =
     "INSERT INTO host_keys (server_id,algorithm,fingerprint_sha256,raw_key_base64) VALUES (?,?,?,?) \
      ON CONFLICT(server_id) DO UPDATE SET algorithm=excluded.algorithm,fingerprint_sha256=excluded.fingerprint_sha256,raw_key_base64=excluded.raw_key_base64,trusted_at=CURRENT_TIMESTAMP";
@@ -58,6 +59,24 @@ impl ServerRepository {
             .as_ref()
             .map(map_server)
             .transpose()
+    }
+
+    pub async fn update_host(&self, id: &str, host: &str) -> AppResult<()> {
+        if id.is_empty() || host.parse::<std::net::IpAddr>().is_err() {
+            return Err(AppError::Validation(
+                "服务器标识或已验证的新 IP 地址无效".into(),
+            ));
+        }
+        let affected = sqlx::query(UPDATE_SERVER_HOST)
+            .bind(host)
+            .bind(id)
+            .execute(&self.pool)
+            .await?
+            .rows_affected();
+        if affected != 1 {
+            return Err(AppError::Validation("服务器不存在".into()));
+        }
+        Ok(())
     }
 
     pub async fn upsert_host_key(&self, key: &StoredHostKey) -> AppResult<()> {
