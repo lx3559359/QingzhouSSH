@@ -1,10 +1,11 @@
 use crate::core::tasks::model::{
-    ExecutionScope, OutputKind, ParameterDefinition, ResultParserKind, RiskLevel, TaskCategory,
-    TaskDefinition, TaskImplementation,
+    BackupItemKind, ExecutionScope, OutputKind, ParameterDefinition, ParameterKind,
+    ResultParserKind, RiskLevel, TaskCategory, TaskDefinition, TaskImplementation,
 };
 
 use super::helpers::{
-    boolean_parameter, bounded_step, host_parameter, integer_parameter, interface_parameter,
+    backup_item, boolean_parameter, bounded_step, dangerous_implementation, dangerous_task,
+    enum_parameter, host_parameter, integer_parameter, interface_parameter, parameter,
     port_parameter, read_only_implementation, read_only_task,
 };
 
@@ -211,7 +212,139 @@ pub(super) fn tasks() -> Vec<TaskDefinition> {
             OutputKind::KeyValue,
         ),
         packet_capture(),
+        hosts_manage(),
+        ip_change(),
     ]
+}
+
+fn hosts_manage() -> TaskDefinition {
+    dangerous_task(
+        "network.hosts_manage",
+        TaskCategory::Network,
+        "管理 Hosts 映射",
+        "只添加或移除带轻舟标识的单条映射，并保留完整 hosts 文件备份",
+        60,
+        vec![
+            enum_parameter(
+                "action",
+                "操作",
+                "添加或移除工具管理的映射",
+                &["add", "remove"],
+                None,
+            ),
+            host_parameter("address", "IP 地址", "映射目标 IPv4 或 IPv6 地址", true),
+            host_parameter("hostname", "主机名", "要解析的主机名", true),
+        ],
+        vec![dangerous_implementation(
+            "hosts-managed-block",
+            &[],
+            &["getent"],
+            "test ! -L /etc/hosts; sed -n '1,300p' /etc/hosts; getent hosts {{hostname}} || true",
+            vec![backup_item(
+                "hosts-before",
+                BackupItemKind::RemoteFile,
+                "/etc/hosts",
+            )],
+            "{{managed:hosts:action}}",
+            "test ! -L /etc/hosts; {{managed:hosts:verify}}; getent hosts {{hostname}} || true",
+            "{{restore:file:hosts-before}}",
+            ResultParserKind::NetworkProbe,
+        )],
+        OutputKind::KeyValue,
+    )
+}
+
+fn ip_change() -> TaskDefinition {
+    let parameters = vec![
+        interface_parameter("interface", "网络接口", "从服务器接口中选择目标网卡"),
+        parameter(
+            "cidr",
+            "新地址",
+            "带前缀长度的 IPv4 或 IPv6 地址",
+            ParameterKind::Cidr,
+            true,
+            None,
+        ),
+        host_parameter("gateway", "默认网关", "目标默认网关地址", true),
+        integer_parameter(
+            "rollbackSeconds",
+            "自动恢复等待秒数",
+            "修改后未验证成功时自动恢复，范围 60 到 300 秒",
+            60,
+            300,
+            120,
+        ),
+    ];
+    dangerous_task(
+        "network.ip_change",
+        TaskCategory::Network,
+        "修改 IP 地址",
+        "先安排超时自动恢复，再修改地址并通过独立连接核验",
+        180,
+        parameters,
+        vec![
+            ip_implementation(
+                "network-manager",
+                &["ip", "nmcli", "systemd-run"],
+                vec![backup_item(
+                    "network-before",
+                    BackupItemKind::CommandSnapshot,
+                    "ip -details address show dev {{interface}}; ip route show table main; nmcli -g all connection show",
+                )],
+            ),
+            ip_implementation(
+                "netplan",
+                &["ip", "netplan", "systemd-run"],
+                vec![
+                    backup_item(
+                        "network-before",
+                        BackupItemKind::CommandSnapshot,
+                        "ip -details address show dev {{interface}}; ip route show table main",
+                    ),
+                    backup_item(
+                        "netplan-managed-before",
+                        BackupItemKind::RemoteFile,
+                        "/etc/netplan/99-qingzhou.yaml",
+                    ),
+                ],
+            ),
+            ip_implementation(
+                "legacy-ifcfg",
+                &["ip", "systemd-run"],
+                vec![
+                    backup_item(
+                        "network-before",
+                        BackupItemKind::CommandSnapshot,
+                        "ip -details address show dev {{interface}}; ip route show table main",
+                    ),
+                    backup_item(
+                        "ifcfg-before",
+                        BackupItemKind::RemoteFile,
+                        "/etc/sysconfig/network-scripts/ifcfg-{{interface}}",
+                    ),
+                ],
+            ),
+        ],
+        OutputKind::KeyValue,
+    )
+}
+
+fn ip_implementation(
+    id: &str,
+    required_commands: &[&str],
+    backup_items: Vec<crate::core::tasks::model::BackupItemDefinition>,
+) -> TaskImplementation {
+    dangerous_implementation(
+        id,
+        &[],
+        required_commands,
+        "ip -details address show dev {{interface}}; ip route show table main",
+        backup_items,
+        "{{managed:network:arm-rollback}}; {{managed:network:apply}}",
+        "{{managed:network:verify-independent-connection}}",
+        "{{restore:network:network-before}}",
+        ResultParserKind::NetworkProbe,
+    )
 }
 
 #[allow(clippy::too_many_arguments)]

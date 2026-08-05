@@ -1,7 +1,7 @@
 use crate::core::tasks::model::{
-    CompatibilityPredicate, ExecutionScope, OutputKind, ParameterDefinition, ParameterKind,
-    PrivilegeRequirement, ResultParserKind, RiskLevel, TaskCategory, TaskDefinition,
-    TaskImplementation, TaskStep,
+    BackupItemDefinition, BackupItemKind, BackupPlan, CompatibilityPredicate, ExecutionScope,
+    OutputKind, ParameterDefinition, ParameterKind, PrivilegeRequirement, ResultParserKind,
+    RiskLevel, RollbackPlan, TaskCategory, TaskDefinition, TaskImplementation, TaskStep,
 };
 use serde_json::{json, Value};
 
@@ -69,6 +69,103 @@ pub(super) fn read_only_implementation(
         verify_steps: Vec::new(),
         rollback_plan: None,
         result_parser,
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(super) fn dangerous_task(
+    id: &str,
+    category: TaskCategory,
+    title: &str,
+    description: &str,
+    estimated_seconds: u32,
+    parameters: Vec<ParameterDefinition>,
+    implementations: Vec<TaskImplementation>,
+    output_kind: OutputKind,
+) -> TaskDefinition {
+    TaskDefinition {
+        id: id.into(),
+        version: 2,
+        category,
+        title: title.into(),
+        description: description.into(),
+        risk_level: RiskLevel::Dangerous,
+        estimated_seconds,
+        privilege: PrivilegeRequirement::RootOrPasswordlessSudo,
+        scope: ExecutionScope::SingleServer,
+        parameters,
+        implementations,
+        output_kind,
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(super) fn dangerous_implementation(
+    id: &str,
+    service_managers: &[&str],
+    required_commands: &[&str],
+    preview_command: &str,
+    backup_items: Vec<BackupItemDefinition>,
+    execution_command: &str,
+    verify_command: &str,
+    rollback_command: &str,
+    result_parser: ResultParserKind,
+) -> TaskImplementation {
+    TaskImplementation {
+        id: id.into(),
+        compatibility: CompatibilityPredicate {
+            os_families: SUPPORTED_FAMILIES
+                .iter()
+                .map(|value| (*value).into())
+                .collect(),
+            service_managers: service_managers
+                .iter()
+                .map(|value| (*value).into())
+                .collect(),
+            required_commands: required_commands
+                .iter()
+                .map(|value| (*value).into())
+                .collect(),
+        },
+        preflight_steps: vec![bounded_step(
+            "preflight",
+            "检查目标与恢复条件",
+            30,
+            preview_command,
+        )],
+        preview_steps: vec![bounded_step("preview", "预演当前状态", 30, preview_command)],
+        backup_plan: Some(BackupPlan {
+            items: backup_items,
+        }),
+        execution_steps: vec![bounded_step(
+            "execute",
+            "执行受控修改",
+            60,
+            execution_command,
+        )],
+        verify_steps: vec![bounded_step("verify", "核验目标状态", 45, verify_command)],
+        rollback_plan: Some(RollbackPlan {
+            steps: vec![bounded_step(
+                "rollback",
+                "恢复修改前状态",
+                60,
+                rollback_command,
+            )],
+            automatic_on_failure: true,
+        }),
+        result_parser,
+    }
+}
+
+pub(super) fn backup_item(
+    id: &str,
+    kind: BackupItemKind,
+    target_template: &str,
+) -> BackupItemDefinition {
+    BackupItemDefinition {
+        id: id.into(),
+        kind,
+        target_template: target_template.into(),
     }
 }
 

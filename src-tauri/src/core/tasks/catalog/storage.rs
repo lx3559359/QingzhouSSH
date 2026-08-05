@@ -1,10 +1,10 @@
 use crate::core::tasks::model::{
-    OutputKind, ParameterDefinition, ResultParserKind, TaskCategory, TaskDefinition,
+    BackupItemKind, OutputKind, ParameterDefinition, ResultParserKind, TaskCategory, TaskDefinition,
 };
 
 use super::helpers::{
-    absolute_path_parameter, bounded_step, integer_parameter, read_only_implementation,
-    read_only_task,
+    absolute_path_parameter, backup_item, bounded_step, dangerous_implementation, dangerous_task,
+    enum_parameter, integer_parameter, read_only_implementation, read_only_task,
 };
 
 pub(super) fn tasks() -> Vec<TaskDefinition> {
@@ -75,7 +75,55 @@ pub(super) fn tasks() -> Vec<TaskDefinition> {
             ResultParserKind::Table,
             OutputKind::Table,
         ),
+        swap_manage(),
     ]
+}
+
+fn swap_manage() -> TaskDefinition {
+    dangerous_task(
+        "storage.swap_manage",
+        TaskCategory::Storage,
+        "管理 Swap",
+        "创建、启用、停用或移除单个受控 Swap 文件，并保留原状态和 fstab",
+        90,
+        vec![
+            enum_parameter(
+                "action",
+                "操作",
+                "选择创建、启用、停用或移除",
+                &["create", "enable", "disable", "remove"],
+                None,
+            ),
+            absolute_path_parameter("path", "Swap 文件", "单个受控 Swap 文件绝对路径"),
+            integer_parameter(
+                "sizeMiB",
+                "容量 MiB",
+                "创建 Swap 时使用，范围 64 MiB 到 32 GiB",
+                64,
+                32_768,
+                1024,
+            ),
+        ],
+        vec![dangerous_implementation(
+            "posix-swap",
+            &[],
+            &["swapon", "swapoff", "mkswap", "stat"],
+            r#"swapon --show --bytes; grep -F -- {{path}} /etc/fstab || true; if test -e {{path}}; then stat -- {{path}}; fi"#,
+            vec![
+                backup_item(
+                    "swap-state-before",
+                    BackupItemKind::CommandSnapshot,
+                    r#"swapon --show --bytes; if test -e {{path}}; then stat -- {{path}}; fi"#,
+                ),
+                backup_item("fstab-before", BackupItemKind::RemoteFile, "/etc/fstab"),
+            ],
+            r#"case {{action}} in 'create') fallocate -l {{sizeMiB}}M -- {{path}} && chmod 0600 -- {{path}} && mkswap -- {{path}} && swapon -- {{path}};; 'enable') swapon -- {{path}};; 'disable') swapoff -- {{path}};; 'remove') swapoff -- {{path}} 2>/dev/null || true; rm -f -- {{path}};; *) exit 64;; esac"#,
+            r#"swapon --show --bytes; if test {{action}} = 'enable' -o {{action}} = 'create'; then swapon --show=NAME --noheadings | grep -Fx -- {{path}}; else ! swapon --show=NAME --noheadings | grep -Fx -- {{path}}; fi"#,
+            "{{restore:swap-state-before}}; {{restore:file:fstab-before}}",
+            ResultParserKind::KeyValue,
+        )],
+        OutputKind::KeyValue,
+    )
 }
 
 #[allow(clippy::too_many_arguments)]

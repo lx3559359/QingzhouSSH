@@ -26,7 +26,10 @@ pub fn built_in_catalog() -> Vec<TaskDefinition> {
         !matches!(
             definition.category,
             TaskCategory::System | TaskCategory::Storage
-        ) && definition.id != "service.status"
+        ) && !matches!(
+            definition.id.as_str(),
+            "service.status" | "service.start" | "service.stop" | "service.restart"
+        )
     });
     catalog.extend(system::tasks());
     catalog.extend(storage::tasks());

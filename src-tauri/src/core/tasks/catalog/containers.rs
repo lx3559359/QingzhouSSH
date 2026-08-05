@@ -1,14 +1,58 @@
 use crate::core::tasks::model::{
-    OutputKind, ResultParserKind, TaskCategory, TaskDefinition, TaskImplementation,
+    BackupItemKind, OutputKind, ResultParserKind, TaskCategory, TaskDefinition, TaskImplementation,
 };
 
 use super::helpers::{
-    bounded_step, container_parameter, enum_parameter, integer_parameter, read_only_implementation,
-    read_only_task,
+    backup_item, bounded_step, container_parameter, dangerous_implementation, dangerous_task,
+    enum_parameter, integer_parameter, read_only_implementation, read_only_task,
 };
 
 pub(super) fn tasks() -> Vec<TaskDefinition> {
-    vec![health_storage(), inspect()]
+    vec![health_storage(), inspect(), container_action()]
+}
+
+fn container_action() -> TaskDefinition {
+    let implementations = ["docker", "podman"]
+        .into_iter()
+        .map(|runtime| {
+            let preview = format!("{runtime} inspect -- {{{{container}}}}");
+            let execute = format!("{runtime} {{{{action}}}} -- {{{{container}}}}");
+            dangerous_implementation(
+                runtime,
+                &[],
+                &[runtime],
+                &preview,
+                vec![backup_item(
+                    "container-state-before",
+                    BackupItemKind::RuntimeState,
+                    &preview,
+                )],
+                &execute,
+                &format!("{{{{managed:container:{runtime}:verify}}}}"),
+                &format!("{{{{restore:container:{runtime}:container-state-before}}}}"),
+                ResultParserKind::ContainerStatus,
+            )
+        })
+        .collect();
+    dangerous_task(
+        "container.action",
+        TaskCategory::Container,
+        "控制容器状态",
+        "只对已发现的单个容器执行启动、停止、重启、暂停或继续，并保存原状态",
+        75,
+        vec![
+            container_parameter(),
+            enum_parameter(
+                "action",
+                "容器动作",
+                "选择一个受控状态动作",
+                &["start", "stop", "restart", "pause", "unpause"],
+                None,
+            ),
+        ],
+        implementations,
+        OutputKind::KeyValue,
+    )
 }
 
 fn health_storage() -> TaskDefinition {

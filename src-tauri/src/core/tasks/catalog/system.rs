@@ -1,10 +1,11 @@
 use crate::core::tasks::model::{
-    OutputKind, ParameterDefinition, ParameterKind, ResultParserKind, TaskCategory, TaskDefinition,
+    BackupItemKind, OutputKind, ParameterDefinition, ParameterKind, ResultParserKind, TaskCategory,
+    TaskDefinition,
 };
 
 use super::helpers::{
-    bounded_step, integer_parameter, parameter, read_only_implementation, read_only_task,
-    string_parameter,
+    backup_item, bounded_step, dangerous_implementation, dangerous_task, host_parameter,
+    integer_parameter, parameter, read_only_implementation, read_only_task, string_parameter,
 };
 
 pub(super) fn tasks() -> Vec<TaskDefinition> {
@@ -163,7 +164,74 @@ pub(super) fn tasks() -> Vec<TaskDefinition> {
             ResultParserKind::Table,
             OutputKind::Table,
         ),
+        hostname_change(),
+        timezone_change(),
     ]
+}
+
+fn hostname_change() -> TaskDefinition {
+    dangerous_task(
+        "system.hostname_change",
+        TaskCategory::System,
+        "修改主机名",
+        "预演并保存原主机名，修改后精确核验，可恢复到原值",
+        45,
+        vec![host_parameter(
+            "hostname",
+            "新主机名",
+            "符合主机名规则的新名称",
+            true,
+        )],
+        vec![dangerous_implementation(
+            "hostnamectl",
+            &[],
+            &["hostnamectl", "hostname"],
+            "hostnamectl status --static; hostname",
+            vec![backup_item(
+                "hostname-before",
+                BackupItemKind::RuntimeState,
+                "hostname",
+            )],
+            "hostnamectl set-hostname -- {{hostname}}",
+            "test \"$(hostname)\" = {{hostname}}; hostnamectl status --static",
+            "hostnamectl set-hostname -- {{restore:hostname-before}}",
+            ResultParserKind::KeyValue,
+        )],
+        OutputKind::KeyValue,
+    )
+}
+
+fn timezone_change() -> TaskDefinition {
+    dangerous_task(
+        "system.timezone_change",
+        TaskCategory::System,
+        "修改时区",
+        "保存原时区后修改，并核验系统报告的时区值",
+        45,
+        vec![string_parameter(
+            "timezone",
+            "新时区",
+            "IANA 时区名称，例如 Asia/Shanghai",
+            1,
+            128,
+        )],
+        vec![dangerous_implementation(
+            "timedatectl",
+            &[],
+            &["timedatectl"],
+            "timedatectl show -p Timezone --value; timedatectl status",
+            vec![backup_item(
+                "timezone-before",
+                BackupItemKind::RuntimeState,
+                "timedatectl show -p Timezone --value",
+            )],
+            "timedatectl set-timezone -- {{timezone}}",
+            "test \"$(timedatectl show -p Timezone --value)\" = {{timezone}}; timedatectl status",
+            "timedatectl set-timezone -- {{restore:timezone-before}}",
+            ResultParserKind::KeyValue,
+        )],
+        OutputKind::KeyValue,
+    )
 }
 
 #[allow(clippy::too_many_arguments)]
