@@ -1,6 +1,8 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
-use qingzhou_ssh_lib::core::tasks::built_in_catalog;
+use qingzhou_ssh_lib::core::tasks::{
+    built_in_catalog, ParameterKind, RiskLevel, TaskCategory, TaskDefinition,
+};
 
 const REQUIRED_READONLY_IDS: &[&str] = &[
     "system.overview",
@@ -56,4 +58,45 @@ fn readonly_catalog_contains_every_stable_id_once() {
         .map(|definition| definition.id.as_str())
         .collect::<BTreeSet<_>>();
     assert_eq!(unique.len(), catalog.len(), "任务 ID 不允许重复");
+}
+
+fn by_id() -> BTreeMap<String, TaskDefinition> {
+    built_in_catalog()
+        .into_iter()
+        .map(|definition| (definition.id.clone(), definition))
+        .collect()
+}
+
+#[test]
+fn system_and_storage_tasks_are_bounded_and_safe() {
+    let catalog = by_id();
+    assert_eq!(catalog["storage.large_directories"].parameters.len(), 3);
+    assert!(
+        catalog["storage.large_directories"].implementations[0].execution_steps[0].timeout_seconds
+            <= 120
+    );
+    assert!(catalog["system.memory_oom"].implementations[0]
+        .execution_steps
+        .iter()
+        .all(|step| step.output_limit_bytes <= 1024 * 1024));
+    let pid = &catalog["system.process_detail"].parameters[0];
+    assert!(pid.required);
+    assert!(matches!(
+        pid.kind,
+        ParameterKind::Integer {
+            min: 1,
+            max: 4_194_304
+        }
+    ));
+    assert!(catalog
+        .values()
+        .filter(|item| matches!(item.category, TaskCategory::System | TaskCategory::Storage))
+        .all(|item| item.risk_level == RiskLevel::Safe));
+    assert!(catalog
+        .values()
+        .filter(|item| matches!(item.category, TaskCategory::System | TaskCategory::Storage))
+        .flat_map(|item| &item.implementations)
+        .flat_map(|implementation| &implementation.execution_steps)
+        .all(|step| !step.command_template.contains("find /")
+            && !step.command_template.contains("du /")));
 }

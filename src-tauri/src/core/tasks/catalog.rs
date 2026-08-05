@@ -11,8 +11,30 @@ use crate::core::tasks::model::{
 const SUPPORTED_FAMILIES: [&str; 3] = ["debian", "rhel", "openeuler"];
 
 mod helpers;
+mod storage;
+mod system;
 
 pub fn built_in_catalog() -> Vec<TaskDefinition> {
+    let mut catalog = legacy_catalog();
+    catalog.retain(|definition| {
+        !matches!(
+            definition.category,
+            TaskCategory::System | TaskCategory::Storage
+        )
+    });
+    catalog.extend(system::tasks());
+    catalog.extend(storage::tasks());
+
+    let mut ids = BTreeSet::new();
+    catalog.retain(|definition| {
+        let inserted = ids.insert(definition.id.clone());
+        debug_assert!(inserted, "内置任务 ID 重复：{}", definition.id);
+        inserted
+    });
+    catalog
+}
+
+fn legacy_catalog() -> Vec<TaskDefinition> {
     let mut catalog = vec![
         task(TaskSpec {
             id: "system.overview",
