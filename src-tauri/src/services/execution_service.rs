@@ -245,6 +245,7 @@ impl ExecutionService {
         .await
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub(crate) async fn execute_planned_step<E: EventSink>(
         &self,
         server_id: &str,

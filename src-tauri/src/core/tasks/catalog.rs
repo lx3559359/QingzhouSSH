@@ -11,6 +11,8 @@ use crate::core::tasks::model::{
 const SUPPORTED_FAMILIES: [&str; 3] = ["debian", "rhel", "openeuler"];
 
 mod helpers;
+mod network;
+mod security;
 mod storage;
 mod system;
 
@@ -24,6 +26,8 @@ pub fn built_in_catalog() -> Vec<TaskDefinition> {
     });
     catalog.extend(system::tasks());
     catalog.extend(storage::tasks());
+    catalog.extend(network::tasks());
+    catalog.extend(security::tasks());
 
     let mut ids = BTreeSet::new();
     catalog.retain(|definition| {

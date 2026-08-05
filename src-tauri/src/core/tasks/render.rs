@@ -24,12 +24,34 @@ pub(crate) fn render_task_step_command(
     let mut command = step.command_template.clone();
     for (name, parameter) in parameters.iter() {
         command = command.replace(&format!("{{{{{name}}}}}"), &parameter.shell_value);
+        command = command.replace(&format!("{{{{?{name}}}}}"), &parameter.shell_value);
     }
+    command = replace_missing_optional_parameters(command)?;
     if command.contains("{{") || command.contains("}}") {
         return Err(AppError::Validation(format!(
             "任务实现 {} 包含未解析参数",
             implementation_id
         )));
+    }
+    Ok(command)
+}
+
+fn replace_missing_optional_parameters(mut command: String) -> AppResult<String> {
+    while let Some(start) = command.find("{{?") {
+        let remainder = &command[start + 3..];
+        let Some(relative_end) = remainder.find("}}") else {
+            return Err(AppError::Validation("任务实现包含未闭合的可选参数".into()));
+        };
+        let end = start + 3 + relative_end;
+        let name = &command[start + 3..end];
+        if name.is_empty()
+            || !name
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_')
+        {
+            return Err(AppError::Validation("任务实现包含无效可选参数名".into()));
+        }
+        command.replace_range(start..end + 2, "''");
     }
     Ok(command)
 }

@@ -1,8 +1,13 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use qingzhou_ssh_lib::core::tasks::{
-    built_in_catalog, ParameterKind, RiskLevel, TaskCategory, TaskDefinition,
+use qingzhou_ssh_lib::core::{
+    system_probe::{SystemCapabilities, PROBE_COMMAND},
+    tasks::{
+        built_in_catalog, plan_task, ExecutionScope, ParameterKind, RiskLevel, TaskCategory,
+        TaskDefinition,
+    },
 };
+use serde_json::json;
 
 const REQUIRED_READONLY_IDS: &[&str] = &[
     "system.overview",
@@ -99,4 +104,89 @@ fn system_and_storage_tasks_are_bounded_and_safe() {
         .flat_map(|implementation| &implementation.execution_steps)
         .all(|step| !step.command_template.contains("find /")
             && !step.command_template.contains("du /")));
+}
+
+#[test]
+fn active_network_tasks_have_explicit_limits() {
+    let catalog = by_id();
+    assert_eq!(
+        catalog["network.packet_capture"].risk_level,
+        RiskLevel::Caution
+    );
+    assert_eq!(
+        catalog["network.packet_capture"].scope,
+        ExecutionScope::SingleServer
+    );
+    assert!(catalog["network.udp"]
+        .parameters
+        .iter()
+        .any(|parameter| parameter.name == "attempts"));
+    assert!(catalog["network.connectivity"]
+        .parameters
+        .iter()
+        .any(|parameter| parameter.name == "host"));
+}
+
+#[test]
+fn packet_capture_builds_only_fixed_optional_filters() {
+    let catalog = by_id();
+    let capabilities = SystemCapabilities {
+        os_id: "openeuler".into(),
+        os_family: "openeuler".into(),
+        version_id: Some("24.03".into()),
+        package_manager: Some("dnf".into()),
+        service_manager: "systemd".into(),
+        architecture: "x86_64".into(),
+        shell: "/bin/sh".into(),
+        commands: ["tcpdump", "timeout", "wc"]
+            .into_iter()
+            .map(str::to_owned)
+            .collect(),
+    };
+    let plan = plan_task(
+        &catalog["network.packet_capture"],
+        &capabilities,
+        &json!({"interface":"eth0","count":20,"seconds":5}),
+    )
+    .unwrap();
+    let command = &plan.execution_steps[0].command;
+    assert!(!command.contains("{{"));
+    assert!(command.contains("qz_host=''") && command.contains("qz_port=''"));
+    assert!(!catalog["network.packet_capture"]
+        .parameters
+        .iter()
+        .any(|parameter| parameter.name == "filter"));
+}
+
+#[test]
+fn capability_probe_covers_new_diagnostic_implementations() {
+    for command in [
+        "ss",
+        "netstat",
+        "getent",
+        "ping",
+        "curl",
+        "openssl",
+        "timeout",
+        "nc",
+        "ncat",
+        "tcpdump",
+        "wc",
+        "du",
+        "sort",
+        "lsof",
+        "iostat",
+        "findmnt",
+        "journalctl",
+        "sshd",
+        "docker",
+        "podman",
+        "nginx",
+        "apachectl",
+    ] {
+        assert!(
+            PROBE_COMMAND.contains(&format!(" {command} ")),
+            "能力探针缺少 {command}"
+        );
+    }
 }

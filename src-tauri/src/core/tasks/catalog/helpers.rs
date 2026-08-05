@@ -125,6 +125,70 @@ pub(super) fn absolute_path_parameter(
     )
 }
 
+pub(super) fn host_parameter(
+    name: &str,
+    label: &str,
+    description: &str,
+    required: bool,
+) -> ParameterDefinition {
+    parameter(
+        name,
+        label,
+        description,
+        ParameterKind::Host,
+        required,
+        None,
+    )
+}
+
+pub(super) fn port_parameter(
+    name: &str,
+    label: &str,
+    description: &str,
+    required: bool,
+    default: Option<u16>,
+) -> ParameterDefinition {
+    parameter(
+        name,
+        label,
+        description,
+        ParameterKind::Port,
+        required,
+        default.map(|value| json!(value)),
+    )
+}
+
+pub(super) fn interface_parameter(
+    name: &str,
+    label: &str,
+    description: &str,
+) -> ParameterDefinition {
+    parameter(
+        name,
+        label,
+        description,
+        ParameterKind::InterfaceName,
+        true,
+        None,
+    )
+}
+
+pub(super) fn boolean_parameter(
+    name: &str,
+    label: &str,
+    description: &str,
+    default: bool,
+) -> ParameterDefinition {
+    parameter(
+        name,
+        label,
+        description,
+        ParameterKind::Boolean,
+        false,
+        Some(json!(default)),
+    )
+}
+
 pub(super) fn parameter(
     name: &str,
     label: &str,
