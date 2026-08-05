@@ -8,7 +8,7 @@ use crate::{
     core::tasks::{
         script_parameter_env_name, validate_parameters, ExecutionScope, OutputKind,
         ParameterDefinition, ParameterKind, PrivilegeRequirement, RiskLevel, TaskCategory,
-        TaskDefinition,
+        TaskDefinition, ValidatedParameters,
     },
     error::{AppError, AppResult},
 };
@@ -95,6 +95,15 @@ pub fn validate_script_parameters(parameters: &[ParameterDefinition]) -> AppResu
         }
     }
     Ok(())
+}
+
+pub fn validate_script_parameter_values(
+    parameters: &[ParameterDefinition],
+    input: &Value,
+) -> AppResult<ValidatedParameters> {
+    validate_script_parameters(parameters)?;
+    let task = parameter_validation_task(parameters.to_vec());
+    validate_parameters(&task, input)
 }
 
 pub fn scan_script_body(body: &str) -> AppResult<ScriptScanSummary> {
@@ -232,7 +241,12 @@ fn validate_parameter_default(parameter: &ParameterDefinition, default: Value) -
     definition.default_value = None;
     let mut input = Map::new();
     input.insert(parameter.name.clone(), default);
-    let task = TaskDefinition {
+    let task = parameter_validation_task(vec![definition]);
+    validate_parameters(&task, &Value::Object(input)).map(|_| ())
+}
+
+fn parameter_validation_task(parameters: Vec<ParameterDefinition>) -> TaskDefinition {
+    TaskDefinition {
         id: "script.personal.validation".into(),
         version: 1,
         category: TaskCategory::System,
@@ -242,11 +256,10 @@ fn validate_parameter_default(parameter: &ParameterDefinition, default: Value) -
         estimated_seconds: 1,
         privilege: PrivilegeRequirement::CurrentUser,
         scope: ExecutionScope::SingleServer,
-        parameters: vec![definition],
+        parameters,
         implementations: Vec::new(),
         output_kind: OutputKind::Text,
-    };
-    validate_parameters(&task, &Value::Object(input)).map(|_| ())
+    }
 }
 
 fn push_warning(

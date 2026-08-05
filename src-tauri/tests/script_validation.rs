@@ -1,10 +1,14 @@
 use qingzhou_ssh_lib::core::{
-    scripts::validation::{
-        scan_script_body, validate_parameter_name, validate_script_body, validate_script_metadata,
-        validate_script_parameters, validate_script_timeout,
-        PERSONAL_SCRIPT_AUTOMATIC_ROLLBACK_AVAILABLE, PERSONAL_SCRIPT_RISK,
+    scripts::{
+        environment::render_script_launcher,
+        validation::{
+            scan_script_body, validate_parameter_name, validate_script_body,
+            validate_script_metadata, validate_script_parameter_values, validate_script_parameters,
+            validate_script_timeout, PERSONAL_SCRIPT_AUTOMATIC_ROLLBACK_AVAILABLE,
+            PERSONAL_SCRIPT_RISK,
+        },
     },
-    tasks::{ParameterDefinition, ParameterKind, RiskLevel},
+    tasks::{shell_quote, ParameterDefinition, ParameterKind, RiskLevel},
 };
 use serde_json::json;
 
@@ -132,4 +136,53 @@ fn static_scan_is_advisory_bounded_and_never_reduces_risk() {
         .iter()
         .all(|warning| !warning.message.contains(body)));
     assert_eq!(PERSONAL_SCRIPT_RISK, RiskLevel::Dangerous);
+}
+
+#[test]
+fn parameter_values_cannot_change_script_structure() {
+    let body = "printf '%s' \"$QZ_PARAM_TEXT\"";
+    let value = "x'; touch /tmp/pwn; #\n`id` $(id) 中文";
+    let definitions = vec![parameter(
+        "TEXT",
+        ParameterKind::String {
+            min_length: 0,
+            max_length: 4096,
+            multiline: true,
+        },
+        None,
+    )];
+    let values = validate_script_parameter_values(&definitions, &json!({"TEXT": value})).unwrap();
+    let command = render_script_launcher(body, &values).unwrap();
+
+    assert!(!command.contains("QZ_PARAM_TEXT=x'; touch"));
+    assert!(command.contains(&format!("QZ_PARAM_TEXT={}", shell_quote(value))));
+    assert_eq!(extract_script_body(&command), body);
+}
+
+#[test]
+fn launcher_preserves_empty_unicode_and_large_script_content() {
+    let definitions = vec![parameter(
+        "TEXT",
+        ParameterKind::String {
+            min_length: 0,
+            max_length: 4096,
+            multiline: true,
+        },
+        None,
+    )];
+    let values = validate_script_parameter_values(&definitions, &json!({"TEXT": ""})).unwrap();
+    let body = format!("# 中文\n{}", "x".repeat(1024 * 1024 - 9));
+    let command = render_script_launcher(&body, &values).unwrap();
+
+    assert!(command.starts_with("env QZ_PARAM_TEXT='' sh -s <<'QZ_SCRIPT_"));
+    assert_eq!(extract_script_body(&command), body);
+}
+
+fn extract_script_body(command: &str) -> &str {
+    let (before_delimiter, delimiter) = command.rsplit_once('\n').expect("closing delimiter");
+    let opening = format!(" sh -s <<'{delimiter}'\n");
+    before_delimiter
+        .rsplit_once(&opening)
+        .map(|(_, body)| body)
+        .expect("quoted heredoc delimiter")
 }
