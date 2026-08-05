@@ -166,6 +166,16 @@ describe('Tauri API wrapper', () => {
     await tauriApi.getOperationBatch('batch-1');
     await tauriApi.exportOperationReport('run-1', 'json');
     await tauriApi.exportOperationBatchReport('batch-1', 'txt');
+    await tauriApi.previewOperation('server-1', preflight);
+    await tauriApi.confirmOperation(
+      'server-1',
+      { ...preflight, confirmationToken: 'preview-1' },
+      () => undefined,
+    );
+    await tauriApi.listOperationRestorePoints('run-1');
+    await tauriApi.rollbackOperation('restore-point-1');
+    await tauriApi.inspectUncertainOperation('run-1');
+    await tauriApi.cleanupOperationRestoreAssets('restore-point-1');
 
     expect(invoke.mock.calls.map(([command, args]) => [command, args && Object.keys(args)])).toEqual([
       ['list_operations_tasks', ['serverId']],
@@ -179,9 +189,23 @@ describe('Tauri API wrapper', () => {
       ['get_operation_batch', ['batchId']],
       ['export_operation_report', ['runId', 'format']],
       ['export_operation_batch_report', ['batchId', 'format']],
+      ['preview_operation', ['serverId', 'request']],
+      ['confirm_operation', ['serverId', 'request', 'onEvent']],
+      ['list_operation_restore_points', ['runId']],
+      ['rollback_operation', ['restorePointId']],
+      ['inspect_uncertain_operation', ['runId']],
+      ['cleanup_operation_restore_assets', ['restorePointId']],
     ]);
-    expect(JSON.stringify(invoke.mock.calls)).not.toContain('commandTemplate');
-    expect(JSON.stringify(invoke.mock.calls)).not.toContain('"command"');
+    const serializedCalls = JSON.stringify(invoke.mock.calls);
+    for (const forbidden of [
+      'commandTemplate',
+      '"command"',
+      'localPath',
+      'remoteScript',
+      'sudoPassword',
+    ]) {
+      expect(serializedCalls).not.toContain(forbidden);
+    }
   });
 
   it('uses all workflow command names, camelCase arguments and monotonic channels', async () => {

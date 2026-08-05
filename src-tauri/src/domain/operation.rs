@@ -88,6 +88,9 @@ impl OperationStatus {
                 | (Self::Uncertain, Self::RolledBack)
                 | (Self::Uncertain, Self::RollbackAvailable)
                 | (Self::Failed, Self::RollbackAvailable)
+                | (Self::Succeeded, Self::RollbackAvailable)
+                | (Self::RollbackPartial, Self::RollbackAvailable)
+                | (Self::RollbackFailed, Self::RollbackAvailable)
                 | (Self::RollbackAvailable, Self::RollingBack)
                 | (Self::RollingBack, Self::RolledBack)
                 | (Self::RollingBack, Self::RollbackPartial)
@@ -208,6 +211,8 @@ impl OperationStepStatus {
                 | (Self::Running, Self::Failed)
                 | (Self::Running, Self::Cancelled)
                 | (Self::Running, Self::Uncertain)
+                | (Self::Failed, Self::Running)
+                | (Self::Uncertain, Self::Running)
                 | (Self::Uncertain, Self::Succeeded)
         )
     }

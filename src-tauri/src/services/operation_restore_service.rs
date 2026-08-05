@@ -24,13 +24,17 @@ use crate::{
             BackupPlan, PrivilegeMode, ValidatedParameters,
         },
     },
+    domain::execution::now_millis,
     domain::operation_restore::{
         NewOperationRestoreItem, NewOperationRestorePoint, OperationRestoreDetails,
         OperationRestoreItem, OperationRestoreItemStatus, OperationRestorePointStatus,
     },
     error::{AppError, AppResult},
     repositories::operation_restore_repository::OperationRestoreRepository,
-    services::server_connector::{ConnectedServer, ServerConnector},
+    services::{
+        remote_recovery_service::RemoteRecoveryService,
+        server_connector::{ConnectedServer, ServerConnector},
+    },
 };
 
 #[derive(Clone)]
@@ -134,6 +138,72 @@ impl OperationRestoreService {
 
     pub async fn list_by_run(&self, run_id: Uuid) -> AppResult<Vec<OperationRestoreDetails>> {
         self.repository.list_by_run(run_id).await
+    }
+
+    pub async fn cleanup_assets(
+        &self,
+        restore_point_id: Uuid,
+    ) -> AppResult<OperationRestoreDetails> {
+        let details = self
+            .repository
+            .get(restore_point_id)
+            .await?
+            .ok_or_else(|| AppError::Validation("恢复点不存在".into()))?;
+        if details.point.status != OperationRestorePointStatus::CleanupPending {
+            self.repository
+                .begin_cleanup(restore_point_id, now_millis())
+                .await?;
+        }
+
+        let expected_relative = task_restore_dir(details.point.operation_run_id)
+            .to_string_lossy()
+            .replace('\\', "/");
+        if details.point.local_relative_dir != expected_relative {
+            return Err(AppError::Security("恢复资产目录与运维运行不匹配".into()));
+        }
+
+        if let Some(remote_asset_id) = details.point.remote_asset_id.as_deref() {
+            let expected_remote = format!("qingzhou-recovery/{}", details.point.operation_run_id);
+            if remote_asset_id != expected_remote {
+                return Err(AppError::Security(
+                    "远程恢复资产标识与运维运行不匹配".into(),
+                ));
+            }
+            RemoteRecoveryService::new(self.connector.clone())
+                .cleanup_operation_assets(&details.point.server_id, details.point.operation_run_id)
+                .await?;
+        }
+
+        let local_dir = resolve_task_restore_path(
+            &self.data_root,
+            PathBuf::from(&details.point.local_relative_dir).as_path(),
+        )?;
+        match tokio::fs::symlink_metadata(&local_dir).await {
+            Ok(metadata) => {
+                if metadata.file_type().is_symlink() || !metadata.is_dir() {
+                    return Err(AppError::Security("恢复资产目录类型无效".into()));
+                }
+                tokio::fs::remove_dir_all(&local_dir).await?;
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error.into()),
+        }
+        self.repository.finish_cleanup(restore_point_id).await?;
+        self.repository
+            .get(restore_point_id)
+            .await?
+            .ok_or_else(|| AppError::Database(sqlx::Error::RowNotFound))
+    }
+
+    pub async fn mark_remote_rollback_observed(&self, run_id: Uuid) -> AppResult<()> {
+        let points = self.repository.list_by_run(run_id).await?;
+        let point = points
+            .into_iter()
+            .find(|details| details.point.status == OperationRestorePointStatus::Available)
+            .ok_or_else(|| AppError::Integrity("远程自动回滚缺少可用恢复点".into()))?;
+        self.repository
+            .mark_remote_rollback_observed(point.point.id)
+            .await
     }
 
     pub async fn attach_remote_asset(

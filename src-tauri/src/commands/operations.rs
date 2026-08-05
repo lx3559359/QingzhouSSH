@@ -7,12 +7,16 @@ use crate::{
         execution::ExecutionFile,
         operation::{OperationDetails, OperationFilter, OperationRunRecord},
         operation_batch::{OperationBatchDetails, OperationBatchRequest},
+        operation_restore::OperationRestoreDetails,
     },
     error::AppResult,
     services::{
         execution_service::TaskAvailability,
         operation_report_service::ReportFormat,
-        operation_service::{OperationPreflightRequest, OperationPreview, OperationStartRequest},
+        operation_service::{
+            OperationConfirmRequest, OperationPreflightRequest, OperationPreview,
+            OperationRecoveryResult, OperationStartRequest,
+        },
     },
     state::AppState,
 };
@@ -44,6 +48,19 @@ pub async fn preflight_operation(
 }
 
 #[tauri::command]
+pub async fn preview_operation(
+    server_id: String,
+    request: OperationPreflightRequest,
+    state: State<'_, AppState>,
+) -> AppResult<OperationPreview> {
+    services(&state)
+        .await?
+        .operation_service()
+        .preflight(&server_id, request)
+        .await
+}
+
+#[tauri::command]
 pub async fn start_operation(
     server_id: String,
     request: OperationStartRequest,
@@ -55,6 +72,69 @@ pub async fn start_operation(
         .await?
         .operation_service()
         .start(&server_id, request, &mut events)
+        .await
+}
+
+#[tauri::command]
+pub async fn confirm_operation(
+    server_id: String,
+    request: OperationConfirmRequest,
+    on_event: Channel<ExecutionEvent>,
+    state: State<'_, AppState>,
+) -> AppResult<OperationDetails> {
+    let mut events = ChannelEventSink(on_event);
+    services(&state)
+        .await?
+        .operation_service()
+        .start(&server_id, request.into(), &mut events)
+        .await
+}
+
+#[tauri::command]
+pub async fn list_operation_restore_points(
+    run_id: Uuid,
+    state: State<'_, AppState>,
+) -> AppResult<Vec<OperationRestoreDetails>> {
+    services(&state)
+        .await?
+        .operation_restore_service()
+        .list_by_run(run_id)
+        .await
+}
+
+#[tauri::command]
+pub async fn rollback_operation(
+    restore_point_id: Uuid,
+    state: State<'_, AppState>,
+) -> AppResult<OperationRecoveryResult> {
+    services(&state)
+        .await?
+        .operation_service()
+        .rollback_operation(restore_point_id)
+        .await
+}
+
+#[tauri::command]
+pub async fn inspect_uncertain_operation(
+    run_id: Uuid,
+    state: State<'_, AppState>,
+) -> AppResult<OperationRecoveryResult> {
+    services(&state)
+        .await?
+        .operation_service()
+        .inspect_uncertain(run_id)
+        .await
+}
+
+#[tauri::command]
+pub async fn cleanup_operation_restore_assets(
+    restore_point_id: Uuid,
+    state: State<'_, AppState>,
+) -> AppResult<OperationRestoreDetails> {
+    services(&state)
+        .await?
+        .operation_restore_service()
+        .cleanup_assets(restore_point_id)
         .await
 }
 
@@ -186,5 +266,27 @@ mod tests {
         assert!(invalid_batch.is_err());
         assert!(serde_json::from_value::<ReportFormat>(serde_json::json!("json")).is_ok());
         assert!(serde_json::from_value::<ReportFormat>(serde_json::json!("../report")).is_err());
+    }
+
+    #[test]
+    fn ipc_confirmation_request_is_token_bound_and_rejects_sensitive_fields() {
+        let token = Uuid::new_v4();
+        let request = OperationConfirmRequest {
+            task_id: "service.restart".into(),
+            task_version: 2,
+            parameters: serde_json::json!({"service":"nginx"}),
+            confirmation_token: token,
+        };
+        let value = serde_json::to_value(&request).unwrap();
+        assert_eq!(value["confirmationToken"], token.to_string());
+        for forbidden in ["command", "localPath", "remoteScript", "sudoPassword"] {
+            assert!(value.get(forbidden).is_none());
+        }
+
+        for forbidden in ["command", "localPath", "remoteScript", "sudoPassword"] {
+            let mut value = value.clone();
+            value[forbidden] = serde_json::json!("must-not-cross-ipc");
+            assert!(serde_json::from_value::<OperationConfirmRequest>(value).is_err());
+        }
     }
 }

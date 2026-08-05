@@ -268,6 +268,24 @@ export interface OperationStartRequest extends OperationPreflightRequest {
   confirmedPreviewId: string | null;
 }
 
+export interface OperationConfirmRequest extends OperationPreflightRequest {
+  confirmationToken: string;
+}
+
+export interface OperationPreviewServer {
+  id: string;
+  name: string;
+  host: string;
+  port: number;
+  username: string;
+}
+
+export interface OperationDisconnectRisk {
+  mayDisconnect: boolean;
+  explanation: string | null;
+  automaticRecoverySeconds: number | null;
+}
+
 export interface OperationPreview {
   previewId: string;
   serverId: string;
@@ -280,6 +298,13 @@ export interface OperationPreview {
   status: OperationStatus;
   stepTitles: string[];
   estimatedSeconds: number;
+  confirmationToken: string | null;
+  server: OperationPreviewServer;
+  permissionSummary: string;
+  currentStateSummary: string;
+  targetStateSummary: string;
+  backupSummary: string[];
+  disconnectRisk: OperationDisconnectRisk;
 }
 
 export interface OperationRunRecord {
@@ -315,6 +340,64 @@ export interface OperationStepRecord {
 export interface OperationRunDetails {
   run: OperationRunRecord;
   steps: OperationStepRecord[];
+}
+
+export type OperationRestorePointStatus =
+  | 'creating'
+  | 'available'
+  | 'rolling_back'
+  | 'rolled_back'
+  | 'partial'
+  | 'failed'
+  | 'expired'
+  | 'cleanup_pending';
+
+export type OperationRestoreItemStatus =
+  | 'pending'
+  | 'available'
+  | 'rolling_back'
+  | 'rolled_back'
+  | 'failed'
+  | 'skipped';
+
+export interface OperationRestorePoint {
+  id: string;
+  operationRunId: string;
+  serverId: string;
+  taskId: string;
+  status: OperationRestorePointStatus;
+  localRelativeDir: string;
+  remoteAssetId: string | null;
+  expiresAt: number | null;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface OperationRestoreItem {
+  id: string;
+  restorePointId: string;
+  ordinal: number;
+  itemKind: BackupItemKind;
+  localRelativePath: string | null;
+  sha256: string | null;
+  originalMetadata: unknown;
+  status: OperationRestoreItemStatus;
+  errorSummary: string | null;
+}
+
+export interface OperationRestoreDetails {
+  point: OperationRestorePoint;
+  items: OperationRestoreItem[];
+}
+
+export interface OperationRecoveryResult {
+  operation: OperationRunDetails;
+  whatHappened: string;
+  serverMayHaveChanged: boolean;
+  stateConfirmed: boolean;
+  nextStep: string;
+  restorePoint: OperationRestorePoint | null;
+  technicalDetails: string | null;
 }
 
 export interface OperationFilter {

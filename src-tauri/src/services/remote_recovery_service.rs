@@ -86,6 +86,30 @@ impl RemoteRecoveryService {
         self.finalize_ip_change(server_id, host, command, privilege_mode)
             .await
     }
+
+    pub async fn cleanup_operation_assets(&self, server_id: &str, run_id: Uuid) -> AppResult<()> {
+        let connected = self.connector.connect(server_id).await?;
+        let privilege_mode = match crate::core::tasks::probe_privilege(&connected.session).await {
+            Ok(mode) => mode,
+            Err(error) => {
+                connected.session.disconnect().await;
+                return Err(error);
+            }
+        };
+        execute_connected(
+            connected,
+            &build_remote_recovery_cleanup_command(run_id),
+            privilege_mode,
+        )
+        .await?;
+        Ok(())
+    }
+}
+
+pub fn build_remote_recovery_cleanup_command(run_id: Uuid) -> String {
+    format!(
+        "qz_base=${{XDG_RUNTIME_DIR:-/tmp}}; case \"$qz_base\" in /*) :;; *) exit 64;; esac; qz_parent=\"$qz_base/qingzhou-recovery\"; qz_dir=\"$qz_parent/{run_id}\"; if test ! -e \"$qz_dir\"; then exit 0; fi; test -d \"$qz_parent\" && test ! -L \"$qz_parent\" && test \"$(stat -Lc %u -- \"$qz_parent\")\" = \"$(id -u)\"; test -d \"$qz_dir\" && test ! -L \"$qz_dir\" && test \"$(stat -Lc %u -- \"$qz_dir\")\" = \"$(id -u)\"; find \"$qz_dir\" -xdev -depth -mindepth 1 -delete; rmdir -- \"$qz_dir\"; test ! -e \"$qz_dir\""
+    )
 }
 
 async fn execute_connected(

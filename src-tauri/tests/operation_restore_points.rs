@@ -535,3 +535,101 @@ async fn local_paths_are_relative_and_operation_deletion_is_restricted() {
         .unwrap();
     assert_eq!(operation.run.status, OperationStatus::Validating);
 }
+
+#[tokio::test]
+async fn ipc_cleanup_claim_accepts_only_expired_or_consumed_restore_points() {
+    let fixture = fixture().await;
+    let available = fixture.repository.create(point(&fixture)).await.unwrap();
+    fixture
+        .repository
+        .add_item(item(
+            available.id,
+            fixture.run_id,
+            0,
+            BackupItemKind::RemoteFile,
+        ))
+        .await
+        .unwrap();
+    fixture
+        .repository
+        .mark_available(available.id)
+        .await
+        .unwrap();
+    assert!(fixture
+        .repository
+        .begin_cleanup(available.id, i64::MAX)
+        .await
+        .is_err());
+
+    fixture
+        .repository
+        .begin_rollback(available.id)
+        .await
+        .unwrap();
+    fixture
+        .repository
+        .finish_rollback(available.id, OperationRestorePointStatus::RolledBack, None)
+        .await
+        .unwrap();
+    fixture
+        .repository
+        .begin_cleanup(available.id, 0)
+        .await
+        .unwrap();
+    fixture
+        .repository
+        .finish_cleanup(available.id)
+        .await
+        .unwrap();
+    assert_eq!(
+        fixture
+            .repository
+            .get(available.id)
+            .await
+            .unwrap()
+            .unwrap()
+            .point
+            .status,
+        OperationRestorePointStatus::Expired
+    );
+}
+
+#[tokio::test]
+async fn ipc_remote_auto_rollback_consumes_the_matching_restore_point() {
+    let fixture = fixture().await;
+    let available = fixture.repository.create(point(&fixture)).await.unwrap();
+    fixture
+        .repository
+        .add_item(item(
+            available.id,
+            fixture.run_id,
+            0,
+            BackupItemKind::RuntimeState,
+        ))
+        .await
+        .unwrap();
+    fixture
+        .repository
+        .mark_available(available.id)
+        .await
+        .unwrap();
+    fixture
+        .repository
+        .mark_remote_rollback_observed(available.id)
+        .await
+        .unwrap();
+    let details = fixture.repository.get(available.id).await.unwrap().unwrap();
+    assert_eq!(
+        details.point.status,
+        OperationRestorePointStatus::RolledBack
+    );
+    assert!(details
+        .items
+        .iter()
+        .all(|item| item.status == OperationRestoreItemStatus::RolledBack));
+    assert!(fixture
+        .repository
+        .mark_remote_rollback_observed(available.id)
+        .await
+        .is_err());
+}

@@ -15,6 +15,7 @@ import type {
   LogResultPage,
   LogSearchRequest,
   OperationEvent,
+  OperationConfirmRequest,
   OperationFilter,
   OperationBatchDetails,
   OperationBatchRequest,
@@ -23,6 +24,8 @@ import type {
   OperationPreview,
   OperationRunDetails,
   OperationRunRecord,
+  OperationRecoveryResult,
+  OperationRestoreDetails,
   OperationStartRequest,
   ServerProfile,
   SystemCapabilities,
@@ -172,6 +175,26 @@ export const tauriApi = {
     invoke<ExecutionFile>('export_operation_report', { runId, format }),
   exportOperationBatchReport: (batchId: string, format: ReportFormat) =>
     invoke<ExecutionFile>('export_operation_batch_report', { batchId, format }),
+  previewOperation: (serverId: string, request: OperationPreflightRequest) =>
+    invoke<OperationPreview>('preview_operation', { serverId, request }),
+  confirmOperation: (
+    serverId: string,
+    request: OperationConfirmRequest,
+    onEvent: OperationEventHandler,
+  ) =>
+    invoke<OperationRunDetails>('confirm_operation', {
+      serverId,
+      request,
+      onEvent: createMonotonicChannel(onEvent),
+    }),
+  listOperationRestorePoints: (runId: string) =>
+    invoke<OperationRestoreDetails[]>('list_operation_restore_points', { runId }),
+  rollbackOperation: (restorePointId: string) =>
+    invoke<OperationRecoveryResult>('rollback_operation', { restorePointId }),
+  inspectUncertainOperation: (runId: string) =>
+    invoke<OperationRecoveryResult>('inspect_uncertain_operation', { runId }),
+  cleanupOperationRestoreAssets: (restorePointId: string) =>
+    invoke<OperationRestoreDetails>('cleanup_operation_restore_assets', { restorePointId }),
   listWorkflows: () => invoke<WorkflowSummary[]>('list_workflows'),
   getWorkflow: (workflowId: string, version: number | null) =>
     invoke<WorkflowDefinition | null>('get_workflow', { workflowId, version }),

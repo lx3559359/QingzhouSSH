@@ -30,7 +30,7 @@ use crate::{
 const DEFAULT_OUTPUT_LIMIT: u64 = 32 * 1024 * 1024;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct TaskExecutionRequest {
     pub task_id: String,
     pub parameters: Value,
@@ -54,7 +54,7 @@ pub enum CustomExecutionMode {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct CustomExecutionRequest {
     pub mode: CustomExecutionMode,
     pub content: String,
@@ -196,9 +196,7 @@ impl ExecutionService {
             .into_iter()
             .find(|definition| definition.id == request.task_id)
             .ok_or_else(|| AppError::Validation("快捷任务不存在".into()))?;
-        if definition.risk_level == RiskLevel::Dangerous && !request.dangerous_confirmed {
-            return Err(AppError::Validation("危险任务必须二次确认".into()));
-        }
+        reject_legacy_dangerous_task(&definition)?;
         let parameters = validate_parameters(&definition, &request.parameters)?;
         let execution = self
             .repository
@@ -637,6 +635,15 @@ fn history_parameters(parameters: &ValidatedParameters) -> Vec<ExecutionParamete
         .collect()
 }
 
+fn reject_legacy_dangerous_task(definition: &TaskDefinition) -> AppResult<()> {
+    if definition.risk_level == RiskLevel::Dangerous {
+        return Err(AppError::Security(
+            "危险任务必须通过运维中心执行，以启用预演、备份、验证和回滚保护".into(),
+        ));
+    }
+    Ok(())
+}
+
 pub(crate) fn relative_to(root: &std::path::Path, path: &std::path::Path) -> AppResult<String> {
     Ok(path
         .strip_prefix(root)
@@ -664,5 +671,22 @@ mod tests {
         assert!(!child.is_cancelled());
         parent.cancel();
         assert!(child.is_cancelled());
+    }
+
+    #[test]
+    fn legacy_task_execution_cannot_bypass_dangerous_operation_recovery() {
+        let dangerous = built_in_catalog()
+            .into_iter()
+            .find(|task| task.risk_level == RiskLevel::Dangerous)
+            .unwrap();
+        let safe = built_in_catalog()
+            .into_iter()
+            .find(|task| task.risk_level == RiskLevel::Safe)
+            .unwrap();
+        assert_eq!(
+            reject_legacy_dangerous_task(&dangerous).unwrap_err().code(),
+            "security"
+        );
+        reject_legacy_dangerous_task(&safe).unwrap();
     }
 }

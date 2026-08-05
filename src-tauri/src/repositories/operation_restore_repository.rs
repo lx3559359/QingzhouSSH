@@ -155,6 +155,52 @@ impl OperationRestoreRepository {
         ensure_one(result.rows_affected(), "恢复点无法登记远程恢复资产")
     }
 
+    pub async fn begin_cleanup(&self, id: Uuid, now: i64) -> AppResult<()> {
+        let result = sqlx::query(
+            "UPDATE operation_restore_points SET status='cleanup_pending',updated_at=? WHERE id=? AND (status='rolled_back' OR (expires_at IS NOT NULL AND expires_at<=? AND status IN ('available','partial','failed')))",
+        )
+        .bind(now_millis())
+        .bind(id.to_string())
+        .bind(now)
+        .execute(&self.pool)
+        .await?;
+        ensure_one(
+            result.rows_affected(),
+            "只能清理已经使用或已经过期的恢复资产",
+        )
+    }
+
+    pub async fn finish_cleanup(&self, id: Uuid) -> AppResult<()> {
+        let result = sqlx::query(
+            "UPDATE operation_restore_points SET status='expired',remote_asset_id=NULL,updated_at=? WHERE id=? AND status='cleanup_pending'",
+        )
+        .bind(now_millis())
+        .bind(id.to_string())
+        .execute(&self.pool)
+        .await?;
+        ensure_one(result.rows_affected(), "恢复资产没有处于待清理状态")
+    }
+
+    pub async fn mark_remote_rollback_observed(&self, id: Uuid) -> AppResult<()> {
+        let mut transaction = self.pool.begin().await?;
+        let point = sqlx::query(
+            "UPDATE operation_restore_points SET status='rolled_back',updated_at=? WHERE id=? AND status='available'",
+        )
+        .bind(now_millis())
+        .bind(id.to_string())
+        .execute(&mut *transaction)
+        .await?;
+        ensure_one(point.rows_affected(), "只有可用恢复点可以记录远程自动回滚")?;
+        sqlx::query(
+            "UPDATE operation_restore_items SET status='rolled_back',error_summary=NULL WHERE restore_point_id=? AND status='available'",
+        )
+        .bind(id.to_string())
+        .execute(&mut *transaction)
+        .await?;
+        transaction.commit().await?;
+        Ok(())
+    }
+
     pub async fn mark_creation_failed(&self, id: Uuid) -> AppResult<()> {
         let result = sqlx::query(
             "UPDATE operation_restore_points SET status='failed',updated_at=? WHERE id=? AND status='creating'",

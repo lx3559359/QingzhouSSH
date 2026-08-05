@@ -9,6 +9,7 @@ import type {
   ExecutionFilter,
   LogSearchRequest,
   OperationFilter,
+  OperationConfirmRequest,
   OperationBatchDetails,
   OperationBatchRequest,
   ReportFormat,
@@ -16,6 +17,8 @@ import type {
   OperationPreview,
   OperationRunDetails,
   OperationRunRecord,
+  OperationRecoveryResult,
+  OperationRestoreDetails,
   OperationStartRequest,
   HostKeyCheck,
   HostKeyObservation,
@@ -198,6 +201,7 @@ function emitPreview(onEvent: (event: ExecutionEvent) => void, details: Executio
 let previewOperationCounter = 0;
 let previewOperations = new Map<string, OperationRunDetails>();
 let previewOperationBatches = new Map<string, OperationBatchDetails>();
+let previewOperationRestorePoints = new Map<string, OperationRestoreDetails>();
 
 function operationTask(taskId: string, taskVersion: number) {
   const task = previewTasks.find((item) => item.definition.id === taskId)?.definition;
@@ -216,6 +220,8 @@ function createOperationPreview(
   const now = Date.now();
   previewOperationCounter += 1;
   const previewId = `preview-operation-${previewOperationCounter}`;
+  const server = previewServers.find((item) => item.id === serverId) ?? previewServer;
+  const dangerous = task.riskLevel === 'dangerous';
   const steps = implementation.executionSteps.map((step, stepIndex) => ({
     runId: previewId,
     phase: 'execute' as const,
@@ -264,6 +270,31 @@ function createOperationPreview(
       ...implementation.executionSteps.map((step) => step.title),
     ],
     estimatedSeconds: task.estimatedSeconds,
+    confirmationToken: dangerous ? previewId : null,
+    server: {
+      id: server.id,
+      name: server.name,
+      host: server.host,
+      port: server.port,
+      username: server.username,
+    },
+    permissionSummary: task.privilege === 'current_user'
+      ? '使用当前 SSH 用户权限'
+      : '执行前必须确认 root 或免密 sudo 权限',
+    currentStateSummary: dangerous
+      ? '预览模式：已完成只读状态检查'
+      : '只读任务将在执行时读取服务器当前状态',
+    targetStateSummary: Object.keys(request.parameters).length
+      ? JSON.stringify(request.parameters)
+      : '此任务没有需要填写的目标参数',
+    backupSummary: implementation.backupPlan?.items.map((item) => `执行前备份：${item.id}`) ?? [],
+    disconnectRisk: task.id === 'network.ip_change'
+      ? {
+          mayDisconnect: true,
+          explanation: '修改服务器 IP 可能中断当前连接；客户端会先安排远程超时自动恢复',
+          automaticRecoverySeconds: Number(request.parameters.rollbackSeconds ?? 120),
+        }
+      : { mayDisconnect: false, explanation: null, automaticRecoverySeconds: null },
   };
 }
 
@@ -271,6 +302,61 @@ function requirePreviewOperation(runId: string) {
   const details = previewOperations.get(runId);
   if (!details) throw Object.assign(new Error('找不到运维运行。'), { code: 'validation' });
   return details;
+}
+
+function executePreviewOperation(
+  serverId: string,
+  request: OperationPreflightRequest,
+  confirmationToken: string,
+  onEvent: (event: ExecutionEvent) => void,
+) {
+  const task = operationTask(request.taskId, request.taskVersion);
+  const details = requirePreviewOperation(confirmationToken);
+  if (
+    details.run.serverId !== serverId
+    || details.run.taskId !== request.taskId
+    || details.run.taskVersion !== request.taskVersion
+    || details.run.status !== 'preview_ready'
+    || details.run.parametersSummary !== (
+      Object.keys(request.parameters).length ? JSON.stringify(request.parameters) : null
+    )
+  ) {
+    throw Object.assign(new Error('确认令牌与本次任务、服务器或参数不一致。'), {
+      code: 'validation',
+    });
+  }
+  const execution = createPreviewExecution(serverId, task.id);
+  emitPreview(onEvent, execution);
+  const finishedAt = Date.now();
+  details.run.status = 'succeeded';
+  details.run.updatedAt = finishedAt;
+  details.run.finishedAt = finishedAt;
+  details.steps = details.steps.map((step) => ({
+    ...step,
+    status: 'succeeded',
+    executionId: execution.record.id,
+    outputSummary: execution.record.outputSummary,
+    startedAt: finishedAt - 100,
+    finishedAt,
+  }));
+  if (task.riskLevel === 'dangerous' && !previewOperationRestorePoints.has(confirmationToken)) {
+    previewOperationRestorePoints.set(confirmationToken, {
+      point: {
+        id: `restore-${confirmationToken}`,
+        operationRunId: confirmationToken,
+        serverId,
+        taskId: task.id,
+        status: 'available',
+        localRelativeDir: `backups/tasks/${confirmationToken}`,
+        remoteAssetId: null,
+        expiresAt: null,
+        createdAt: finishedAt,
+        updatedAt: finishedAt,
+      },
+      items: [],
+    });
+  }
+  return clone(details);
 }
 
 type StoredWorkflow = {
@@ -955,6 +1041,8 @@ export const previewApi = {
   listOperationsTasks: async (_serverId: string) => previewTasks,
   preflightOperation: async (serverId: string, request: OperationPreflightRequest) =>
     createOperationPreview(serverId, request),
+  previewOperation: async (serverId: string, request: OperationPreflightRequest) =>
+    createOperationPreview(serverId, request),
   startOperation: async (
     serverId: string,
     request: OperationStartRequest,
@@ -966,35 +1054,81 @@ export const previewApi = {
     }
     const previewId = request.confirmedPreviewId
       ?? createOperationPreview(serverId, request).previewId;
-    const details = requirePreviewOperation(previewId);
-    if (
-      details.run.serverId !== serverId
-      || details.run.taskId !== request.taskId
-      || details.run.taskVersion !== request.taskVersion
-    ) {
-      throw Object.assign(new Error('确认的预览与任务不一致。'), { code: 'validation' });
+    return executePreviewOperation(serverId, request, previewId, onEvent);
+  },
+  confirmOperation: async (
+    serverId: string,
+    request: OperationConfirmRequest,
+    onEvent: (event: ExecutionEvent) => void,
+  ): Promise<OperationRunDetails> =>
+    executePreviewOperation(serverId, request, request.confirmationToken, onEvent),
+  listOperationRestorePoints: async (runId: string): Promise<OperationRestoreDetails[]> => {
+    const restore = previewOperationRestorePoints.get(runId);
+    return restore ? [clone(restore)] : [];
+  },
+  rollbackOperation: async (restorePointId: string): Promise<OperationRecoveryResult> => {
+    const entry = [...previewOperationRestorePoints.entries()]
+      .find(([, details]) => details.point.id === restorePointId);
+    if (!entry || entry[1].point.status !== 'available') {
+      throw Object.assign(new Error('恢复点不存在或已经使用。'), {
+        code: 'restore_point_already_consumed',
+      });
     }
-    if (task.riskLevel === 'dangerous') {
-      details.run.status = 'waiting_confirmation';
-      details.run.updatedAt = Date.now();
-      return clone(details);
+    const [runId, restore] = entry;
+    const operation = requirePreviewOperation(runId);
+    const now = Date.now();
+    restore.point.status = 'rolled_back';
+    restore.point.updatedAt = now;
+    operation.run.status = 'rolled_back';
+    operation.run.updatedAt = now;
+    operation.run.finishedAt = now;
+    return clone({
+      operation,
+      whatHappened: '已按恢复点还原修改前状态',
+      serverMayHaveChanged: false,
+      stateConfirmed: true,
+      nextStep: '请重新检查对应服务或配置是否恢复正常',
+      restorePoint: restore.point,
+      technicalDetails: null,
+    });
+  },
+  inspectUncertainOperation: async (runId: string): Promise<OperationRecoveryResult> => {
+    const operation = requirePreviewOperation(runId);
+    if (operation.run.status !== 'uncertain') {
+      throw Object.assign(new Error('只有状态未确认的 IP 修改可以重新检查。'), {
+        code: 'validation',
+      });
     }
-
-    const execution = createPreviewExecution(serverId, task.id);
-    emitPreview(onEvent, execution);
-    const finishedAt = Date.now();
-    details.run.status = 'succeeded';
-    details.run.updatedAt = finishedAt;
-    details.run.finishedAt = finishedAt;
-    details.steps = details.steps.map((step) => ({
-      ...step,
-      status: 'succeeded',
-      executionId: execution.record.id,
-      outputSummary: execution.record.outputSummary,
-      startedAt: finishedAt - 100,
-      finishedAt,
-    }));
-    return clone(details);
+    const restore = previewOperationRestorePoints.get(runId);
+    return clone({
+      operation,
+      whatHappened: '服务器仍在自动恢复保护窗口内，当前状态尚未最终确认',
+      serverMayHaveChanged: true,
+      stateConfirmed: false,
+      nextStep: '等待自动恢复窗口结束后再次检查，不要重复修改网络',
+      restorePoint: restore?.point ?? null,
+      technicalDetails: null,
+    });
+  },
+  cleanupOperationRestoreAssets: async (
+    restorePointId: string,
+  ): Promise<OperationRestoreDetails> => {
+    const entry = [...previewOperationRestorePoints.entries()]
+      .find(([, details]) => details.point.id === restorePointId);
+    if (!entry) {
+      throw Object.assign(new Error('恢复点不存在。'), { code: 'validation' });
+    }
+    const restore = entry[1];
+    const expired = restore.point.expiresAt !== null && restore.point.expiresAt <= Date.now();
+    if (restore.point.status !== 'rolled_back' && !expired) {
+      throw Object.assign(new Error('只能清理已经使用或已经过期的恢复资产。'), {
+        code: 'validation',
+      });
+    }
+    restore.point.status = 'expired';
+    restore.point.remoteAssetId = null;
+    restore.point.updatedAt = Date.now();
+    return clone(restore);
   },
   cancelOperation: async (runId: string) => {
     const details = requirePreviewOperation(runId);

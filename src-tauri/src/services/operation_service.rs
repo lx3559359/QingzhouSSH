@@ -25,7 +25,8 @@ use crate::{
             OperationFilter, OperationPhase, OperationRunRecord, OperationStatus,
             OperationStepStatus,
         },
-        operation_restore::OperationRestorePointStatus,
+        operation_restore::{OperationRestorePoint, OperationRestorePointStatus},
+        server::ServerProfile,
     },
     error::{AppError, AppResult},
     repositories::operation_repository::OperationRepository,
@@ -57,6 +58,56 @@ pub struct OperationStartRequest {
     pub confirmed_preview_id: Option<Uuid>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct OperationConfirmRequest {
+    pub task_id: String,
+    pub task_version: i32,
+    pub parameters: Value,
+    pub confirmation_token: Uuid,
+}
+
+impl From<OperationConfirmRequest> for OperationStartRequest {
+    fn from(value: OperationConfirmRequest) -> Self {
+        Self {
+            task_id: value.task_id,
+            task_version: value.task_version,
+            parameters: value.parameters,
+            confirmed_preview_id: Some(value.confirmation_token),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OperationPreviewServer {
+    pub id: String,
+    pub name: String,
+    pub host: String,
+    pub port: u16,
+    pub username: String,
+}
+
+impl From<ServerProfile> for OperationPreviewServer {
+    fn from(value: ServerProfile) -> Self {
+        Self {
+            id: value.id,
+            name: value.name,
+            host: value.host,
+            port: value.port,
+            username: value.username,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OperationDisconnectRisk {
+    pub may_disconnect: bool,
+    pub explanation: Option<String>,
+    pub automatic_recovery_seconds: Option<u64>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct OperationPreview {
@@ -71,6 +122,31 @@ pub struct OperationPreview {
     pub status: OperationStatus,
     pub step_titles: Vec<String>,
     pub estimated_seconds: u32,
+    pub confirmation_token: Option<Uuid>,
+    pub server: OperationPreviewServer,
+    pub permission_summary: String,
+    pub current_state_summary: String,
+    pub target_state_summary: String,
+    pub backup_summary: Vec<String>,
+    pub disconnect_risk: OperationDisconnectRisk,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OperationRecoveryResult {
+    pub operation: OperationDetails,
+    pub what_happened: String,
+    pub server_may_have_changed: bool,
+    pub state_confirmed: bool,
+    pub next_step: String,
+    pub restore_point: Option<OperationRestorePoint>,
+    pub technical_details: Option<String>,
+}
+
+struct OperationPreviewContext {
+    server: ServerProfile,
+    permission_summary: String,
+    current_state_summary: String,
 }
 
 #[derive(Clone)]
@@ -125,7 +201,7 @@ impl OperationService {
         } else {
             None
         };
-        if definition.risk_level == RiskLevel::Dangerous {
+        let current_state_summary = if definition.risk_level == RiskLevel::Dangerous {
             let plan = match plan_task(&definition, &connected.capabilities, &request.parameters) {
                 Ok(plan) => plan,
                 Err(error) => {
@@ -134,24 +210,37 @@ impl OperationService {
                     return Err(error);
                 }
             };
-            if let Err(error) = run_dangerous_preview(
+            match run_dangerous_preview(
                 &connected.session,
                 &plan.preview_steps,
                 privilege_mode.unwrap_or(PrivilegeMode::Root),
+                &connected.redactor,
             )
             .await
             {
-                self.mark_preflight_failed(run.id).await;
-                connected.session.disconnect().await;
-                return Err(error);
+                Ok(summary) => summary,
+                Err(error) => {
+                    self.mark_preflight_failed(run.id).await;
+                    connected.session.disconnect().await;
+                    return Err(error);
+                }
             }
-        }
+        } else {
+            "只读任务将在执行时读取服务器当前状态".into()
+        };
+        let server = connected.profile.clone();
+        let permission_summary = permission_summary(definition.privilege, privilege_mode);
         let result = self
             .complete_preflight(
                 run,
                 &definition,
                 &request.parameters,
                 &connected.capabilities,
+                OperationPreviewContext {
+                    server,
+                    permission_summary,
+                    current_state_summary,
+                },
             )
             .await;
         connected.session.disconnect().await;
@@ -166,8 +255,20 @@ impl OperationService {
         capabilities: &SystemCapabilities,
     ) -> AppResult<OperationPreview> {
         let (definition, run) = self.begin_preflight(server_id, &request).await?;
-        self.complete_preflight(run, &definition, &request.parameters, capabilities)
-            .await
+        let server = self.connector.require_server(server_id).await?;
+        let permission = permission_summary(definition.privilege, None);
+        self.complete_preflight(
+            run,
+            &definition,
+            &request.parameters,
+            capabilities,
+            OperationPreviewContext {
+                server,
+                permission_summary: permission,
+                current_state_summary: "测试能力预检未读取远程当前状态".into(),
+            },
+        )
+        .await
     }
 
     pub async fn start<E: EventSink>(
@@ -1025,6 +1126,7 @@ impl OperationService {
                     .await?;
             }
             IpRecoveryState::RolledBack => {
+                self.restores.mark_remote_rollback_observed(run_id).await?;
                 let result = OperationResult {
                     status: OperationConclusion::Warning,
                     summary: "远端超时保护已把网络恢复到修改前状态".into(),
@@ -1042,6 +1144,156 @@ impl OperationService {
             }
         }
         self.require_details(run_id).await
+    }
+
+    pub async fn inspect_uncertain(&self, run_id: Uuid) -> AppResult<OperationRecoveryResult> {
+        let operation = self.reconcile_ip_change(run_id).await?;
+        let restore_point = self
+            .restores
+            .list_by_run(run_id)
+            .await?
+            .into_iter()
+            .next()
+            .map(|details| details.point);
+        let state_confirmed = operation.run.status != OperationStatus::Uncertain;
+        let (what_happened, next_step) = match operation.run.status {
+            OperationStatus::Succeeded => (
+                "已重新连接服务器并确认修改后的状态".into(),
+                "可以继续使用该服务器；恢复点会保留到手动清理".into(),
+            ),
+            OperationStatus::RolledBack => (
+                "远程超时保护已经把服务器恢复到修改前状态".into(),
+                "请确认原地址连接正常，再重新发起修改".into(),
+            ),
+            _ => (
+                "服务器仍在自动恢复保护窗口内，当前状态尚未最终确认".into(),
+                "等待自动恢复窗口结束后再次检查，不要重复修改网络".into(),
+            ),
+        };
+        Ok(OperationRecoveryResult {
+            operation,
+            what_happened,
+            server_may_have_changed: !state_confirmed,
+            state_confirmed,
+            next_step,
+            restore_point,
+            technical_details: None,
+        })
+    }
+
+    pub async fn rollback_operation(
+        &self,
+        restore_point_id: Uuid,
+    ) -> AppResult<OperationRecoveryResult> {
+        let restore = self
+            .restores
+            .get(restore_point_id)
+            .await?
+            .ok_or_else(|| AppError::Validation("恢复点不存在".into()))?;
+        if !matches!(
+            restore.point.status,
+            OperationRestorePointStatus::Available
+                | OperationRestorePointStatus::Partial
+                | OperationRestorePointStatus::Failed
+        ) {
+            return Err(AppError::RestorePointAlreadyConsumed);
+        }
+        let run_id = restore.point.operation_run_id;
+        let operation = self.require_details(run_id).await?;
+        match operation.run.status {
+            OperationStatus::Succeeded
+            | OperationStatus::Failed
+            | OperationStatus::Uncertain
+            | OperationStatus::RollbackPartial
+            | OperationStatus::RollbackFailed => {
+                self.repository
+                    .transition(run_id, OperationStatus::RollbackAvailable)
+                    .await?;
+            }
+            OperationStatus::RollbackAvailable => {}
+            _ => {
+                return Err(AppError::Validation("当前运维状态不允许手动回滚".into()));
+            }
+        }
+        self.repository
+            .transition(run_id, OperationStatus::RollingBack)
+            .await?;
+        self.repository
+            .mark_step_running(run_id, OperationPhase::Rollback, 0, now_millis())
+            .await?;
+
+        let rollback = self
+            .restores
+            .rollback(restore_point_id, CancellationToken::new())
+            .await;
+        let (step_status, run_status, what_happened, next_step, technical_details) = match rollback
+        {
+            Ok(details) if details.point.status == OperationRestorePointStatus::RolledBack => (
+                OperationStepStatus::Succeeded,
+                OperationStatus::RolledBack,
+                "已按恢复点还原修改前状态".into(),
+                "请重新检查对应服务或配置是否恢复正常".into(),
+                None,
+            ),
+            Ok(details) => (
+                OperationStepStatus::Failed,
+                OperationStatus::RollbackPartial,
+                "只完成了部分恢复，服务器可能仍有变化".into(),
+                "请停止继续修改，并查看恢复点明细后人工处理".into(),
+                Some(format!("restoreStatus={}", details.point.status.as_str())),
+            ),
+            Err(error) => {
+                let uncertain = operation_status_for_error(&error) == OperationStatus::Uncertain;
+                (
+                    if uncertain {
+                        OperationStepStatus::Uncertain
+                    } else {
+                        OperationStepStatus::Failed
+                    },
+                    if uncertain {
+                        OperationStatus::Uncertain
+                    } else {
+                        OperationStatus::RollbackFailed
+                    },
+                    if uncertain {
+                        "回滚期间连接中断，无法确认服务器最终状态".into()
+                    } else {
+                        "恢复点回滚失败，服务器可能仍有变化".into()
+                    },
+                    "不要重复执行修改；请先重新连接并检查服务器状态".into(),
+                    Some(cap_text(error.to_string(), 8 * 1024)),
+                )
+            }
+        };
+        self.repository
+            .finish_step(FinishOperationStep {
+                run_id,
+                phase: OperationPhase::Rollback,
+                step_index: 0,
+                status: step_status,
+                execution_id: None,
+                output_summary: (step_status == OperationStepStatus::Succeeded)
+                    .then(|| "恢复点已经应用并核验".into()),
+                error_message: technical_details.clone(),
+                finished_at: now_millis(),
+            })
+            .await?;
+        self.repository.transition(run_id, run_status).await?;
+        let operation = self.require_details(run_id).await?;
+        let restore_point = self
+            .restores
+            .get(restore_point_id)
+            .await?
+            .map(|details| details.point);
+        Ok(OperationRecoveryResult {
+            server_may_have_changed: run_status != OperationStatus::RolledBack,
+            state_confirmed: run_status == OperationStatus::RolledBack,
+            operation,
+            what_happened,
+            next_step,
+            restore_point,
+            technical_details,
+        })
     }
 
     pub async fn get(&self, id: Uuid) -> AppResult<Option<OperationDetails>> {
@@ -1122,6 +1374,7 @@ impl OperationService {
         definition: &TaskDefinition,
         parameters: &Value,
         capabilities: &SystemCapabilities,
+        context: OperationPreviewContext,
     ) -> AppResult<OperationPreview> {
         let plan = match plan_task(definition, capabilities, parameters) {
             Ok(plan) => plan,
@@ -1137,6 +1390,20 @@ impl OperationService {
         self.repository
             .transition(run.id, OperationStatus::PreviewReady)
             .await?;
+        let target_state_summary = parameter_summary(&plan.parameters)
+            .unwrap_or_else(|| "此任务没有需要填写的目标参数".into());
+        let backup_summary = plan
+            .backup_plan
+            .as_ref()
+            .map(|backup| {
+                backup
+                    .items
+                    .iter()
+                    .map(|item| format!("执行前备份：{}", item.id))
+                    .collect()
+            })
+            .unwrap_or_default();
+        let disconnect_risk = disconnect_risk(definition, &plan.parameters);
         let summary = plan.public_summary();
         Ok(OperationPreview {
             preview_id: run.id,
@@ -1150,6 +1417,13 @@ impl OperationService {
             status: OperationStatus::PreviewReady,
             step_titles: summary.step_titles,
             estimated_seconds: summary.estimated_seconds,
+            confirmation_token: (summary.risk_level == RiskLevel::Dangerous).then_some(run.id),
+            server: context.server.into(),
+            permission_summary: context.permission_summary,
+            current_state_summary: context.current_state_summary,
+            target_state_summary,
+            backup_summary,
+            disconnect_risk,
         })
     }
 
@@ -1359,6 +1633,18 @@ fn parser_warning_result(summary: &str, error: AppError) -> OperationResult {
     }
 }
 
+fn cap_text(mut value: String, limit: usize) -> String {
+    if value.len() <= limit {
+        return value;
+    }
+    let mut boundary = limit;
+    while !value.is_char_boundary(boundary) {
+        boundary -= 1;
+    }
+    value.truncate(boundary);
+    value
+}
+
 fn elevate_steps(
     steps: &[RenderedTaskStep],
     privilege_mode: PrivilegeMode,
@@ -1424,7 +1710,9 @@ async fn run_dangerous_preview(
     session: &crate::core::ssh::transport::AuthenticatedSshSession,
     steps: &[RenderedTaskStep],
     privilege_mode: PrivilegeMode,
-) -> AppResult<()> {
+    redactor: &Redactor,
+) -> AppResult<String> {
+    let mut summary = String::new();
     for step in steps {
         let command = elevate_fixed_command(&step.command, privilege_mode)?;
         let output = tokio::time::timeout(
@@ -1434,10 +1722,75 @@ async fn run_dangerous_preview(
         .await
         .map_err(|_| AppError::RemoteStateUncertain("危险任务只读预演超时".into()))??;
         if output.exit_status != 0 {
-            return Err(AppError::ssh_command(output.exit_status, output.stderr));
+            return Err(AppError::ssh_command(
+                output.exit_status,
+                redactor.redact(&output.stderr),
+            ));
+        }
+        append_capped_summary(&mut summary, &redactor.redact(&output.stdout), 8 * 1024);
+    }
+    if summary.trim().is_empty() {
+        Ok("预演检查通过，未返回额外状态信息".into())
+    } else {
+        Ok(summary)
+    }
+}
+
+fn append_capped_summary(summary: &mut String, value: &str, limit: usize) {
+    if summary.len() >= limit {
+        return;
+    }
+    if !summary.is_empty() {
+        summary.push('\n');
+    }
+    let remaining = limit.saturating_sub(summary.len());
+    if value.len() <= remaining {
+        summary.push_str(value.trim());
+        return;
+    }
+    let mut boundary = remaining;
+    while boundary > 0 && !value.is_char_boundary(boundary) {
+        boundary -= 1;
+    }
+    summary.push_str(value[..boundary].trim());
+}
+
+fn permission_summary(requirement: PrivilegeRequirement, mode: Option<PrivilegeMode>) -> String {
+    match (requirement, mode) {
+        (PrivilegeRequirement::CurrentUser, _) => "使用当前 SSH 用户权限".into(),
+        (PrivilegeRequirement::RootOrPasswordlessSudo, Some(PrivilegeMode::Root)) => {
+            "服务器当前账号为 root".into()
+        }
+        (PrivilegeRequirement::RootOrPasswordlessSudo, Some(PrivilegeMode::PasswordlessSudo)) => {
+            "服务器已配置免密 sudo；客户端不会接收 sudo 密码".into()
+        }
+        (PrivilegeRequirement::RootOrPasswordlessSudo, None) => {
+            "执行前必须确认 root 或免密 sudo 权限".into()
         }
     }
-    Ok(())
+}
+
+fn disconnect_risk(
+    definition: &TaskDefinition,
+    parameters: &ValidatedParameters,
+) -> OperationDisconnectRisk {
+    if definition.id == "network.ip_change" {
+        let seconds = parameters
+            .get("rollbackSeconds")
+            .and_then(|parameter| parameter.value.as_u64());
+        return OperationDisconnectRisk {
+            may_disconnect: true,
+            explanation: Some(
+                "修改服务器 IP 可能中断当前连接；客户端会先安排远程超时自动恢复".into(),
+            ),
+            automatic_recovery_seconds: seconds,
+        };
+    }
+    OperationDisconnectRisk {
+        may_disconnect: false,
+        explanation: None,
+        automatic_recovery_seconds: None,
+    }
 }
 
 fn execution_history_category(category: TaskCategory) -> &'static str {
