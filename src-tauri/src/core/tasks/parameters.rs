@@ -122,12 +122,7 @@ fn validate_value(parameter: &ParameterDefinition, value: &Value) -> AppResult<S
         }
         ParameterKind::ServiceName => {
             let value = required_string(parameter, value)?;
-            if value.is_empty()
-                || value.len() > 255
-                || !value.bytes().all(|byte| {
-                    byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-' | b'.' | b'@')
-                })
-            {
+            if !is_service_name(value) {
                 return Err(invalid(parameter));
             }
             Ok(shell_quote(value))
@@ -236,7 +231,31 @@ fn validate_value(parameter: &ParameterDefinition, value: &Value) -> AppResult<S
             }
             Ok(shell_values.join(" "))
         }
+        ParameterKind::ServiceMultiSelect { max_items } => {
+            let values = value.as_array().ok_or_else(|| invalid(parameter))?;
+            if values.is_empty() || values.len() > *max_items {
+                return Err(invalid(parameter));
+            }
+            let mut seen = BTreeSet::new();
+            let mut shell_values = Vec::with_capacity(values.len());
+            for value in values {
+                let value = required_string(parameter, value)?;
+                if !is_service_name(value) || !seen.insert(value) {
+                    return Err(invalid(parameter));
+                }
+                shell_values.push(shell_quote(value));
+            }
+            Ok(shell_values.join(" "))
+        }
     }
+}
+
+fn is_service_name(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 255
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-' | b'.' | b'@'))
 }
 
 pub fn script_parameter_env_name(name: &str) -> AppResult<String> {

@@ -88,7 +88,8 @@ export type ParameterKind =
   | { type: 'containerName' }
   | { type: 'fileMode' }
   | { type: 'cronExpression' }
-  | { type: 'multiSelect'; options: string[]; maxItems: number };
+  | { type: 'multiSelect'; options: string[]; maxItems: number }
+  | { type: 'serviceMultiSelect'; maxItems: number };
 
 export interface ParameterDefinition {
   name: string;

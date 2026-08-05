@@ -188,3 +188,37 @@ async fn structured_operation_result_is_persisted_only_for_active_run() {
         .await
         .is_err());
 }
+
+#[tokio::test]
+async fn failed_multistep_run_marks_remaining_steps_skipped() {
+    let (_root, database, server) = harness().await;
+    let repo = OperationRepository::new(database.pool().clone());
+    let run = repo
+        .create(NewOperationRun {
+            server_id: server.id,
+            task_id: "runbook.cpu.incident".into(),
+            task_version: 2,
+            risk_level: RiskLevel::Safe,
+            parameters_summary: None,
+        })
+        .await
+        .unwrap();
+    for index in 0..3 {
+        repo.create_step(NewOperationStep {
+            run_id: run.id,
+            phase: OperationPhase::Execute,
+            step_index: index,
+            step_id: format!("step-{index}"),
+            title: format!("步骤 {index}"),
+        })
+        .await
+        .unwrap();
+    }
+    repo.skip_pending_steps(run.id, OperationPhase::Execute, 2)
+        .await
+        .unwrap();
+    let details = repo.get(run.id).await.unwrap().unwrap();
+    assert_eq!(details.steps[0].status, OperationStepStatus::Pending);
+    assert_eq!(details.steps[1].status, OperationStepStatus::Pending);
+    assert_eq!(details.steps[2].status, OperationStepStatus::Skipped);
+}

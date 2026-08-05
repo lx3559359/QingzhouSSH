@@ -138,6 +138,24 @@ impl OperationRepository {
         .await
     }
 
+    pub async fn skip_pending_steps(
+        &self,
+        run_id: Uuid,
+        phase: OperationPhase,
+        from_index: usize,
+    ) -> AppResult<u64> {
+        let result = sqlx::query(
+            "UPDATE operation_steps SET status='skipped',finished_at=? WHERE run_id=? AND phase=? AND step_index>=? AND status='pending'",
+        )
+        .bind(now_millis())
+        .bind(run_id.to_string())
+        .bind(phase.as_str())
+        .bind(index_to_i64(from_index)?)
+        .execute(&self.pool)
+        .await?;
+        Ok(result.rows_affected())
+    }
+
     pub async fn get(&self, id: Uuid) -> AppResult<Option<OperationDetails>> {
         let Some(row) = sqlx::query(
             "SELECT id,server_id,task_id,task_version,risk_level,status,parameters_summary,result_json,error_category,error_message,created_at,updated_at,finished_at FROM operation_runs WHERE id=?",

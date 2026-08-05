@@ -10,7 +10,7 @@ use crate::{
         tasks::{
             built_in_catalog, parse_result, plan_task, select_implementation,
             task_version_is_compatible, validate_parameters, ExecutionScope, PlannedTask,
-            PrivilegeRequirement, RiskLevel, TaskDefinition, ValidatedParameters,
+            PrivilegeRequirement, RiskLevel, TaskCategory, TaskDefinition, ValidatedParameters,
         },
     },
     domain::{
@@ -198,7 +198,7 @@ impl OperationService {
                         server_id,
                         &definition.id,
                         definition.version,
-                        definition.category.as_str(),
+                        execution_history_category(definition.category),
                         step,
                         &history_parameters,
                         &mut capture,
@@ -221,6 +221,13 @@ impl OperationService {
                         })
                         .await?;
                     self.repository
+                        .skip_pending_steps(
+                            preview_id,
+                            OperationPhase::Execute,
+                            index.saturating_add(1),
+                        )
+                        .await?;
+                    self.repository
                         .transition(preview_id, OperationStatus::Failed)
                         .await?;
                     return Err(error);
@@ -240,6 +247,13 @@ impl OperationService {
                 })
                 .await?;
             if let Some(run_status) = run_status {
+                self.repository
+                    .skip_pending_steps(
+                        preview_id,
+                        OperationPhase::Execute,
+                        index.saturating_add(1),
+                    )
+                    .await?;
                 self.repository.transition(preview_id, run_status).await?;
                 return self.require_details(preview_id).await;
             }
@@ -496,6 +510,21 @@ fn statuses_for_execution(
         ExecutionStatus::Queued | ExecutionStatus::Running | ExecutionStatus::Failed => {
             (OperationStepStatus::Failed, Some(OperationStatus::Failed))
         }
+    }
+}
+
+fn execution_history_category(category: TaskCategory) -> &'static str {
+    match category {
+        TaskCategory::System => "system",
+        TaskCategory::Service => "service",
+        TaskCategory::Logs => "logs",
+        TaskCategory::Storage
+        | TaskCategory::Network
+        | TaskCategory::Security
+        | TaskCategory::Web
+        | TaskCategory::Container
+        | TaskCategory::Script
+        | TaskCategory::Advanced => "advanced",
     }
 }
 

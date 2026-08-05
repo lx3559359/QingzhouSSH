@@ -146,6 +146,45 @@ async fn safe_run_links_the_existing_execution_even_when_connection_fails() {
 }
 
 #[tokio::test]
+async fn new_diagnostic_categories_use_the_compatible_history_category() {
+    let (root, services, server) = fixture().await;
+    let operations = services.operation_service();
+    let request = OperationPreflightRequest {
+        task_id: "storage.mounts_inode".into(),
+        task_version: 2,
+        parameters: json!({}),
+    };
+    let capabilities = capabilities("systemd", &["df"]);
+    let preview = operations
+        .preflight_with_capabilities(&server.id, request.clone(), &capabilities)
+        .await
+        .unwrap();
+    let mut events = VecEventSink::default();
+    let details = operations
+        .start_with_capabilities(
+            &server.id,
+            OperationStartRequest {
+                task_id: request.task_id,
+                task_version: request.task_version,
+                parameters: request.parameters,
+                confirmed_preview_id: Some(preview.preview_id),
+            },
+            &capabilities,
+            &mut events,
+        )
+        .await
+        .unwrap();
+    assert_eq!(details.run.status, OperationStatus::Failed);
+
+    let database = Database::open(root.path()).await.unwrap();
+    let category: String = sqlx::query_scalar("SELECT category FROM executions LIMIT 1")
+        .fetch_one(database.pool())
+        .await
+        .unwrap();
+    assert_eq!(category, "advanced");
+}
+
+#[tokio::test]
 async fn dangerous_run_without_confirmation_creates_no_execution() {
     let (root, services, server) = fixture().await;
     let operations = services.operation_service();

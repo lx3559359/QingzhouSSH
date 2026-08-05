@@ -118,13 +118,24 @@ fn validate_discovered_targets(
     for parameter in &definition.parameters {
         let Some(value) = parameters
             .get(&parameter.name)
-            .and_then(|parameter| parameter.value.as_str())
+            .map(|parameter| &parameter.value)
         else {
             continue;
         };
         let available = match &parameter.kind {
-            ParameterKind::ServiceName => capabilities.has_service(value),
-            ParameterKind::ContainerName => capabilities.has_container(value),
+            ParameterKind::ServiceName => value
+                .as_str()
+                .is_some_and(|value| capabilities.has_service(value)),
+            ParameterKind::ContainerName => value
+                .as_str()
+                .is_some_and(|value| capabilities.has_container(value)),
+            ParameterKind::ServiceMultiSelect { .. } => value.as_array().is_some_and(|values| {
+                values.iter().all(|value| {
+                    value
+                        .as_str()
+                        .is_some_and(|value| capabilities.has_service(value))
+                })
+            }),
             _ => continue,
         };
         if !available {

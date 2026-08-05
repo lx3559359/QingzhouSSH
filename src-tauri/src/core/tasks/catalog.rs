@@ -13,6 +13,7 @@ const SUPPORTED_FAMILIES: [&str; 3] = ["debian", "rhel", "openeuler"];
 mod containers;
 mod helpers;
 mod network;
+mod runbooks;
 mod security;
 mod services;
 mod storage;
@@ -34,6 +35,7 @@ pub fn built_in_catalog() -> Vec<TaskDefinition> {
     catalog.extend(services::tasks());
     catalog.extend(web::tasks());
     catalog.extend(containers::tasks());
+    catalog.extend(runbooks::tasks());
 
     let mut ids = BTreeSet::new();
     catalog.retain(|definition| {

@@ -200,6 +200,17 @@ pub(super) fn service_parameter() -> ParameterDefinition {
     )
 }
 
+pub(super) fn service_multi_parameter(max_items: usize) -> ParameterDefinition {
+    parameter(
+        "services",
+        "服务",
+        "从服务器已发现的服务中选择一个或多个",
+        ParameterKind::ServiceMultiSelect { max_items },
+        true,
+        None,
+    )
+}
+
 pub(super) fn container_parameter() -> ParameterDefinition {
     parameter(
         "container",

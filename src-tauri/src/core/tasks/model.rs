@@ -95,6 +95,9 @@ pub enum ParameterKind {
         options: Vec<String>,
         max_items: usize,
     },
+    ServiceMultiSelect {
+        max_items: usize,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

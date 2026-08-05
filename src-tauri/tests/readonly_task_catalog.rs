@@ -47,6 +47,18 @@ const REQUIRED_READONLY_IDS: &[&str] = &[
     "container.inspect",
 ];
 
+const RUNBOOK_IDS: &[&str] = &[
+    "runbook.health.baseline",
+    "runbook.cpu.incident",
+    "runbook.memory.oom",
+    "runbook.storage.capacity_io",
+    "runbook.network.intermittent",
+    "runbook.security.ssh_audit",
+    "runbook.web.gateway",
+    "runbook.container.runtime",
+    "runbook.service.incident",
+];
+
 #[test]
 fn readonly_catalog_contains_every_stable_id_once() {
     let catalog = built_in_catalog();
@@ -248,6 +260,49 @@ fn service_web_and_container_targets_follow_discovery() {
         &catalog["container.inspect"],
         &docker,
         &json!({"container":"database","action":"inspect","lines":100})
+    )
+    .is_err());
+}
+
+#[test]
+fn builtin_runbooks_are_safe_bounded_multistep_plans() {
+    let catalog = by_id();
+    for id in RUNBOOK_IDS {
+        let task = &catalog[*id];
+        assert_eq!(task.risk_level, RiskLevel::Safe, "{id}");
+        assert_eq!(task.scope, ExecutionScope::ReadOnlyBatch, "{id}");
+        for implementation in &task.implementations {
+            assert!(
+                (2..=6).contains(&implementation.execution_steps.len()),
+                "{id}"
+            );
+            assert!(implementation.execution_steps.iter().all(|step| {
+                step.timeout_seconds <= 120 && step.output_limit_bytes <= 1024 * 1024
+            }));
+        }
+    }
+
+    let service_runbook = &catalog["runbook.service.incident"];
+    assert!(matches!(
+        service_runbook.parameters[0].kind,
+        ParameterKind::ServiceMultiSelect { max_items: 10 }
+    ));
+    let capabilities = detected_capabilities(
+        "systemd",
+        &["systemctl", "ps", "journalctl"],
+        &["nginx.service", "sshd.service"],
+        &[],
+    );
+    assert!(plan_task(
+        service_runbook,
+        &capabilities,
+        &json!({"services":["nginx.service","sshd.service"]})
+    )
+    .is_ok());
+    assert!(plan_task(
+        service_runbook,
+        &capabilities,
+        &json!({"services":["missing.service"]})
     )
     .is_err());
 }
