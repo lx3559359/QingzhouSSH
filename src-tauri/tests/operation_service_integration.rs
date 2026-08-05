@@ -6,7 +6,7 @@ use qingzhou_ssh_lib::{
         system_probe::SystemCapabilities, tasks::RiskLevel,
     },
     domain::{
-        operation::{OperationStatus, OperationStepStatus},
+        operation::{OperationFilter, OperationStatus, OperationStepStatus},
         server::{CreateServerRequest, CredentialInput, ServerProfile},
     },
     error::AppResult,
@@ -223,6 +223,39 @@ async fn confirmed_preview_cannot_be_reused_with_different_parameters() {
         .await
         .unwrap();
     assert_eq!(count, 0);
+}
+
+#[tokio::test]
+async fn preview_ready_operations_can_be_filtered_and_cancelled() {
+    let (_root, services, server) = fixture().await;
+    let operations = services.operation_service();
+    let preview = operations
+        .preflight_with_capabilities(
+            &server.id,
+            OperationPreflightRequest {
+                task_id: "system.overview".into(),
+                task_version: 2,
+                parameters: json!({}),
+            },
+            &capabilities("systemd", &["uptime", "uname", "df", "ps"]),
+        )
+        .await
+        .unwrap();
+
+    let preview_ready = operations
+        .list(OperationFilter {
+            server_id: Some(server.id.clone()),
+            status: Some(OperationStatus::PreviewReady),
+            ..OperationFilter::default()
+        })
+        .await
+        .unwrap();
+    assert_eq!(preview_ready.len(), 1);
+    assert_eq!(preview_ready[0].id, preview.preview_id);
+
+    operations.cancel(preview.preview_id).await.unwrap();
+    let details = operations.get(preview.preview_id).await.unwrap().unwrap();
+    assert_eq!(details.run.status, OperationStatus::Cancelled);
 }
 
 #[test]

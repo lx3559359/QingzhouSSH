@@ -40,6 +40,9 @@ const tasks: TaskAvailability[] = [
       title: '系统概览',
       description: '查看系统状态',
       riskLevel: 'safe',
+      estimatedSeconds: 30,
+      privilege: 'current_user',
+      scope: 'read_only_batch',
       parameters: [],
       implementations: [],
       outputKind: 'key_value',
@@ -55,6 +58,9 @@ const tasks: TaskAvailability[] = [
       title: '重启服务',
       description: '重启指定服务',
       riskLevel: 'dangerous',
+      estimatedSeconds: 30,
+      privilege: 'root_or_passwordless_sudo',
+      scope: 'single_server',
       parameters: [
         {
           name: 'service',

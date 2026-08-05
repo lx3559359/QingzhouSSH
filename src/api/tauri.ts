@@ -14,6 +14,13 @@ import type {
   HostKeyObservation,
   LogResultPage,
   LogSearchRequest,
+  OperationEvent,
+  OperationFilter,
+  OperationPreflightRequest,
+  OperationPreview,
+  OperationRunDetails,
+  OperationRunRecord,
+  OperationStartRequest,
   ServerProfile,
   SystemCapabilities,
   TaskAvailability,
@@ -36,6 +43,7 @@ import { dataRootPreviewApi, previewApi } from './preview';
 export { normalizeAppError as asAppError } from './errors';
 
 export type ExecutionEventHandler = (event: ExecutionEvent) => void;
+export type OperationEventHandler = (event: OperationEvent) => void;
 
 function createMonotonicChannel<T extends { sequence: number }>(onEvent: (event: T) => void) {
   const channel = new Channel<T>();
@@ -131,6 +139,26 @@ export const tauriApi = {
     invoke<ExecutionRecord[]>('list_executions', { filter }),
   getExecution: (executionId: string) =>
     invoke<ExecutionDetails | null>('get_execution', { executionId }),
+  listOperationsTasks: (serverId: string) =>
+    invoke<TaskAvailability[]>('list_operations_tasks', { serverId }),
+  preflightOperation: (serverId: string, request: OperationPreflightRequest) =>
+    invoke<OperationPreview>('preflight_operation', { serverId, request }),
+  startOperation: (
+    serverId: string,
+    request: OperationStartRequest,
+    onEvent: OperationEventHandler,
+  ) =>
+    invoke<OperationRunDetails>('start_operation', {
+      serverId,
+      request,
+      onEvent: createMonotonicChannel(onEvent),
+    }),
+  cancelOperation: (runId: string) =>
+    invoke<void>('cancel_operation', { runId }),
+  getOperation: (runId: string) =>
+    invoke<OperationRunDetails | null>('get_operation', { runId }),
+  listOperations: (filter: OperationFilter) =>
+    invoke<OperationRunRecord[]>('list_operations', { filter }),
   listWorkflows: () => invoke<WorkflowSummary[]>('list_workflows'),
   getWorkflow: (workflowId: string, version: number | null) =>
     invoke<WorkflowDefinition | null>('get_workflow', { workflowId, version }),

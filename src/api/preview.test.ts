@@ -46,6 +46,29 @@ describe('log search preview API', () => {
   });
 });
 
+describe('operations preview API', () => {
+  it('provides safe and dangerous plans without command text', async () => {
+    const tasks = await previewApi.listOperationsTasks('preview-openeuler');
+    expect(tasks.some((item) => item.definition.riskLevel === 'safe')).toBe(true);
+    expect(tasks.some((item) => item.definition.riskLevel === 'dangerous')).toBe(true);
+
+    const safe = await previewApi.preflightOperation('preview-openeuler', {
+      taskId: 'system.overview',
+      taskVersion: 2,
+      parameters: {},
+    });
+    const dangerous = await previewApi.preflightOperation('preview-openeuler', {
+      taskId: 'service.restart',
+      taskVersion: 2,
+      parameters: { service: 'nginx' },
+    });
+    expect(safe.riskLevel).toBe('safe');
+    expect(dangerous.riskLevel).toBe('dangerous');
+    expect(JSON.stringify([safe, dangerous])).not.toContain('systemctl');
+    expect(JSON.stringify([safe, dangerous])).not.toContain('command');
+  });
+});
+
 describe('workflow preview API', () => {
   it('saves immutable-looking versions and reports validation diagnostics', async () => {
     resetWorkflowPreviewForTests();

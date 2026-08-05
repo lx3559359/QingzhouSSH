@@ -8,6 +8,12 @@ import type {
   ExecutionFile,
   ExecutionFilter,
   LogSearchRequest,
+  OperationFilter,
+  OperationPreflightRequest,
+  OperationPreview,
+  OperationRunDetails,
+  OperationRunRecord,
+  OperationStartRequest,
   HostKeyCheck,
   HostKeyObservation,
   ServerProfile,
@@ -55,11 +61,14 @@ const previewTasks: TaskAvailability[] = [
     reason: null,
     definition: {
       id: 'system.overview',
-      version: 1,
+      version: 2,
       category: 'system',
       title: '系统概览',
       description: '查看运行时间、负载、内存和磁盘摘要',
       riskLevel: 'safe',
+      estimatedSeconds: 30,
+      privilege: 'current_user',
+      scope: 'read_only_batch',
       parameters: [],
       implementations: [
         {
@@ -69,6 +78,13 @@ const previewTasks: TaskAvailability[] = [
             serviceManagers: [],
             requiredCommands: ['uptime'],
           },
+          preflightSteps: [],
+          previewSteps: [{ id: 'preview', title: '执行预演', timeoutSeconds: 30, outputLimitBytes: 1048576 }],
+          backupPlan: null,
+          executionSteps: [{ id: 'execute', title: '执行任务', timeoutSeconds: 30, outputLimitBytes: 1048576 }],
+          verifySteps: [],
+          rollbackPlan: null,
+          resultParser: 'key_value',
         },
       ],
       outputKind: 'key_value',
@@ -79,11 +95,14 @@ const previewTasks: TaskAvailability[] = [
     reason: null,
     definition: {
       id: 'service.restart',
-      version: 1,
+      version: 2,
       category: 'service',
       title: '重启服务',
       description: '重启指定 systemd 服务',
       riskLevel: 'dangerous',
+      estimatedSeconds: 30,
+      privilege: 'current_user',
+      scope: 'single_server',
       parameters: [
         {
           name: 'service',
@@ -103,6 +122,13 @@ const previewTasks: TaskAvailability[] = [
             serviceManagers: ['systemd'],
             requiredCommands: ['systemctl'],
           },
+          preflightSteps: [],
+          previewSteps: [{ id: 'preview', title: '查看当前服务状态', timeoutSeconds: 30, outputLimitBytes: 1048576 }],
+          backupPlan: null,
+          executionSteps: [{ id: 'execute', title: '执行任务', timeoutSeconds: 30, outputLimitBytes: 1048576 }],
+          verifySteps: [],
+          rollbackPlan: null,
+          resultParser: 'service_status',
         },
       ],
       outputKind: 'text',
@@ -164,6 +190,83 @@ function emitPreview(onEvent: (event: ExecutionEvent) => void, details: Executio
     durationMs: 360,
     result: null,
   });
+}
+
+let previewOperationCounter = 0;
+let previewOperations = new Map<string, OperationRunDetails>();
+
+function operationTask(taskId: string, taskVersion: number) {
+  const task = previewTasks.find((item) => item.definition.id === taskId)?.definition;
+  if (!task || task.version !== taskVersion) {
+    throw Object.assign(new Error('找不到指定运维任务或版本。'), { code: 'validation' });
+  }
+  return task;
+}
+
+function createOperationPreview(
+  serverId: string,
+  request: OperationPreflightRequest,
+): OperationPreview {
+  const task = operationTask(request.taskId, request.taskVersion);
+  const implementation = task.implementations[0];
+  const now = Date.now();
+  previewOperationCounter += 1;
+  const previewId = `preview-operation-${previewOperationCounter}`;
+  const steps = implementation.executionSteps.map((step, stepIndex) => ({
+    runId: previewId,
+    phase: 'execute' as const,
+    stepIndex,
+    stepId: step.id,
+    title: step.title,
+    status: 'pending' as const,
+    executionId: null,
+    outputSummary: null,
+    errorMessage: null,
+    startedAt: null,
+    finishedAt: null,
+  }));
+  previewOperations.set(previewId, {
+    run: {
+      id: previewId,
+      serverId,
+      taskId: task.id,
+      taskVersion: task.version,
+      riskLevel: task.riskLevel,
+      status: 'preview_ready',
+      parametersSummary: Object.keys(request.parameters).length
+        ? JSON.stringify(request.parameters)
+        : null,
+      result: null,
+      errorCategory: null,
+      errorMessage: null,
+      createdAt: now,
+      updatedAt: now,
+      finishedAt: null,
+    },
+    steps,
+  });
+  return {
+    previewId,
+    serverId,
+    taskId: task.id,
+    taskVersion: task.version,
+    implementationId: implementation.id,
+    riskLevel: task.riskLevel,
+    privilege: task.privilege,
+    scope: task.scope,
+    status: 'preview_ready',
+    stepTitles: [
+      ...implementation.preflightSteps.map((step) => step.title),
+      ...implementation.executionSteps.map((step) => step.title),
+    ],
+    estimatedSeconds: task.estimatedSeconds,
+  };
+}
+
+function requirePreviewOperation(runId: string) {
+  const details = previewOperations.get(runId);
+  if (!details) throw Object.assign(new Error('找不到运维运行。'), { code: 'validation' });
+  return details;
 }
 
 type StoredWorkflow = {
@@ -843,6 +946,67 @@ export const previewApi = {
     commands: ['grep', 'gzip', 'awk', 'systemctl', 'ps', 'df', 'sh'],
   }),
   listTaskDefinitions: async (_serverId: string) => previewTasks,
+  listOperationsTasks: async (_serverId: string) => previewTasks,
+  preflightOperation: async (serverId: string, request: OperationPreflightRequest) =>
+    createOperationPreview(serverId, request),
+  startOperation: async (
+    serverId: string,
+    request: OperationStartRequest,
+    onEvent: (event: ExecutionEvent) => void,
+  ): Promise<OperationRunDetails> => {
+    const task = operationTask(request.taskId, request.taskVersion);
+    if (task.riskLevel === 'dangerous' && !request.confirmedPreviewId) {
+      throw Object.assign(new Error('危险任务必须先预览并确认。'), { code: 'validation' });
+    }
+    const previewId = request.confirmedPreviewId
+      ?? createOperationPreview(serverId, request).previewId;
+    const details = requirePreviewOperation(previewId);
+    if (
+      details.run.serverId !== serverId
+      || details.run.taskId !== request.taskId
+      || details.run.taskVersion !== request.taskVersion
+    ) {
+      throw Object.assign(new Error('确认的预览与任务不一致。'), { code: 'validation' });
+    }
+    if (task.riskLevel === 'dangerous') {
+      details.run.status = 'waiting_confirmation';
+      details.run.updatedAt = Date.now();
+      return clone(details);
+    }
+
+    const execution = createPreviewExecution(serverId, task.id);
+    emitPreview(onEvent, execution);
+    const finishedAt = Date.now();
+    details.run.status = 'succeeded';
+    details.run.updatedAt = finishedAt;
+    details.run.finishedAt = finishedAt;
+    details.steps = details.steps.map((step) => ({
+      ...step,
+      status: 'succeeded',
+      executionId: execution.record.id,
+      outputSummary: execution.record.outputSummary,
+      startedAt: finishedAt - 100,
+      finishedAt,
+    }));
+    return clone(details);
+  },
+  cancelOperation: async (runId: string) => {
+    const details = requirePreviewOperation(runId);
+    details.run.status = 'cancelled';
+    details.run.updatedAt = Date.now();
+    details.run.finishedAt = details.run.updatedAt;
+  },
+  getOperation: async (runId: string) => {
+    const details = previewOperations.get(runId);
+    return details ? clone(details) : null;
+  },
+  listOperations: async (filter: OperationFilter): Promise<OperationRunRecord[]> =>
+    [...previewOperations.values()]
+      .map((details) => details.run)
+      .filter((run) => !filter.serverId || run.serverId === filter.serverId)
+      .filter((run) => !filter.taskId || run.taskId === filter.taskId)
+      .filter((run) => !filter.status || run.status === filter.status)
+      .map(clone),
   startTaskExecution: async (
     serverId: string,
     request: TaskExecutionRequest,

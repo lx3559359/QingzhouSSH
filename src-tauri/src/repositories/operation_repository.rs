@@ -7,8 +7,8 @@ use crate::{
         execution::now_millis,
         operation::{
             FinishOperationStep, NewOperationRun, NewOperationStep, OperationDetails,
-            OperationPhase, OperationRunRecord, OperationStatus, OperationStepRecord,
-            OperationStepStatus,
+            OperationFilter, OperationPhase, OperationRunRecord, OperationStatus,
+            OperationStepRecord, OperationStepStatus,
         },
     },
     error::{AppError, AppResult},
@@ -158,6 +158,28 @@ impl OperationRepository {
         .map(map_step)
         .collect::<AppResult<Vec<_>>>()?;
         Ok(Some(OperationDetails { run, steps }))
+    }
+
+    pub async fn list(&self, filter: OperationFilter) -> AppResult<Vec<OperationRunRecord>> {
+        let status = filter.status.map(|value| value.as_str().to_owned());
+        sqlx::query(
+            "SELECT id,server_id,task_id,task_version,risk_level,status,parameters_summary,result_json,error_category,error_message,created_at,updated_at,finished_at FROM operation_runs WHERE (? IS NULL OR server_id=?) AND (? IS NULL OR task_id=?) AND (? IS NULL OR status=?) AND (? IS NULL OR created_at>=?) AND (? IS NULL OR created_at<=?) ORDER BY created_at DESC,id DESC LIMIT 500",
+        )
+        .bind(filter.server_id.as_deref())
+        .bind(filter.server_id.as_deref())
+        .bind(filter.task_id.as_deref())
+        .bind(filter.task_id.as_deref())
+        .bind(status.as_deref())
+        .bind(status.as_deref())
+        .bind(filter.created_from)
+        .bind(filter.created_from)
+        .bind(filter.created_to)
+        .bind(filter.created_to)
+        .fetch_all(&self.pool)
+        .await?
+        .iter()
+        .map(map_run)
+        .collect()
     }
 
     pub async fn recover_interrupted(&self) -> AppResult<u64> {

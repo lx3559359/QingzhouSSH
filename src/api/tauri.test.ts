@@ -139,6 +139,36 @@ describe('Tauri API wrapper', () => {
     expect(received).toEqual([1, 3]);
   });
 
+  it('uses typed operations IPC without accepting command text', async () => {
+    const preflight = {
+      taskId: 'system.overview',
+      taskVersion: 2,
+      parameters: {},
+    };
+    const start = {
+      ...preflight,
+      confirmedPreviewId: null,
+    };
+
+    await tauriApi.listOperationsTasks('server-1');
+    await tauriApi.preflightOperation('server-1', preflight);
+    await tauriApi.startOperation('server-1', start, () => undefined);
+    await tauriApi.cancelOperation('run-1');
+    await tauriApi.getOperation('run-1');
+    await tauriApi.listOperations({ serverId: 'server-1', status: 'failed' });
+
+    expect(invoke.mock.calls.map(([command, args]) => [command, args && Object.keys(args)])).toEqual([
+      ['list_operations_tasks', ['serverId']],
+      ['preflight_operation', ['serverId', 'request']],
+      ['start_operation', ['serverId', 'request', 'onEvent']],
+      ['cancel_operation', ['runId']],
+      ['get_operation', ['runId']],
+      ['list_operations', ['filter']],
+    ]);
+    expect(JSON.stringify(invoke.mock.calls)).not.toContain('commandTemplate');
+    expect(JSON.stringify(invoke.mock.calls)).not.toContain('"command"');
+  });
+
   it('uses all workflow command names, camelCase arguments and monotonic channels', async () => {
     const draft = {
       id: null,

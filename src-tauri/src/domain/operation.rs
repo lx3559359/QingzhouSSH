@@ -275,6 +275,16 @@ pub struct OperationDetails {
     pub steps: Vec<OperationStepRecord>,
 }
 
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct OperationFilter {
+    pub server_id: Option<String>,
+    pub task_id: Option<String>,
+    pub status: Option<OperationStatus>,
+    pub created_from: Option<i64>,
+    pub created_to: Option<i64>,
+}
+
 #[derive(Debug, Clone)]
 pub struct NewOperationRun {
     pub server_id: String,

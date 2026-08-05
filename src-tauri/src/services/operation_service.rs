@@ -16,7 +16,8 @@ use crate::{
         execution::{now_millis, ExecutionParameter, ExecutionStatus},
         operation::{
             FinishOperationStep, NewOperationRun, NewOperationStep, OperationDetails,
-            OperationPhase, OperationRunRecord, OperationStatus, OperationStepStatus,
+            OperationFilter, OperationPhase, OperationRunRecord, OperationStatus,
+            OperationStepStatus,
         },
     },
     error::{AppError, AppResult},
@@ -247,6 +248,32 @@ impl OperationService {
 
     pub async fn get(&self, id: Uuid) -> AppResult<Option<OperationDetails>> {
         self.repository.get(id).await
+    }
+
+    pub async fn list(&self, filter: OperationFilter) -> AppResult<Vec<OperationRunRecord>> {
+        self.repository.list(filter).await
+    }
+
+    pub async fn cancel(&self, id: Uuid) -> AppResult<()> {
+        let details = self
+            .repository
+            .get(id)
+            .await?
+            .ok_or_else(|| AppError::Validation("运维运行不存在".into()))?;
+        if matches!(
+            details.run.status,
+            OperationStatus::BackingUp
+                | OperationStatus::Running
+                | OperationStatus::Verifying
+                | OperationStatus::RollingBack
+        ) {
+            return Err(AppError::Validation(
+                "任务正在远程执行，请在当前步骤完成取消接入后再取消".into(),
+            ));
+        }
+        self.repository
+            .transition(id, OperationStatus::Cancelled)
+            .await
     }
 
     async fn begin_preflight(

@@ -55,9 +55,21 @@ export type ExecutionStatus =
   | 'cancelled'
   | 'uncertain';
 
-export type TaskCategory = 'system' | 'service' | 'logs' | 'advanced';
+export type TaskCategory =
+  | 'system'
+  | 'storage'
+  | 'network'
+  | 'security'
+  | 'service'
+  | 'logs'
+  | 'web'
+  | 'container'
+  | 'script'
+  | 'advanced';
 export type RiskLevel = 'safe' | 'caution' | 'dangerous';
 export type OutputKind = 'text' | 'table' | 'key_value' | 'log_matches';
+export type PrivilegeRequirement = 'current_user' | 'root_or_passwordless_sudo';
+export type ExecutionScope = 'single_server' | 'read_only_batch';
 
 export type ParameterKind =
   | { type: 'string'; minLength: number; maxLength: number; multiline: boolean }
@@ -66,7 +78,15 @@ export type ParameterKind =
   | { type: 'enum'; options: string[] }
   | { type: 'absolutePath' }
   | { type: 'serviceName' }
-  | { type: 'timeRange' };
+  | { type: 'timeRange' }
+  | { type: 'host' }
+  | { type: 'port' }
+  | { type: 'interfaceName' }
+  | { type: 'cidr' }
+  | { type: 'containerName' }
+  | { type: 'fileMode' }
+  | { type: 'cronExpression' }
+  | { type: 'multiSelect'; options: string[]; maxItems: number };
 
 export interface ParameterDefinition {
   name: string;
@@ -87,7 +107,50 @@ export interface CompatibilityPredicate {
 export interface TaskImplementation {
   id: string;
   compatibility: CompatibilityPredicate;
+  preflightSteps: TaskStepMetadata[];
+  previewSteps: TaskStepMetadata[];
+  backupPlan: BackupPlan | null;
+  executionSteps: TaskStepMetadata[];
+  verifySteps: TaskStepMetadata[];
+  rollbackPlan: RollbackPlan | null;
+  resultParser: ResultParserKind;
 }
+
+export interface TaskStepMetadata {
+  id: string;
+  title: string;
+  timeoutSeconds: number;
+  outputLimitBytes: number;
+}
+
+export type BackupItemKind =
+  | 'remote_file'
+  | 'command_snapshot'
+  | 'managed_block'
+  | 'runtime_state';
+
+export interface BackupItemDefinition {
+  id: string;
+  kind: BackupItemKind;
+}
+
+export interface BackupPlan {
+  items: BackupItemDefinition[];
+}
+
+export interface RollbackPlan {
+  steps: TaskStepMetadata[];
+  automaticOnFailure: boolean;
+}
+
+export type ResultParserKind =
+  | 'text'
+  | 'key_value'
+  | 'table'
+  | 'health_summary'
+  | 'network_probe'
+  | 'service_status'
+  | 'container_status';
 
 export interface TaskDefinition {
   id: string;
@@ -96,6 +159,9 @@ export interface TaskDefinition {
   title: string;
   description: string;
   riskLevel: RiskLevel;
+  estimatedSeconds: number;
+  privilege: PrivilegeRequirement;
+  scope: ExecutionScope;
   parameters: ParameterDefinition[];
   implementations: TaskImplementation[];
   outputKind: OutputKind;
@@ -159,6 +225,103 @@ export interface ExecutionDetails {
   parameters: ExecutionParameter[];
   files: ExecutionFile[];
 }
+
+export type OperationStatus =
+  | 'validating'
+  | 'preflighting'
+  | 'preview_ready'
+  | 'waiting_confirmation'
+  | 'backing_up'
+  | 'running'
+  | 'verifying'
+  | 'succeeded'
+  | 'failed'
+  | 'cancelled'
+  | 'uncertain'
+  | 'rollback_available'
+  | 'rolling_back'
+  | 'rolled_back'
+  | 'rollback_partial'
+  | 'rollback_failed';
+
+export type OperationPhase = 'preflight' | 'backup' | 'execute' | 'verify' | 'rollback';
+export type OperationStepStatus =
+  | 'pending'
+  | 'running'
+  | 'succeeded'
+  | 'failed'
+  | 'cancelled'
+  | 'uncertain'
+  | 'skipped';
+
+export interface OperationPreflightRequest {
+  taskId: string;
+  taskVersion: number;
+  parameters: Record<string, unknown>;
+}
+
+export interface OperationStartRequest extends OperationPreflightRequest {
+  confirmedPreviewId: string | null;
+}
+
+export interface OperationPreview {
+  previewId: string;
+  serverId: string;
+  taskId: string;
+  taskVersion: number;
+  implementationId: string;
+  riskLevel: RiskLevel;
+  privilege: PrivilegeRequirement;
+  scope: ExecutionScope;
+  status: OperationStatus;
+  stepTitles: string[];
+  estimatedSeconds: number;
+}
+
+export interface OperationRunRecord {
+  id: string;
+  serverId: string;
+  taskId: string;
+  taskVersion: number;
+  riskLevel: RiskLevel;
+  status: OperationStatus;
+  parametersSummary: string | null;
+  result: unknown | null;
+  errorCategory: string | null;
+  errorMessage: string | null;
+  createdAt: number;
+  updatedAt: number;
+  finishedAt: number | null;
+}
+
+export interface OperationStepRecord {
+  runId: string;
+  phase: OperationPhase;
+  stepIndex: number;
+  stepId: string;
+  title: string;
+  status: OperationStepStatus;
+  executionId: string | null;
+  outputSummary: string | null;
+  errorMessage: string | null;
+  startedAt: number | null;
+  finishedAt: number | null;
+}
+
+export interface OperationRunDetails {
+  run: OperationRunRecord;
+  steps: OperationStepRecord[];
+}
+
+export interface OperationFilter {
+  serverId?: string;
+  taskId?: string;
+  status?: OperationStatus;
+  createdFrom?: number;
+  createdTo?: number;
+}
+
+export type OperationEvent = ExecutionEvent;
 
 type ExecutionEventBase = { sequence: number; emittedAt: number };
 
