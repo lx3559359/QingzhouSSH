@@ -27,6 +27,7 @@ pub struct ScriptVersion {
     pub body_sha256: String,
     pub parameters: Value,
     pub scan_summary: Value,
+    pub timeout_seconds: u64,
     pub created_at: i64,
 }
 
@@ -57,6 +58,7 @@ pub struct NewScriptVersion {
     pub body: String,
     pub parameters: Value,
     pub scan_summary: Value,
+    pub timeout_seconds: u64,
 }
 
 #[derive(Debug, Clone)]

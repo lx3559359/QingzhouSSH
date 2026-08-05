@@ -33,6 +33,7 @@ fn new_script(title: &str, category: &str, body: &str) -> NewPersonalScript {
             body: body.into(),
             parameters: json!([]),
             scan_summary: json!({"warningCount":0}),
+            timeout_seconds: 300,
         },
     }
 }
@@ -75,6 +76,12 @@ async fn saving_changes_creates_immutable_version_and_soft_delete_preserves_hist
         .unwrap();
     assert_eq!(created.active_version.version_number, 1);
     assert_eq!(created.active_version.body, "echo one");
+    assert_eq!(created.active_version.timeout_seconds, 300);
+    assert_eq!(
+        created.active_version.scan_summary["bodySha256"],
+        created.active_version.body_sha256
+    );
+    assert_eq!(created.active_version.scan_summary["warningCount"], 0);
 
     let v2 = repository
         .save_version(
@@ -83,6 +90,7 @@ async fn saving_changes_creates_immutable_version_and_soft_delete_preserves_hist
                 body: "echo two".into(),
                 parameters: json!([]),
                 scan_summary: json!({"warningCount":0}),
+                timeout_seconds: 300,
             },
         )
         .await
@@ -132,6 +140,19 @@ async fn saving_changes_creates_immutable_version_and_soft_delete_preserves_hist
             .body,
         "echo one"
     );
+}
+
+#[tokio::test]
+async fn repository_rejects_invalid_version_boundaries() {
+    let (_root, _database, repository) = harness().await;
+
+    let mut invalid_timeout = new_script("超时校验", "安全", "echo ok");
+    invalid_timeout.version.timeout_seconds = 0;
+    assert!(repository.create(invalid_timeout).await.is_err());
+
+    let mut invalid_parameters = new_script("参数校验", "安全", "echo ok");
+    invalid_parameters.version.parameters = json!({"unexpected": true});
+    assert!(repository.create(invalid_parameters).await.is_err());
 }
 
 #[tokio::test]
