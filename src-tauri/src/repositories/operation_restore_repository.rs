@@ -126,6 +126,69 @@ impl OperationRestoreRepository {
         )
     }
 
+    pub async fn mark_creation_failed(&self, id: Uuid) -> AppResult<()> {
+        let result = sqlx::query(
+            "UPDATE operation_restore_points SET status='failed',updated_at=? WHERE id=? AND status='creating'",
+        )
+        .bind(now_millis())
+        .bind(id.to_string())
+        .execute(&self.pool)
+        .await?;
+        ensure_one(result.rows_affected(), "恢复点不处于创建状态")
+    }
+
+    pub async fn mark_item_rolling_back(&self, id: Uuid) -> AppResult<()> {
+        let result = sqlx::query(
+            "UPDATE operation_restore_items SET status='rolling_back',error_summary=NULL WHERE id=? AND status IN ('available','failed')",
+        )
+        .bind(id.to_string())
+        .execute(&self.pool)
+        .await?;
+        ensure_one(result.rows_affected(), "恢复项当前状态不允许回滚")
+    }
+
+    pub async fn finish_item_rollback(
+        &self,
+        id: Uuid,
+        status: OperationRestoreItemStatus,
+        error_summary: Option<String>,
+    ) -> AppResult<()> {
+        if !matches!(
+            status,
+            OperationRestoreItemStatus::RolledBack
+                | OperationRestoreItemStatus::Failed
+                | OperationRestoreItemStatus::Skipped
+        ) {
+            return Err(AppError::Validation("恢复项回滚结果状态无效".into()));
+        }
+        let result = sqlx::query(
+            "UPDATE operation_restore_items SET status=?,error_summary=? WHERE id=? AND status='rolling_back'",
+        )
+        .bind(status.as_str())
+        .bind(cap_utf8(error_summary, 8 * 1024))
+        .bind(id.to_string())
+        .execute(&self.pool)
+        .await?;
+        ensure_one(result.rows_affected(), "恢复项不处于回滚执行状态")
+    }
+
+    pub async fn recover_interrupted(&self) -> AppResult<u64> {
+        let mut transaction = self.pool.begin().await?;
+        sqlx::query(
+            "UPDATE operation_restore_items SET status='failed',error_summary='应用退出时恢复项状态未确认' WHERE status='rolling_back'",
+        )
+        .execute(&mut *transaction)
+        .await?;
+        let result = sqlx::query(
+            "UPDATE operation_restore_points SET status='partial',updated_at=? WHERE status='rolling_back'",
+        )
+        .bind(now_millis())
+        .execute(&mut *transaction)
+        .await?;
+        transaction.commit().await?;
+        Ok(result.rows_affected())
+    }
+
     pub async fn begin_rollback(&self, id: Uuid) -> AppResult<()> {
         let result = sqlx::query(
             "UPDATE operation_restore_points SET status='rolling_back',updated_at=? WHERE id=? AND status IN ('available','partial','failed')",
@@ -263,6 +326,9 @@ fn validate_item(draft: &NewOperationRestoreItem) -> AppResult<()> {
     }
     if let Some(relative) = draft.local_relative_path.as_deref() {
         validate_relative_path(relative)?;
+        if relative.ends_with(".partial") {
+            return Err(AppError::Security("临时恢复资产不能登记为可用备份".into()));
+        }
     }
     if draft
         .sha256

@@ -16,6 +16,7 @@ use crate::{
             executor::{EventSink, VecEventSink},
             transport::AuthenticatedSshSession,
         },
+        tasks::prepare_task_restore_destination,
         workflows::resolve_restore_point_path,
     },
     domain::events::{EventSequence, ExecutionEventPayload},
@@ -48,6 +49,22 @@ pub struct TransferOutcome {
     pub bytes: u64,
     pub sha256: String,
     pub location: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct RemoteFileMetadata {
+    pub size: Option<u64>,
+    pub uid: Option<u32>,
+    pub gid: Option<u32>,
+    pub permissions: Option<u32>,
+    pub modified_at: Option<u32>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct OperationFileBackup {
+    pub transfer: Option<TransferOutcome>,
+    pub metadata: Option<RemoteFileMetadata>,
 }
 
 pub fn validate_remote_path(path: &str) -> AppResult<()> {
@@ -300,30 +317,94 @@ pub(crate) async fn backup_remote_file(
 ) -> AppResult<Option<TransferOutcome>> {
     validate_remote_path(remote_path)?;
     let destination = resolve_restore_point_path(data_root, relative_path)?;
-    let partial = local_partial_path(&destination);
+    backup_remote_file_to(
+        ssh,
+        data_root,
+        remote_path,
+        relative_path,
+        &destination,
+        cancel,
+    )
+    .await
+    .map(|backup| backup.transfer)
+}
+
+pub(crate) async fn backup_operation_remote_file(
+    ssh: &AuthenticatedSshSession,
+    data_root: &Path,
+    remote_path: &str,
+    relative_path: &Path,
+    cancel: CancellationToken,
+) -> AppResult<OperationFileBackup> {
+    validate_remote_path(remote_path)?;
+    let destination = prepare_task_restore_destination(data_root, relative_path).await?;
+    let location = relative_path.to_string_lossy().replace('\\', "/");
+    backup_remote_file_to(ssh, data_root, remote_path, &location, &destination, cancel).await
+}
+
+async fn backup_remote_file_to(
+    ssh: &AuthenticatedSshSession,
+    data_root: &Path,
+    remote_path: &str,
+    relative_location: &str,
+    destination: &Path,
+    cancel: CancellationToken,
+) -> AppResult<OperationFileBackup> {
+    let partial = local_partial_path(destination);
     let sftp = open_sftp(ssh).await?;
-    let exists = sftp_try_exists(&sftp, remote_path).await;
-    let exists = match exists {
-        Ok(exists) => exists,
-        Err(error) => {
-            let _ = sftp.close().await;
-            return Err(error);
-        }
+    let metadata = match sftp.symlink_metadata(remote_path).await {
+        Ok(metadata) => metadata,
+        Err(metadata_error) => match sftp_try_exists(&sftp, remote_path).await {
+            Ok(false) => {
+                let _ = sftp.close().await;
+                return Ok(OperationFileBackup {
+                    transfer: None,
+                    metadata: None,
+                });
+            }
+            Ok(true) => {
+                let _ = sftp.close().await;
+                return Err(sftp_error(metadata_error));
+            }
+            Err(error) => {
+                let _ = sftp.close().await;
+                return Err(error);
+            }
+        },
     };
-    if !exists {
+    if metadata.is_symlink() {
         let _ = sftp.close().await;
-        return Ok(None);
+        return Err(AppError::Security(
+            "远程恢复目标是符号链接，已拒绝备份".into(),
+        ));
+    }
+    if !metadata.is_regular() {
+        let _ = sftp.close().await;
+        return Err(AppError::Validation("远程恢复目标必须是普通文件".into()));
     }
     if let Some(parent) = destination.parent() {
         tokio::fs::create_dir_all(parent).await?;
     }
+    if let Ok(existing) = tokio::fs::symlink_metadata(destination).await {
+        let _ = sftp.close().await;
+        return Err(if existing.file_type().is_symlink() {
+            AppError::Security("本地恢复资产目标是符号链接".into())
+        } else {
+            AppError::Security("本地恢复资产目标已经存在".into())
+        });
+    }
     if partial.exists() {
+        let partial_metadata = tokio::fs::symlink_metadata(&partial).await?;
+        if partial_metadata.file_type().is_symlink() || !partial_metadata.is_file() {
+            let _ = sftp.close().await;
+            return Err(AppError::Security("本地临时恢复资产不是普通文件".into()));
+        }
         tokio::fs::remove_file(&partial).await?;
     }
     let mut events = VecEventSink::default();
     let target = LocalDownloadTarget {
         data_root,
-        destination: &destination,
+        destination,
         partial: &partial,
         overwrite: true,
     };
@@ -332,7 +413,19 @@ pub(crate) async fn backup_remote_file(
         let _ = tokio::fs::remove_file(&partial).await;
     }
     let _ = sftp.close().await;
-    result.map(Some)
+    result.map(|transfer| OperationFileBackup {
+        transfer: Some(TransferOutcome {
+            location: relative_location.into(),
+            ..transfer
+        }),
+        metadata: Some(RemoteFileMetadata {
+            size: metadata.size,
+            uid: metadata.uid,
+            gid: metadata.gid,
+            permissions: metadata.permissions,
+            modified_at: metadata.mtime,
+        }),
+    })
 }
 
 pub(crate) async fn delete_remote_file(

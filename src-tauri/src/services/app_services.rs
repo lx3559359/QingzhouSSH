@@ -28,8 +28,9 @@ use crate::{
     repositories::{
         execution_repository::ExecutionRepository,
         operation_batch_repository::OperationBatchRepository,
-        operation_repository::OperationRepository, server_repository::ServerRepository,
-        workflow_repository::WorkflowRepository,
+        operation_repository::OperationRepository,
+        operation_restore_repository::OperationRestoreRepository,
+        server_repository::ServerRepository, workflow_repository::WorkflowRepository,
     },
     services::{
         execution_service::{
@@ -39,6 +40,7 @@ use crate::{
         log_service::LogService,
         operation_batch_service::OperationBatchService,
         operation_report_service::OperationReportService,
+        operation_restore_service::OperationRestoreService,
         operation_service::OperationService,
         restore_point_service::RestorePointService,
         server_connector::ServerConnector,
@@ -75,6 +77,7 @@ pub struct AppServices {
     operations: OperationService,
     operation_batches: OperationBatchService,
     operation_reports: OperationReportService,
+    operation_restore_points: OperationRestoreService,
     logs: LogService,
     transfers: TransferService,
     workflows: WorkflowRepository,
@@ -100,6 +103,8 @@ impl AppServices {
         execution_repository.recover_interrupted().await?;
         let operation_repository = OperationRepository::new(database.pool().clone());
         operation_repository.recover_interrupted().await?;
+        let operation_restore_repository = OperationRestoreRepository::new(database.pool().clone());
+        operation_restore_repository.recover_interrupted().await?;
         let operation_batch_repository = OperationBatchRepository::new(database.pool().clone());
         operation_batch_repository.recover_interrupted().await?;
         let workflow_repository = WorkflowRepository::new(database.pool().clone());
@@ -109,6 +114,11 @@ impl AppServices {
         let restore_points = RestorePointService::new(
             root.to_path_buf(),
             workflow_repository.clone(),
+            connector.clone(),
+        );
+        let operation_restore_points = OperationRestoreService::new(
+            root.to_path_buf(),
+            operation_restore_repository,
             connector.clone(),
         );
         let executions = ExecutionService::new(
@@ -166,6 +176,7 @@ impl AppServices {
             operations,
             operation_batches,
             operation_reports,
+            operation_restore_points,
             logs,
             transfers,
             workflows: workflow_repository,
@@ -193,6 +204,10 @@ impl AppServices {
 
     pub fn operation_report_service(&self) -> OperationReportService {
         self.operation_reports.clone()
+    }
+
+    pub fn operation_restore_service(&self) -> OperationRestoreService {
+        self.operation_restore_points.clone()
     }
 
     pub fn log_service(&self) -> LogService {

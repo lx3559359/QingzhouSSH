@@ -1,22 +1,174 @@
+use std::{
+    path::{Path, PathBuf},
+    sync::Arc,
+};
+
 use qingzhou_ssh_lib::{
-    core::database::Database,
-    core::tasks::BackupItemKind,
+    core::tasks::{
+        resolve_task_restore_path, task_restore_dir, task_restore_item_relative_path,
+        validate_restore_relative_path, write_restore_asset_atomic, BackupItemDefinition,
+        BackupItemKind, BackupPlan, ValidatedParameters,
+    },
+    core::{
+        database::Database, secret_protector::SecretProtector, system_probe::SystemCapabilities,
+    },
     domain::{
         operation::{NewOperationRun, OperationStatus},
         operation_restore::{
             NewOperationRestoreItem, NewOperationRestorePoint, OperationRestoreItemStatus,
             OperationRestorePointStatus,
         },
-        server::{AuthKind, ServerProfile},
+        server::{AuthKind, CreateServerRequest, CredentialInput, ServerProfile},
     },
+    error::AppResult,
     repositories::{
         operation_repository::OperationRepository,
         operation_restore_repository::OperationRestoreRepository,
         server_repository::ServerRepository,
     },
+    services::{app_services::AppServices, operation_service::OperationPreflightRequest},
 };
 use serde_json::json;
 use uuid::Uuid;
+
+struct XorProtector;
+
+impl SecretProtector for XorProtector {
+    fn protect(&self, value: &[u8]) -> AppResult<Vec<u8>> {
+        Ok(value.iter().map(|byte| byte ^ 0x3c).collect())
+    }
+
+    fn unprotect(&self, value: &[u8]) -> AppResult<Vec<u8>> {
+        Ok(value.iter().map(|byte| byte ^ 0x3c).collect())
+    }
+}
+
+#[test]
+fn task_backup_paths_are_confined_to_the_project_data_root() {
+    let run_id = Uuid::nil();
+    assert_eq!(
+        task_restore_dir(run_id),
+        PathBuf::from("backups/tasks/00000000-0000-0000-0000-000000000000")
+    );
+    let relative = task_restore_item_relative_path(run_id, 0, "/etc/hosts").unwrap();
+    assert!(relative.starts_with(&task_restore_dir(run_id)));
+    assert_eq!(
+        resolve_task_restore_path(Path::new("D:/Qingzhou/data"), &relative).unwrap(),
+        Path::new("D:/Qingzhou/data").join(relative)
+    );
+
+    for unsafe_path in [
+        Path::new("../../escape"),
+        Path::new("C:/escape"),
+        Path::new("backups/tasks/not-a-uuid/file"),
+        Path::new("backups/tasks/00000000-0000-0000-0000-000000000000/file.partial"),
+        Path::new("backups/workflows/00000000-0000-0000-0000-000000000000/file"),
+    ] {
+        assert!(validate_restore_relative_path(unsafe_path).is_err());
+    }
+}
+
+#[tokio::test]
+async fn atomic_restore_asset_is_hashed_and_never_exposes_a_partial_as_available() {
+    let root = tempfile::tempdir().unwrap();
+    let run_id = Uuid::new_v4();
+    let relative = task_restore_item_relative_path(run_id, 0, "/etc/hosts").unwrap();
+    let asset = write_restore_asset_atomic(root.path(), &relative, b"127.0.0.1 localhost\n")
+        .await
+        .unwrap();
+    assert_eq!(
+        asset.relative_path,
+        relative.to_string_lossy().replace('\\', "/")
+    );
+    assert_eq!(asset.bytes, 20);
+    assert_eq!(asset.sha256.len(), 64);
+    assert!(root.path().join(relative).is_file());
+    assert!(
+        std::fs::read_dir(root.path().join(task_restore_dir(run_id)))
+            .unwrap()
+            .all(|entry| !entry
+                .unwrap()
+                .file_name()
+                .to_string_lossy()
+                .ends_with(".partial"))
+    );
+}
+
+#[tokio::test]
+async fn failed_operation_capture_is_persisted_without_creating_local_assets() {
+    let root = tempfile::tempdir().unwrap();
+    let services = AppServices::open_with_protector(root.path(), Arc::new(XorProtector))
+        .await
+        .unwrap();
+    let server = services
+        .create_server(CreateServerRequest {
+            name: "untrusted operation restore".into(),
+            host: "127.0.0.1".into(),
+            port: 2222,
+            username: "tester".into(),
+            credential: CredentialInput::Password {
+                password: "restore-canary".into(),
+            },
+        })
+        .await
+        .unwrap();
+    let preview = services
+        .operation_service()
+        .preflight_with_capabilities(
+            &server.id,
+            OperationPreflightRequest {
+                task_id: "service.restart".into(),
+                task_version: 2,
+                parameters: json!({"service": "nginx"}),
+            },
+            &SystemCapabilities {
+                os_id: "openeuler".into(),
+                os_family: "openeuler".into(),
+                version_id: Some("24.03".into()),
+                package_manager: Some("dnf".into()),
+                service_manager: "systemd".into(),
+                architecture: "x86_64".into(),
+                shell: "/bin/sh".into(),
+                commands: vec!["systemctl".into()],
+                services: vec!["nginx".into()],
+                containers: Vec::new(),
+            },
+        )
+        .await
+        .unwrap();
+    let result = services
+        .operation_restore_service()
+        .capture(
+            preview.preview_id,
+            &server.id,
+            "service.restart",
+            "systemd-restart",
+            &BackupPlan {
+                items: vec![BackupItemDefinition {
+                    id: "service-state".into(),
+                    kind: BackupItemKind::RuntimeState,
+                    target_template: "systemctl is-active -- nginx".into(),
+                }],
+            },
+            &ValidatedParameters::default(),
+            tokio_util::sync::CancellationToken::new(),
+        )
+        .await;
+    assert!(result.is_err());
+
+    let points = services
+        .operation_restore_service()
+        .list_by_run(preview.preview_id)
+        .await
+        .unwrap();
+    assert_eq!(points.len(), 1);
+    assert_eq!(points[0].point.status, OperationRestorePointStatus::Failed);
+    assert!(points[0].items.is_empty());
+    assert!(!root
+        .path()
+        .join(task_restore_dir(preview.preview_id))
+        .exists());
+}
 
 struct Fixture {
     _root: tempfile::TempDir,
@@ -123,6 +275,9 @@ async fn restore_point_and_items_survive_database_reopen() {
     assert_eq!(details.items.len(), 2);
     assert_eq!(details.items[0].ordinal, 0);
     assert_eq!(details.items[1].item_kind, BackupItemKind::CommandSnapshot);
+    let public_json = serde_json::to_string(&details).unwrap();
+    assert!(!public_json.contains("remoteTarget"));
+    assert!(!public_json.contains("/etc/qingzhou-"));
 
     let by_run = repository.list_by_run(fixture.run_id).await.unwrap();
     assert_eq!(by_run.len(), 1);
@@ -133,6 +288,12 @@ async fn restore_point_and_items_survive_database_reopen() {
 async fn consumed_restore_point_cannot_be_rolled_back_twice() {
     let fixture = fixture().await;
     let created = fixture.repository.create(point(&fixture)).await.unwrap();
+    let mut partial = item(created.id, fixture.run_id, 0, BackupItemKind::RemoteFile);
+    partial.local_relative_path = Some(format!(
+        "backups/tasks/{}/unfinished.partial",
+        fixture.run_id
+    ));
+    assert!(fixture.repository.add_item(partial).await.is_err());
     fixture
         .repository
         .add_item(item(

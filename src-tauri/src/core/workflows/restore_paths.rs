@@ -4,7 +4,7 @@ use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
 use crate::{
-    core::sftp::validate_remote_path,
+    core::{sftp::validate_remote_path, tasks::validate_confined_relative_path},
     error::{AppError, AppResult},
 };
 
@@ -48,15 +48,7 @@ pub fn restore_point_relative_path(
 }
 
 pub fn validate_restore_point_relative_path(relative_path: &str) -> AppResult<()> {
-    if relative_path.is_empty()
-        || relative_path.contains('\0')
-        || relative_path.contains('\\')
-        || Path::new(relative_path).is_absolute()
-    {
-        return Err(AppError::Security(
-            "恢复点路径不是安全的项目内相对路径".into(),
-        ));
-    }
+    validate_confined_relative_path(Path::new(relative_path))?;
     let components = Path::new(relative_path).components().collect::<Vec<_>>();
     if components.len() != 5
         || components[0] != Component::Normal("backups".as_ref())

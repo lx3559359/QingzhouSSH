@@ -115,6 +115,7 @@ pub struct OperationRestoreItem {
     pub restore_point_id: Uuid,
     pub ordinal: usize,
     pub item_kind: BackupItemKind,
+    #[serde(skip_serializing, skip_deserializing)]
     pub remote_target: String,
     pub local_relative_path: Option<String>,
     pub sha256: Option<String>,

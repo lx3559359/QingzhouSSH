@@ -3,6 +3,7 @@ mod model;
 mod parameters;
 mod planner;
 mod privilege;
+mod recovery;
 mod render;
 mod result;
 
@@ -21,6 +22,12 @@ pub use planner::{plan_task, validate_scope, PlannedTask, PublicTaskPlan, Render
 pub use privilege::{
     elevate_fixed_command, evaluate_privilege_probe, probe_privilege,
     PASSWORDLESS_SUDO_PROBE_COMMAND, PRIVILEGE_UID_COMMAND,
+};
+pub(crate) use recovery::validate_confined_relative_path;
+pub(crate) use recovery::{prepare_task_restore_destination, render_backup_target};
+pub use recovery::{
+    resolve_task_restore_path, task_restore_dir, task_restore_item_relative_path,
+    validate_restore_relative_path, write_restore_asset_atomic, StoredRestoreAsset,
 };
 pub use render::render_command;
 pub use result::{
