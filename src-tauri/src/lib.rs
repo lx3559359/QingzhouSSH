@@ -41,6 +41,8 @@ pub fn run() {
             commands::executions::start_task_execution,
             commands::executions::start_custom_execution,
             commands::executions::cancel_execution,
+            commands::remediation::preview_task_remediation,
+            commands::remediation::confirm_task_remediation,
             commands::logs::search_logs,
             commands::logs::read_log_result_page,
             commands::logs::download_log_result,

@@ -1,5 +1,6 @@
 import type {
   CreateServerRequest,
+  ConfirmTaskRemediationRequest,
   CustomExecutionRequest,
   DownloadRequest,
   DirectoryListing,
@@ -25,6 +26,7 @@ import type {
   ServerProfile,
   SystemCapabilities,
   TaskAvailability,
+  TaskRemediationPreview,
   TaskExecutionRequest,
   UploadRequest,
   StartWorkflowRunRequest,
@@ -171,6 +173,86 @@ const previewTasks: TaskAvailability[] = [
     },
   },
 ];
+
+previewTasks.push(
+  {
+    state: 'remediable',
+    summary: '服务器缺少 tcpdump，可以在确认后补齐白名单组件',
+    missingCommands: ['tcpdump'],
+    remediation: {
+      packageManager: 'dnf',
+      missingCommands: ['tcpdump'],
+      packages: ['tcpdump'],
+    },
+    library: {
+      source: 'reviewed_command',
+      primaryCategory: 'network',
+      keywords: ['抓包', '网络诊断', 'tcpdump'],
+      noviceAliases: ['网络断断续续', '查谁在访问服务器'],
+    },
+    definition: {
+      ...previewTasks[0]!.definition,
+      id: 'network.packet_capture',
+      category: 'network',
+      title: '限时抓包摘要',
+      description: '抓取限定数量的数据包并生成摘要',
+      outputKind: 'text',
+      implementations: [{
+        ...previewTasks[0]!.definition.implementations[0]!,
+        id: 'linux-tcpdump',
+        compatibility: {
+          osFamilies: ['debian', 'rhel', 'openeuler'],
+          serviceManagers: [],
+          requiredCommands: ['tcpdump'],
+        },
+      }],
+    },
+  },
+  {
+    state: 'permission_blocked',
+    summary: '当前账号不是 root，且服务器未配置免密 sudo',
+    missingCommands: [],
+    remediation: null,
+    library: {
+      source: 'builtin_task',
+      primaryCategory: 'security_login',
+      keywords: ['防火墙', '安全规则'],
+      noviceAliases: ['端口放不开', '外网访问不了'],
+    },
+    definition: {
+      ...previewTasks[0]!.definition,
+      id: 'security.firewall_manage',
+      category: 'security',
+      title: '管理防火墙规则',
+      description: '需要 root 或免密 sudo 权限',
+      riskLevel: 'dangerous',
+      privilege: 'root_or_passwordless_sudo',
+      scope: 'single_server',
+    },
+  },
+  {
+    state: 'unsupported',
+    summary: '安全回滚与断线重连验证尚未完成，当前版本不会执行',
+    missingCommands: [],
+    remediation: null,
+    library: {
+      source: 'builtin_task',
+      primaryCategory: 'system_settings',
+      keywords: ['IP', '网络地址'],
+      noviceAliases: ['修改服务器地址'],
+    },
+    definition: {
+      ...previewTasks[0]!.definition,
+      id: 'network.ip_change',
+      category: 'network',
+      title: '修改 IP 地址',
+      description: '涉及断线的高风险网络配置变更',
+      riskLevel: 'dangerous',
+      privilege: 'root_or_passwordless_sudo',
+      scope: 'single_server',
+    },
+  },
+);
 
 function createPreviewExecution(serverId: string, taskId: string): ExecutionDetails {
   const now = Date.now();
@@ -1294,6 +1376,31 @@ export const previewApi = {
     previewPersonalScriptRuns.delete(operationRunId);
   },
   listTaskDefinitions: async (_serverId: string) => previewTasks,
+  previewTaskRemediation: async (
+    _serverId: string,
+    taskId: string,
+  ): Promise<TaskRemediationPreview> => ({
+    previewId: crypto.randomUUID(),
+    confirmationToken: crypto.randomUUID(),
+    expiresAt: Date.now() + 5 * 60 * 1000,
+    taskId,
+    implementationId: 'preview-remediation',
+    missingCommands: ['tcpdump'],
+    packages: ['tcpdump'],
+    packageManager: 'apt',
+    permissionState: 'ready',
+    commandSummary: 'apt-get install -y --no-install-recommends tcpdump',
+  }),
+  confirmTaskRemediation: async (
+    serverId: string,
+    _request: ConfirmTaskRemediationRequest,
+    onEvent: (event: ExecutionEvent) => void,
+  ): Promise<TaskAvailability> => {
+    const execution = createPreviewExecution(serverId, 'maintenance.package_install');
+    emitPreview(onEvent, execution);
+    const task = previewTasks.find((item) => item.definition.id === 'network.packet_capture');
+    return task ?? previewTasks[0]!;
+  },
   listOperationsTasks: async (_serverId: string) => previewTasks,
   preflightOperation: async (serverId: string, request: OperationPreflightRequest) =>
     createOperationPreview(serverId, request),

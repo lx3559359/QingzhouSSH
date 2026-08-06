@@ -7,14 +7,24 @@ const apiMocks = vi.hoisted(() => ({
   listServers: vi.fn(),
   listTaskDefinitions: vi.fn(),
   startTaskExecution: vi.fn(),
+  previewOperation: vi.fn(),
+  confirmOperation: vi.fn(),
+  previewTaskRemediation: vi.fn(),
+  confirmTaskRemediation: vi.fn(),
   cancelExecution: vi.fn(),
   listPersonalScripts: vi.fn(),
+  getPersonalScriptForEditor: vi.fn(),
+  previewPersonalScriptRun: vi.fn(),
+  confirmPersonalScriptRun: vi.fn(),
+  cancelPersonalScriptRun: vi.fn(),
 }));
 
 vi.mock('../../api/tauri', () => ({ api: apiMocks }));
 
 import type {
   ExecutionDetails,
+  PersonalScriptDetails,
+  PersonalScriptSummary,
   ServerProfile,
   TaskAvailability,
 } from '../../api/contracts';
@@ -150,6 +160,113 @@ const tasks: TaskAvailability[] = [
   },
 ];
 
+const unavailableTasks: TaskAvailability[] = [
+  {
+    ...tasks[0],
+    state: 'permission_blocked',
+    summary: '需要 root 或免密 sudo',
+    definition: {
+      ...tasks[0].definition,
+      id: 'network.udp',
+      title: 'UDP 探测',
+      description: '检查 UDP 服务是否可达',
+      category: 'network',
+    },
+    library: {
+      ...readyLibrary,
+      primaryCategory: 'network',
+      noviceAliases: ['UDP 不通'],
+    },
+  },
+  {
+    ...tasks[0],
+    state: 'unsupported',
+    summary: '延迟回滚与重连验证尚未实现',
+    definition: {
+      ...tasks[0].definition,
+      id: 'network.ip_change',
+      title: '修改 IP 地址',
+      description: '安全能力尚未完成',
+      category: 'network',
+    },
+    library: {
+      ...readyLibrary,
+      source: 'builtin_task',
+      primaryCategory: 'network',
+      noviceAliases: ['修改地址'],
+    },
+  },
+];
+
+const remediableTask: TaskAvailability = {
+  ...tasks[0],
+  state: 'remediable',
+  summary: '缺少抓包组件，可以在确认后安全补齐',
+  missingCommands: ['tcpdump'],
+  remediation: {
+    packageManager: 'dnf',
+    missingCommands: ['tcpdump'],
+    packages: ['tcpdump'],
+  },
+  definition: {
+    ...tasks[0].definition,
+    id: 'network.packet_capture',
+    title: '限时抓包摘要',
+    description: '抓取限定数量的数据包并生成摘要',
+    category: 'network',
+  },
+  library: {
+    ...readyLibrary,
+    primaryCategory: 'network',
+    noviceAliases: ['网络抓包'],
+  },
+};
+
+const personalScript: PersonalScriptDetails = {
+  definition: {
+    id: 'script-1',
+    title: '服务巡检脚本',
+    category: '日常巡检',
+    tags: ['服务', '巡检'],
+    isFavorite: true,
+    isEnabled: true,
+    activeVersionId: 'version-1',
+    createdAt: 1,
+    updatedAt: 1,
+    deletedAt: null,
+  },
+  activeVersion: {
+    id: 'version-1',
+    definitionId: 'script-1',
+    versionNumber: 1,
+    body: 'systemctl --failed',
+    bodySha256: 'a'.repeat(64),
+    parameters: [],
+    scanSummary: {
+      lineCount: 1,
+      characterCount: 18,
+      bodySha256: 'a'.repeat(64),
+      warningCount: 0,
+      warnings: [],
+    },
+    timeoutSeconds: 30,
+    createdAt: 1,
+  },
+};
+
+const personalScriptSummary: PersonalScriptSummary = {
+  id: personalScript.definition.id,
+  title: personalScript.definition.title,
+  category: personalScript.definition.category,
+  tags: personalScript.definition.tags,
+  isFavorite: true,
+  isEnabled: true,
+  activeVersionId: personalScript.activeVersion.id,
+  activeVersionNumber: 1,
+  bodySha256: personalScript.activeVersion.bodySha256,
+  updatedAt: 1,
+};
+
 function details(taskId: string): ExecutionDetails {
   return {
     record: {
@@ -195,6 +312,83 @@ describe('TaskPage', () => {
     );
     apiMocks.cancelExecution.mockResolvedValue(undefined);
     apiMocks.listPersonalScripts.mockResolvedValue([]);
+    apiMocks.getPersonalScriptForEditor.mockResolvedValue(null);
+    apiMocks.previewPersonalScriptRun.mockResolvedValue({
+      previewId: 'script-preview-1',
+      confirmationToken: 'script-token-1',
+      expiresAt: Date.now() + 300_000,
+      serverId: server.id,
+      scriptDefinitionId: 'script-1',
+      scriptVersionId: 'version-1',
+      scriptVersionNumber: 1,
+      title: '服务巡检脚本',
+      riskLevel: 'dangerous',
+      automaticRollbackAvailable: false,
+      warning: '个人脚本无法自动回滚，请确认后运行。',
+      lineCount: 1,
+      characterCount: 18,
+      bodySha256: 'a'.repeat(64),
+      parameterNames: [],
+      scanWarnings: [],
+      timeoutSeconds: 30,
+    });
+    apiMocks.confirmPersonalScriptRun.mockResolvedValue({
+      operationRunId: 'script-preview-1',
+      scriptDefinitionId: 'script-1',
+      scriptVersionId: 'version-1',
+      execution: details('script.personal'),
+    });
+    apiMocks.cancelPersonalScriptRun.mockResolvedValue(undefined);
+    apiMocks.previewOperation.mockResolvedValue({
+      previewId: 'preview-1',
+      serverId: 'server-1',
+      taskId: 'service.restart',
+      taskVersion: 1,
+      implementationId: 'systemd',
+      riskLevel: 'dangerous',
+      privilege: 'root_or_passwordless_sudo',
+      scope: 'single_server',
+      status: 'waiting_confirmation',
+      stepTitles: ['预演', '备份', '执行', '验证'],
+      estimatedSeconds: 30,
+      confirmationToken: 'token-1',
+      server: { id: 'server-1', name: server.name, host: server.host, port: 22, username: 'ops' },
+      permissionSummary: '使用免密 sudo',
+      currentStateSummary: '服务正在运行',
+      targetStateSummary: '安全重启服务',
+      backupSummary: ['记录当前运行状态'],
+      disconnectRisk: { mayDisconnect: false, explanation: null, automaticRecoverySeconds: null },
+    });
+    apiMocks.confirmOperation.mockResolvedValue({ run: { id: 'run-1' }, steps: [] });
+    apiMocks.previewTaskRemediation.mockResolvedValue({
+      previewId: 'remediation-preview-1',
+      confirmationToken: 'remediation-token-1',
+      expiresAt: Date.now() + 300_000,
+      taskId: 'network.packet_capture',
+      implementationId: 'linux-tcpdump',
+      missingCommands: ['tcpdump'],
+      packages: ['tcpdump'],
+      packageManager: 'dnf',
+      permissionState: 'ready',
+      commandSummary: '将通过 dnf 安装白名单组件：tcpdump',
+    });
+    apiMocks.confirmTaskRemediation.mockResolvedValue({ ...remediableTask, state: 'ready' });
+  });
+
+  it('keeps category, list and details visible while hiding unavailable tools by default', async () => {
+    const user = userEvent.setup();
+    apiMocks.listTaskDefinitions.mockResolvedValue([...tasks, ...unavailableTasks]);
+    render(<TaskPage />);
+
+    expect(await screen.findByLabelText('工具分类')).toBeVisible();
+    expect(screen.getByLabelText('工具列表')).toBeVisible();
+    expect(screen.getByLabelText('工具详情')).toBeVisible();
+    expect(screen.queryByText('UDP 探测')).not.toBeInTheDocument();
+    expect(screen.queryByText('修改 IP 地址')).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: '查看受限与不支持' }));
+    expect(await screen.findByText('UDP 探测')).toBeVisible();
+    expect(screen.getByText('修改 IP 地址')).toBeVisible();
   });
 
   it('opens the personal script center as a first-class task mode', async () => {
@@ -238,19 +432,24 @@ describe('TaskPage', () => {
     await user.type(screen.getByLabelText('服务名'), 'nginx.service');
     await user.click(screen.getByRole('button', { name: '运行任务' }));
 
-    expect(screen.getByRole('heading', { name: '确认危险操作' })).toBeVisible();
+    expect(await screen.findByRole('heading', { name: '确认危险操作' })).toBeVisible();
     const dialog = screen.getByRole('dialog', { name: '确认危险操作' });
     expect(within(dialog).getByText('openEuler 生产机')).toBeVisible();
     expect(within(dialog).getByText(/重启指定服务/)).toBeVisible();
     await user.click(screen.getByRole('button', { name: '确认并运行' }));
 
+    expect(apiMocks.previewOperation).toHaveBeenCalledWith(
+      'server-1',
+      { taskId: 'service.restart', taskVersion: 1, parameters: { service: 'nginx.service' } },
+    );
     await waitFor(() =>
-      expect(apiMocks.startTaskExecution).toHaveBeenCalledWith(
+      expect(apiMocks.confirmOperation).toHaveBeenCalledWith(
         'server-1',
         {
           taskId: 'service.restart',
+          taskVersion: 1,
           parameters: { service: 'nginx.service' },
-          dangerousConfirmed: true,
+          confirmationToken: 'token-1',
         },
         expect.any(Function),
       ),
@@ -286,5 +485,58 @@ describe('TaskPage', () => {
     const entryId = screen.getByLabelText('任务标识');
     expect(entryId).toHaveAttribute('readonly');
     expect((entryId as HTMLInputElement).value).toMatch(/^[0-9a-f-]{36}$/);
+  });
+
+  it('previews missing packages and refreshes compatibility without auto-running the task', async () => {
+    const user = userEvent.setup();
+    apiMocks.listTaskDefinitions
+      .mockResolvedValueOnce([...tasks, remediableTask])
+      .mockResolvedValueOnce([...tasks, { ...remediableTask, state: 'ready', missingCommands: [], remediation: null }]);
+    render(<TaskPage />);
+
+    await user.click(await screen.findByRole('button', { name: '选择任务 限时抓包摘要' }));
+    await user.click(screen.getByRole('button', { name: '查看并补齐组件' }));
+
+    const dialog = await screen.findByRole('dialog', { name: '确认补齐组件' });
+    expect(within(dialog).getByText('openEuler 生产机')).toBeVisible();
+    expect(within(dialog).getAllByText('tcpdump').length).toBeGreaterThan(0);
+    expect(within(dialog).getByText(/不会询问 sudo 密码/)).toBeVisible();
+    expect(within(dialog).getByText(/不会自动运行原任务/)).toBeVisible();
+    expect(apiMocks.previewTaskRemediation).toHaveBeenCalledWith('server-1', 'network.packet_capture');
+    expect(apiMocks.confirmTaskRemediation).not.toHaveBeenCalled();
+
+    await user.click(within(dialog).getByRole('button', { name: '确认安装组件' }));
+
+    await waitFor(() => expect(apiMocks.confirmTaskRemediation).toHaveBeenCalledWith(
+      'server-1',
+      { previewId: 'remediation-preview-1', confirmationToken: 'remediation-token-1' },
+      expect.any(Function),
+    ));
+    await waitFor(() => expect(apiMocks.listTaskDefinitions).toHaveBeenCalledTimes(2));
+    expect(apiMocks.startTaskExecution).not.toHaveBeenCalledWith(
+      'server-1',
+      expect.objectContaining({ taskId: 'network.packet_capture' }),
+      expect.any(Function),
+    );
+  });
+
+  it('runs a personal script from the unified library through the existing safety preview', async () => {
+    const user = userEvent.setup();
+    apiMocks.listPersonalScripts.mockResolvedValue([personalScriptSummary]);
+    apiMocks.getPersonalScriptForEditor.mockResolvedValue(personalScript);
+    render(<TaskPage />);
+
+    await user.click(await screen.findByRole('button', { name: '选择任务 服务巡检脚本' }));
+    await user.click(screen.getByRole('button', { name: '检查并运行脚本' }));
+
+    const dialog = await screen.findByRole('dialog', { name: '运行个人脚本' });
+    expect(within(dialog).getByText(/个人脚本无法自动回滚/)).toBeVisible();
+    expect(apiMocks.previewPersonalScriptRun).toHaveBeenCalledWith('script-1', 'server-1', {});
+
+    await user.click(within(dialog).getByRole('button', { name: '确认并运行' }));
+    await waitFor(() => expect(apiMocks.confirmPersonalScriptRun).toHaveBeenCalledWith(
+      { previewId: 'script-preview-1', confirmationToken: 'script-token-1' },
+      expect.any(Function),
+    ));
   });
 });

@@ -10,6 +10,7 @@ pub mod remote_recovery_service;
 pub mod restore_point_service;
 pub mod script_service;
 pub mod server_connector;
+pub mod task_remediation_service;
 pub mod transfer_service;
 pub mod update_service;
 pub mod workflow_diagnostics;

@@ -139,6 +139,29 @@ describe('Tauri API wrapper', () => {
     expect(received).toEqual([1, 3]);
   });
 
+  it('previews and confirms only token-bound component remediation', async () => {
+    const received: number[] = [];
+    await tauriApi.previewTaskRemediation('server-1', 'network.packet_capture');
+    await tauriApi.confirmTaskRemediation(
+      'server-1',
+      { previewId: 'preview-1', confirmationToken: 'token-1' },
+      (event) => received.push(event.sequence),
+    );
+
+    expect(invoke.mock.calls.map(([command, args]) => [command, args && Object.keys(args)])).toEqual([
+      ['preview_task_remediation', ['serverId', 'taskId']],
+      ['confirm_task_remediation', ['serverId', 'request', 'onEvent']],
+    ]);
+    expect(JSON.stringify(invoke.mock.calls)).not.toContain('sudoPassword');
+    expect(JSON.stringify(invoke.mock.calls)).not.toContain('packages');
+    expect(JSON.stringify(invoke.mock.calls)).not.toContain('command');
+
+    channels[0].onmessage?.({ sequence: 1 });
+    channels[0].onmessage?.({ sequence: 1 });
+    channels[0].onmessage?.({ sequence: 2 });
+    expect(received).toEqual([1, 2]);
+  });
+
   it('uses typed operations IPC without accepting command text', async () => {
     const preflight = {
       taskId: 'system.overview',

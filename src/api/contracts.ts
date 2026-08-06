@@ -192,6 +192,24 @@ export interface TaskRemediationSummary {
   packages: string[];
 }
 
+export interface TaskRemediationPreview {
+  previewId: string;
+  confirmationToken: string;
+  expiresAt: number;
+  taskId: string;
+  implementationId: string;
+  missingCommands: string[];
+  packages: string[];
+  packageManager: string;
+  permissionState: TaskAvailabilityState;
+  commandSummary: string;
+}
+
+export interface ConfirmTaskRemediationRequest {
+  previewId: string;
+  confirmationToken: string;
+}
+
 export type ToolSource = 'builtin_task' | 'reviewed_command';
 
 export type ToolLibraryCategory =

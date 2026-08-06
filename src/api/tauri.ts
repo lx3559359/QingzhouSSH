@@ -3,6 +3,7 @@ import { Channel, invoke } from '@tauri-apps/api/core';
 import type {
   BootstrapStatus,
   CreateServerRequest,
+  ConfirmTaskRemediationRequest,
   CustomExecutionRequest,
   DownloadRequest,
   DirectoryListing,
@@ -30,6 +31,7 @@ import type {
   ServerProfile,
   SystemCapabilities,
   TaskAvailability,
+  TaskRemediationPreview,
   TaskExecutionRequest,
   UploadRequest,
   ExecutionFile,
@@ -92,6 +94,17 @@ export const tauriApi = {
     invoke<SystemCapabilities>('test_server_connection', { serverId }),
   listTaskDefinitions: (serverId: string) =>
     invoke<TaskAvailability[]>('list_task_definitions', { serverId }),
+  previewTaskRemediation: (serverId: string, taskId: string) =>
+    invoke<TaskRemediationPreview>('preview_task_remediation', { serverId, taskId }),
+  confirmTaskRemediation: (
+    serverId: string,
+    request: ConfirmTaskRemediationRequest,
+    onEvent: ExecutionEventHandler,
+  ) => invoke<TaskAvailability>('confirm_task_remediation', {
+    serverId,
+    request,
+    onEvent: createEventChannel(onEvent),
+  }),
   startTaskExecution: (
     serverId: string,
     request: TaskExecutionRequest,

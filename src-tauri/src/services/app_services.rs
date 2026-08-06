@@ -47,6 +47,7 @@ use crate::{
         restore_point_service::RestorePointService,
         script_service::ScriptService,
         server_connector::ServerConnector,
+        task_remediation_service::TaskRemediationService,
         transfer_service::TransferService,
         workflow_diagnostics::WorkflowDiagnosticsService,
         workflow_nodes::{execution::ExecutionNodeAdapter, io::IoNodeAdapter},
@@ -77,6 +78,7 @@ pub struct AppServices {
     servers: ServerRepository,
     vault: Vault,
     executions: ExecutionService,
+    task_remediation: TaskRemediationService,
     operations: OperationService,
     operation_batches: OperationBatchService,
     operation_reports: OperationReportService,
@@ -134,6 +136,7 @@ impl AppServices {
             registry.clone(),
         );
         let remote_recovery = RemoteRecoveryService::new(connector.clone());
+        let task_remediation = TaskRemediationService::new(connector.clone(), executions.clone());
         let operations = OperationService::new(
             operation_repository.clone(),
             executions.clone(),
@@ -188,6 +191,7 @@ impl AppServices {
             servers,
             vault,
             executions,
+            task_remediation,
             operations,
             operation_batches,
             operation_reports,
@@ -209,6 +213,10 @@ impl AppServices {
 
     pub fn execution_service(&self) -> ExecutionService {
         self.executions.clone()
+    }
+
+    pub fn task_remediation_service(&self) -> TaskRemediationService {
+        self.task_remediation.clone()
     }
 
     pub fn operation_service(&self) -> OperationService {

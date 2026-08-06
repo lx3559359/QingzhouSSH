@@ -37,7 +37,7 @@ pub use recovery::{
     resolve_task_restore_path, task_restore_dir, task_restore_item_relative_path,
     validate_restore_relative_path, write_restore_asset_atomic, StoredRestoreAsset,
 };
-pub use remediation::remediation_for;
+pub use remediation::{fixed_install_command, remediation_for, PackageId, PackageManagerKind};
 pub use render::render_command;
 pub use result::{
     parse_result, FindingLevel, OperationConclusion, OperationFinding, OperationResult,

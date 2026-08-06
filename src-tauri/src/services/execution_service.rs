@@ -11,10 +11,10 @@ use crate::{
         sftp::sha256_local_file,
         ssh::executor::{execute_streaming, CommandRequest, EventSink},
         tasks::{
-            built_in_catalog, evaluate_task_availability, metadata_for, remediation_for,
-            render_command, select_implementation, validate_parameters, RenderedTaskStep,
-            RiskLevel, TaskAvailabilityState, TaskDefinition, TaskRemediationSummary,
-            ToolLibraryMetadata, ValidatedParameters,
+            built_in_catalog, evaluate_task_availability, metadata_for, probe_privilege,
+            remediation_for, render_command, select_implementation, validate_parameters,
+            RenderedTaskStep, RiskLevel, TaskAvailabilityState, TaskDefinition,
+            TaskRemediationSummary, ToolLibraryMetadata, ValidatedParameters,
         },
     },
     domain::{
@@ -171,8 +171,17 @@ impl ExecutionService {
     pub async fn list_task_definitions(&self, server_id: &str) -> AppResult<Vec<TaskAvailability>> {
         let connected = self.connector.connect(server_id).await?;
         let capabilities = connected.capabilities.clone();
+        let definitions = built_in_catalog();
+        let permission_available = if definitions.iter().any(|definition| {
+            evaluate_task_availability(definition, &capabilities).state
+                == TaskAvailabilityState::Remediable
+        }) {
+            probe_privilege(&connected.session).await.is_ok()
+        } else {
+            true
+        };
         connected.session.disconnect().await;
-        Ok(built_in_catalog()
+        Ok(definitions
             .into_iter()
             .map(|definition| {
                 let evaluation = evaluate_task_availability(&definition, &capabilities);
@@ -185,10 +194,23 @@ impl ExecutionService {
                 } else {
                     None
                 };
+                let (state, summary) = if evaluation.state == TaskAvailabilityState::Remediable
+                    && !permission_available
+                {
+                    (
+                        TaskAvailabilityState::PermissionBlocked,
+                        format!(
+                            "{}；当前账号需要 root 或免密 sudo 才能补齐组件",
+                            evaluation.summary
+                        ),
+                    )
+                } else {
+                    (evaluation.state, evaluation.summary)
+                };
                 TaskAvailability {
                     definition,
-                    state: evaluation.state,
-                    summary: evaluation.summary,
+                    state,
+                    summary,
                     missing_commands: evaluation.missing_commands,
                     remediation,
                     library,
@@ -264,6 +286,45 @@ impl ExecutionService {
             execution.id,
             command,
             Duration::from_secs(request.timeout_seconds),
+            events,
+        )
+        .await
+    }
+
+    pub(crate) async fn execute_fixed_maintenance<E: EventSink>(
+        &self,
+        server_id: &str,
+        package_manager: &str,
+        packages: &[String],
+        command: String,
+        events: &mut E,
+    ) -> AppResult<ExecutionDetails> {
+        let execution = self
+            .repository
+            .create(NewExecution {
+                server_id: server_id.into(),
+                task_id: "maintenance.package_install".into(),
+                task_version: 1,
+                category: "maintenance".into(),
+                parameters: vec![
+                    ExecutionParameter {
+                        name: "packageManager".into(),
+                        display_value: package_manager.into(),
+                        sensitive: false,
+                    },
+                    ExecutionParameter {
+                        name: "packages".into(),
+                        display_value: packages.join(", "),
+                        sensitive: false,
+                    },
+                ],
+            })
+            .await?;
+        self.run_command_with_limit(
+            execution.id,
+            command,
+            Duration::from_secs(10 * 60),
+            2 * 1024 * 1024,
             events,
         )
         .await
