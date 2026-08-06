@@ -120,10 +120,18 @@ async fn tasks_scripts_logs_sftp_history_and_canaries_close_the_m2_loop() {
         .unwrap();
     assert!(available
         .iter()
-        .any(|task| task.definition.id == "system.disk_usage" && task.compatible));
+        .any(|task| {
+            task.definition.id == "system.disk_usage"
+                && task.state
+                    == qingzhou_ssh_lib::core::tasks::TaskAvailabilityState::Ready
+        }));
     assert!(available
         .iter()
-        .any(|task| task.definition.id == "service.status" && task.compatible));
+        .any(|task| {
+            task.definition.id == "service.status"
+                && task.state
+                    == qingzhou_ssh_lib::core::tasks::TaskAvailabilityState::Ready
+        }));
 
     let mut all_events = Vec::new();
     let mut events = VecEventSink::default();

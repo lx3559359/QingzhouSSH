@@ -168,7 +168,6 @@ export function TaskPage() {
                   type="button"
                   key={task.definition.id}
                   aria-label={`选择任务 ${task.definition.title}`}
-                  disabled={!task.compatible}
                   onClick={() => chooseTask(task)}
                 >
                   <span className={`feature-icon ${task.definition.category === 'service' ? 'feature-icon--orange' : task.definition.category === 'logs' ? 'feature-icon--green' : 'feature-icon--blue'}`}>
@@ -178,7 +177,7 @@ export function TaskPage() {
                     <span className="task-card__meta">{task.definition.category} · v{task.definition.version}</span>
                     <h2>{task.definition.title}</h2>
                     <p>{task.definition.description}</p>
-                    <span className={`risk-chip risk-chip--${task.definition.riskLevel}`}>{task.compatible ? task.definition.riskLevel : '不兼容'}</span>
+                    <span className={`risk-chip risk-chip--${task.definition.riskLevel}`}>{task.state === 'ready' ? task.definition.riskLevel : task.summary}</span>
                   </span>
                 </button>
               ))}
@@ -190,7 +189,7 @@ export function TaskPage() {
               <article className="silver-card task-parameters">
                 <header><div><span className="eyebrow">任务参数</span><h2>{selected.definition.title}</h2></div>{selected.definition.riskLevel === 'dangerous' && <ShieldWarning className="danger-icon" weight="fill" />}</header>
                 <ParameterForm definitions={selected.definition.parameters} values={parameters} onChange={(name, value) => setParameters((current) => ({ ...current, [name]: value }))} />
-                <button className={selected.definition.riskLevel === 'dangerous' ? 'danger-button' : 'success-button'} type="button" disabled={running || !selected.compatible} onClick={requestRun}>运行任务</button>
+                <button className={selected.definition.riskLevel === 'dangerous' ? 'danger-button' : 'success-button'} type="button" disabled={running || selected.state !== 'ready'} onClick={requestRun}>运行任务</button>
               </article>
               <ExecutionDrawer events={events} details={details} running={running} onCancel={() => void cancel()} />
             </section>

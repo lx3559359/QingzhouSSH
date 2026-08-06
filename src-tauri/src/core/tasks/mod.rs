@@ -1,13 +1,21 @@
+mod availability;
 mod catalog;
+mod library;
 mod model;
 mod parameters;
 mod planner;
 mod privilege;
 mod recovery;
+mod remediation;
 mod render;
 mod result;
 
+pub use availability::{
+    evaluate_task_availability, TaskAvailabilityEvaluation, TaskAvailabilityState,
+    TaskRemediationSummary,
+};
 pub use catalog::built_in_catalog;
+pub use library::{metadata_for, ToolLibraryCategory, ToolLibraryMetadata, ToolSource};
 pub use model::{
     BackupItemDefinition, BackupItemKind, BackupPlan, CompatibilityPredicate, ExecutionScope,
     OutputKind, ParameterDefinition, ParameterKind, PrivilegeMode, PrivilegeRequirement,
@@ -29,6 +37,7 @@ pub use recovery::{
     resolve_task_restore_path, task_restore_dir, task_restore_item_relative_path,
     validate_restore_relative_path, write_restore_asset_atomic, StoredRestoreAsset,
 };
+pub use remediation::remediation_for;
 pub use render::render_command;
 pub use result::{
     parse_result, FindingLevel, OperationConclusion, OperationFinding, OperationResult,

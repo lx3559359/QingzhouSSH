@@ -11,8 +11,10 @@ use crate::{
         sftp::sha256_local_file,
         ssh::executor::{execute_streaming, CommandRequest, EventSink},
         tasks::{
-            built_in_catalog, render_command, select_implementation, validate_parameters,
-            RenderedTaskStep, RiskLevel, TaskDefinition, ValidatedParameters,
+            built_in_catalog, evaluate_task_availability, metadata_for, remediation_for,
+            render_command, select_implementation, validate_parameters, RenderedTaskStep,
+            RiskLevel, TaskAvailabilityState, TaskDefinition, TaskRemediationSummary,
+            ToolLibraryMetadata, ValidatedParameters,
         },
     },
     domain::{
@@ -42,8 +44,11 @@ pub struct TaskExecutionRequest {
 #[serde(rename_all = "camelCase")]
 pub struct TaskAvailability {
     pub definition: TaskDefinition,
-    pub compatible: bool,
-    pub reason: Option<String>,
+    pub state: TaskAvailabilityState,
+    pub summary: String,
+    pub missing_commands: Vec<String>,
+    pub remediation: Option<TaskRemediationSummary>,
+    pub library: ToolLibraryMetadata,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -169,20 +174,26 @@ impl ExecutionService {
         connected.session.disconnect().await;
         Ok(built_in_catalog()
             .into_iter()
-            .map(
-                |definition| match select_implementation(&definition, &capabilities) {
-                    Ok(_) => TaskAvailability {
-                        definition,
-                        compatible: true,
-                        reason: None,
-                    },
-                    Err(error) => TaskAvailability {
-                        definition,
-                        compatible: false,
-                        reason: Some(error.to_string()),
-                    },
-                },
-            )
+            .map(|definition| {
+                let evaluation = evaluate_task_availability(&definition, &capabilities);
+                let library = metadata_for(&definition);
+                let remediation = if evaluation.state == TaskAvailabilityState::Remediable {
+                    remediation_for(
+                        capabilities.package_manager.as_deref(),
+                        &evaluation.missing_commands,
+                    )
+                } else {
+                    None
+                };
+                TaskAvailability {
+                    definition,
+                    state: evaluation.state,
+                    summary: evaluation.summary,
+                    missing_commands: evaluation.missing_commands,
+                    remediation,
+                    library,
+                }
+            })
             .collect())
     }
 

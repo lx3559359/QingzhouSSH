@@ -30,10 +30,20 @@ const server: ServerProfile = {
   credentialId: 'credential-1',
 };
 
+const readyLibrary = {
+  source: 'reviewed_command' as const,
+  primaryCategory: 'daily_inspection' as const,
+  keywords: ['日常巡检'],
+  noviceAliases: ['检查服务器'],
+};
+
 const tasks: TaskAvailability[] = [
   {
-    compatible: true,
-    reason: null,
+    state: 'ready',
+    summary: '当前服务器可以直接运行',
+    missingCommands: [],
+    remediation: null,
+    library: readyLibrary,
     definition: {
       id: 'system.overview',
       version: 1,
@@ -50,8 +60,11 @@ const tasks: TaskAvailability[] = [
     },
   },
   {
-    compatible: true,
-    reason: null,
+    state: 'ready',
+    summary: '当前服务器可以直接运行',
+    missingCommands: [],
+    remediation: null,
+    library: { ...readyLibrary, source: 'builtin_task', primaryCategory: 'service_management' },
     definition: {
       id: 'service.restart',
       version: 1,
@@ -78,8 +91,11 @@ const tasks: TaskAvailability[] = [
     },
   },
   {
-    compatible: true,
-    reason: null,
+    state: 'ready',
+    summary: '当前服务器可以直接运行',
+    missingCommands: [],
+    remediation: null,
+    library: { ...readyLibrary, source: 'builtin_task', primaryCategory: 'service_management' },
     definition: {
       id: 'service.cron_manage',
       version: 2,

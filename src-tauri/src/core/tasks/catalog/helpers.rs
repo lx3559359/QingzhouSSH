@@ -52,10 +52,7 @@ pub(super) fn read_only_implementation(
     TaskImplementation {
         id: id.into(),
         compatibility: CompatibilityPredicate {
-            os_families: SUPPORTED_FAMILIES
-                .iter()
-                .map(|value| (*value).into())
-                .collect(),
+            os_families: Vec::new(),
             service_managers: Vec::new(),
             required_commands: required_commands
                 .iter()

@@ -173,8 +173,44 @@ export interface TaskDefinition {
 
 export interface TaskAvailability {
   definition: TaskDefinition;
-  compatible: boolean;
-  reason: string | null;
+  state: TaskAvailabilityState;
+  summary: string;
+  missingCommands: string[];
+  remediation: TaskRemediationSummary | null;
+  library: ToolLibraryMetadata;
+}
+
+export type TaskAvailabilityState =
+  | 'ready'
+  | 'remediable'
+  | 'permission_blocked'
+  | 'unsupported';
+
+export interface TaskRemediationSummary {
+  packageManager: string;
+  missingCommands: string[];
+  packages: string[];
+}
+
+export type ToolSource = 'builtin_task' | 'reviewed_command';
+
+export type ToolLibraryCategory =
+  | 'recommended_recent'
+  | 'daily_inspection'
+  | 'performance'
+  | 'storage'
+  | 'network'
+  | 'web_service'
+  | 'security_login'
+  | 'service_management'
+  | 'container'
+  | 'system_settings';
+
+export interface ToolLibraryMetadata {
+  source: ToolSource;
+  primaryCategory: ToolLibraryCategory;
+  keywords: string[];
+  noviceAliases: string[];
 }
 
 export interface TaskExecutionRequest {

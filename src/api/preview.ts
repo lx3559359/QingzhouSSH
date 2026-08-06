@@ -77,8 +77,16 @@ const previewDataRoot =
 
 const previewTasks: TaskAvailability[] = [
   {
-    compatible: true,
-    reason: null,
+    state: 'ready',
+    summary: '当前服务器可以直接运行',
+    missingCommands: [],
+    remediation: null,
+    library: {
+      source: 'reviewed_command',
+      primaryCategory: 'daily_inspection',
+      keywords: ['系统概览', '日常巡检'],
+      noviceAliases: ['检查服务器'],
+    },
     definition: {
       id: 'system.overview',
       version: 2,
@@ -111,8 +119,16 @@ const previewTasks: TaskAvailability[] = [
     },
   },
   {
-    compatible: true,
-    reason: null,
+    state: 'ready',
+    summary: '当前服务器可以直接运行',
+    missingCommands: [],
+    remediation: null,
+    library: {
+      source: 'builtin_task',
+      primaryCategory: 'service_management',
+      keywords: ['重启服务', '服务管理'],
+      noviceAliases: ['服务没有响应'],
+    },
     definition: {
       id: 'service.restart',
       version: 2,
