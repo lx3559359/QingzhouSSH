@@ -10,9 +10,9 @@ use serde::{Deserialize, Serialize};
 use crate::{
     core::{
         data_migration::{
-            copy_and_verify, DataMigrationJournal, DataMigrationPhase, MigrationJournalStore,
-            SystemMigrationEnvironment, VerifiedMigration, MIGRATION_COMPLETE_FILE,
-            MIGRATION_JOURNAL_FILE,
+            copy_and_verify, CopyAndVerifyRequest, DataMigrationJournal, DataMigrationPhase,
+            MigrationJournalStore, SystemMigrationEnvironment, VerifiedMigration,
+            MIGRATION_COMPLETE_FILE, MIGRATION_JOURNAL_FILE,
         },
         data_root::DataRootSource,
         portable_root, root_registry,
@@ -211,16 +211,15 @@ where
         journal.copied_bytes = 0;
         journal.updated_at = now_millis();
         store.save(&journal)?;
-        let verified = copy_and_verify(
+        let request = CopyAndVerifyRequest::new(
             &preview.source,
             &preview.target,
             &manifest,
             preview.retryable,
-            &mut journal,
             &store,
             environment,
-            before_verify,
-        )?;
+        );
+        let verified = copy_and_verify(request, &mut journal, before_verify)?;
         write_complete_marker(&verified)?;
         pointer.commit(&verified)?;
         journal.transition(DataMigrationPhase::Switched, now_millis());

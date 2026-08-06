@@ -47,52 +47,67 @@ impl VerifiedMigration {
     }
 }
 
-pub fn copy_and_verify<E, F>(
-    source: &Path,
-    target: &Path,
-    manifest: &DataMigrationManifest,
+pub struct CopyAndVerifyRequest<'a, E> {
+    source: &'a Path,
+    target: &'a Path,
+    manifest: &'a DataMigrationManifest,
     retryable: bool,
+    store: &'a MigrationJournalStore,
+    environment: &'a E,
+}
+
+impl<'a, E> CopyAndVerifyRequest<'a, E> {
+    pub fn new(
+        source: &'a Path,
+        target: &'a Path,
+        manifest: &'a DataMigrationManifest,
+        retryable: bool,
+        store: &'a MigrationJournalStore,
+        environment: &'a E,
+    ) -> Self {
+        Self {
+            source,
+            target,
+            manifest,
+            retryable,
+            store,
+            environment,
+        }
+    }
+}
+
+pub fn copy_and_verify<E, F>(
+    request: CopyAndVerifyRequest<'_, E>,
     journal: &mut DataMigrationJournal,
-    store: &MigrationJournalStore,
-    environment: &E,
     before_verify: F,
 ) -> AppResult<VerifiedMigration>
 where
     E: MigrationEnvironment,
     F: FnOnce(&Path) -> AppResult<()>,
 {
-    let result = copy_and_verify_inner(
-        source,
-        target,
-        manifest,
-        retryable,
-        journal,
-        store,
-        environment,
-        before_verify,
-    );
+    let result = copy_and_verify_inner(&request, journal, before_verify);
     if let Err(error) = &result {
         journal.fail(error, now_millis());
-        let _ = store.save(journal);
+        let _ = request.store.save(journal);
     }
     result
 }
 
-#[allow(clippy::too_many_arguments)]
 fn copy_and_verify_inner<E, F>(
-    source: &Path,
-    target: &Path,
-    manifest: &DataMigrationManifest,
-    retryable: bool,
+    request: &CopyAndVerifyRequest<'_, E>,
     journal: &mut DataMigrationJournal,
-    store: &MigrationJournalStore,
-    environment: &E,
     before_verify: F,
 ) -> AppResult<VerifiedMigration>
 where
     E: MigrationEnvironment,
     F: FnOnce(&Path) -> AppResult<()>,
 {
+    let source = request.source;
+    let target = request.target;
+    let manifest = request.manifest;
+    let retryable = request.retryable;
+    let store = request.store;
+    let environment = request.environment;
     validate_existing_target(target, manifest, retryable, environment)?;
     journal.transition(DataMigrationPhase::Copying, now_millis());
     store.save(journal)?;

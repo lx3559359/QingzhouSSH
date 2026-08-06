@@ -2,8 +2,8 @@ use std::{cell::Cell, fs, path::Path};
 
 use qingzhou_ssh_lib::core::{
     data_migration::{
-        copy_and_verify, preflight_with, DataMigrationJournal, DataMigrationPhase,
-        MigrationEnvironment, MigrationJournalStore,
+        copy_and_verify, preflight_with, CopyAndVerifyRequest, DataMigrationJournal,
+        DataMigrationPhase, MigrationEnvironment, MigrationJournalStore,
     },
     data_root::{initialize_data_root, DataRootSource},
 };
@@ -62,17 +62,9 @@ fn copies_files_and_empty_directories_then_verifies_sha256() {
     let (manifest, mut journal, store) = prepared(&source, &target);
     store.save(&journal).unwrap();
 
-    let verified = copy_and_verify(
-        &source,
-        &target,
-        &manifest,
-        false,
-        &mut journal,
-        &store,
-        &Environment,
-        |_| Ok(()),
-    )
-    .unwrap();
+    let request =
+        CopyAndVerifyRequest::new(&source, &target, &manifest, false, &store, &Environment);
+    let verified = copy_and_verify(request, &mut journal, |_| Ok(())).unwrap();
 
     assert_eq!(verified.file_count(), 2);
     assert_eq!(fs::read(target.join("app.db")).unwrap(), b"database");
@@ -94,19 +86,12 @@ fn corruption_marks_failed_and_never_qualifies_for_pointer_switch() {
     store.save(&journal).unwrap();
     let pointer_switches = Cell::new(0_u32);
 
-    let result = copy_and_verify(
-        &source,
-        &target,
-        &manifest,
-        false,
-        &mut journal,
-        &store,
-        &Environment,
-        |target| {
-            fs::write(target.join("app.db"), b"tampered")?;
-            Ok(())
-        },
-    );
+    let request =
+        CopyAndVerifyRequest::new(&source, &target, &manifest, false, &store, &Environment);
+    let result = copy_and_verify(request, &mut journal, |target| {
+        fs::write(target.join("app.db"), b"tampered")?;
+        Ok(())
+    });
     if result.is_ok() {
         pointer_switches.set(pointer_switches.get() + 1);
     }

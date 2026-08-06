@@ -4,7 +4,7 @@ pub mod model;
 pub mod preflight;
 pub mod worker;
 
-pub use copy::{copy_and_verify, verify_manifest, VerifiedMigration};
+pub use copy::{copy_and_verify, verify_manifest, CopyAndVerifyRequest, VerifiedMigration};
 pub use journal::{DataMigrationJournal, DataMigrationPhase, MigrationJournalStore};
 pub use model::{
     DataMigrationManifest, DataMigrationManifestEntry, DataMigrationPreview, ManifestEntryKind,
