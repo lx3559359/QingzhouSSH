@@ -96,6 +96,10 @@ impl WorkflowRunRegistry {
             .is_ok_and(|active| active.contains_key(&run_id))
     }
 
+    pub async fn is_empty(&self) -> bool {
+        self.active.lock().is_ok_and(|active| active.is_empty())
+    }
+
     fn lock(&self) -> AppResult<std::sync::MutexGuard<'_, HashMap<Uuid, ActiveWorkflowRun>>> {
         self.active
             .lock()

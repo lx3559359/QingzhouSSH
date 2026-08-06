@@ -376,6 +376,10 @@ impl ScriptService {
         Ok(())
     }
 
+    pub async fn is_idle(&self) -> bool {
+        self.active.lock().await.is_empty()
+    }
+
     async fn consume_preview(
         &self,
         preview_id: Uuid,

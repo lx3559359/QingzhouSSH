@@ -20,6 +20,8 @@ import { DownloadsPage } from '../features/downloads/DownloadsPage';
 import { ExecutionHistoryPage } from '../features/history/ExecutionHistoryPage';
 import { WorkflowPage } from '../features/workflows/WorkflowPage';
 import { SettingsPage } from '../features/settings/SettingsPage';
+import { DataMigrationResultNotice } from '../features/settings/DataMigrationResultNotice';
+import type { ReadyBootstrapStatus } from '../api/contracts';
 
 type PageKey =
   | 'home'
@@ -44,7 +46,7 @@ const navigation = [
   { key: 'settings' as const, label: '设置', icon: GearSix },
 ];
 
-export function AppShell({ dataRoot }: { dataRoot: string }) {
+export function AppShell({ bootstrap }: { bootstrap: ReadyBootstrapStatus }) {
   const [page, setPage] = useState<PageKey>('home');
   const [searchIntent, setSearchIntent] = useState<RemoteFileSearchIntent | null>(null);
   const contentRef = useRef<HTMLElement>(null);
@@ -84,6 +86,7 @@ export function AppShell({ dataRoot }: { dataRoot: string }) {
       </nav>
 
       <section className="workspace-content" ref={contentRef}>
+        <DataMigrationResultNotice journal={bootstrap.lastDataMigration} onRetry={() => setPage('settings')} />
         {page === 'home' && <HomePage onNavigate={setPage} />}
         {page === 'servers' && <ServerListPage />}
         {page === 'tasks' && <TaskPage />}
@@ -92,7 +95,7 @@ export function AppShell({ dataRoot }: { dataRoot: string }) {
         {page === 'workflows' && <WorkflowPage />}
         {page === 'history' && <ExecutionHistoryPage />}
         {page === 'downloads' && <DownloadsPage />}
-        {page === 'settings' && <SettingsPage dataRoot={dataRoot} />}
+        {page === 'settings' && <SettingsPage bootstrap={bootstrap} />}
       </section>
     </div>
   );

@@ -51,6 +51,9 @@ describe('App', () => {
     apiMocks.bootstrapStatus.mockResolvedValue({
       state: 'ready',
       dataRoot: 'D:\\QingzhouSSH',
+      dataRootSource: 'registry',
+      dataRootMutable: true,
+      lastDataMigration: null,
     });
     render(<App />);
 

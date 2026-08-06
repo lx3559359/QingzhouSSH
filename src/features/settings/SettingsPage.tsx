@@ -4,6 +4,7 @@ import {
   ClockCounterClockwise,
   Database,
   DownloadSimple,
+  FolderOpen,
   GearSix,
   GithubLogo,
   HardDrive,
@@ -15,8 +16,9 @@ import {
 } from '@phosphor-icons/react';
 import { useCallback, useEffect, useState } from 'react';
 
-import type { UpdatePhase, UpdateProgressEvent, UpdateStatus } from '../../api/contracts';
+import type { ReadyBootstrapStatus, UpdatePhase, UpdateProgressEvent, UpdateStatus } from '../../api/contracts';
 import { api, asAppError } from '../../api/tauri';
+import { DataRootMigrationDialog } from './DataRootMigrationDialog';
 
 type BusyAction =
   | 'loading'
@@ -61,12 +63,13 @@ function statusTone(phase: UpdatePhase) {
   return 'neutral';
 }
 
-export function SettingsPage({ dataRoot }: { dataRoot: string }) {
+export function SettingsPage({ bootstrap }: { bootstrap: ReadyBootstrapStatus }) {
   const [status, setStatus] = useState<UpdateStatus | null>(null);
   const [busy, setBusy] = useState<BusyAction>('loading');
   const [error, setError] = useState('');
   const [progress, setProgress] = useState<UpdateProgressEvent | null>(null);
   const [confirmInstall, setConfirmInstall] = useState(false);
+  const [migrationIntent, setMigrationIntent] = useState<'choose' | 'retry' | 'portable_default' | null>(null);
 
   const loadStatus = useCallback(async () => {
     setBusy('loading');
@@ -221,9 +224,32 @@ export function SettingsPage({ dataRoot }: { dataRoot: string }) {
               <span className="feature-icon feature-icon--blue"><Database weight="duotone" /></span>
               <div>
                 <span>数据目录</span>
-                <strong title={dataRoot}>{dataRoot}</strong>
-                <small>配置、日志、缓存与更新均位于此目录</small>
+                <strong title={bootstrap.dataRoot}>{bootstrap.dataRoot}</strong>
+                <small>
+                  {bootstrap.dataRootSource === 'environment'
+                    ? '由 QINGZHOU_DATA_ROOT 环境变量锁定'
+                    : '配置、日志、缓存与更新均位于此目录'}
+                </small>
               </div>
+              <button
+                className="secondary-button data-root-change-button"
+                type="button"
+                disabled={!bootstrap.dataRootMutable}
+                title={!bootstrap.dataRootMutable ? '环境变量锁定时不能在客户端修改' : undefined}
+                onClick={() => setMigrationIntent('choose')}
+              >
+                <FolderOpen weight="bold" />更改数据目录
+              </button>
+              {bootstrap.dataRootSource === 'portable_custom' && (
+                <button className="secondary-button data-root-restore-button" type="button" onClick={() => setMigrationIntent('portable_default')}>
+                  恢复程序旁目录
+                </button>
+              )}
+              {bootstrap.lastDataMigration?.phase === 'failed' && (
+                <button className="secondary-button data-root-retry-button" type="button" onClick={() => setMigrationIntent('retry')}>
+                  重试上次迁移
+                </button>
+              )}
             </article>
           </div>
 
@@ -414,6 +440,10 @@ export function SettingsPage({ dataRoot }: { dataRoot: string }) {
             </div>
           </section>
         </div>
+      )}
+
+      {migrationIntent && (
+        <DataRootMigrationDialog bootstrap={bootstrap} intent={migrationIntent} onClose={() => setMigrationIntent(null)} />
       )}
     </section>
   );

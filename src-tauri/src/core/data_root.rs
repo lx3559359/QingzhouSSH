@@ -4,55 +4,84 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::error::{AppError, AppResult};
 
 #[derive(Debug, Default)]
 pub struct DataRootInputs {
     pub env_override: Option<PathBuf>,
-    pub portable_root: Option<PathBuf>,
+    pub portable_mode: bool,
+    pub portable_custom_root: Option<PathBuf>,
+    pub portable_default_root: Option<PathBuf>,
     pub registry_root: Option<PathBuf>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum DataRootSource {
     Environment,
-    Portable,
+    PortableCustom,
+    PortableDefault,
     Registry,
     NeedsSelection,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct DataRootResolution {
     pub source: DataRootSource,
     pub path: Option<PathBuf>,
+    pub mutable: bool,
 }
 
-pub fn resolve_data_root(input: DataRootInputs) -> DataRootResolution {
+pub fn resolve_data_root(input: DataRootInputs) -> AppResult<DataRootResolution> {
     if let Some(path) = input.env_override {
-        return DataRootResolution {
+        validate_root_path(&path)?;
+        return Ok(DataRootResolution {
             source: DataRootSource::Environment,
             path: Some(path),
-        };
+            mutable: false,
+        });
     }
-    if let Some(path) = input.portable_root {
-        return DataRootResolution {
-            source: DataRootSource::Portable,
+    if input.portable_mode {
+        if let Some(path) = input.portable_custom_root {
+            validate_root_path(&path)?;
+            return Ok(DataRootResolution {
+                source: DataRootSource::PortableCustom,
+                path: Some(path),
+                mutable: true,
+            });
+        }
+        let path = input
+            .portable_default_root
+            .ok_or_else(|| AppError::Validation("便携版默认数据目录不可用".into()))?;
+        validate_root_path(&path)?;
+        return Ok(DataRootResolution {
+            source: DataRootSource::PortableDefault,
             path: Some(path),
-        };
+            mutable: true,
+        });
     }
     if let Some(path) = input.registry_root {
-        return DataRootResolution {
+        validate_root_path(&path)?;
+        return Ok(DataRootResolution {
             source: DataRootSource::Registry,
             path: Some(path),
-        };
+            mutable: true,
+        });
     }
-    DataRootResolution {
+    Ok(DataRootResolution {
         source: DataRootSource::NeedsSelection,
         path: None,
+        mutable: true,
+    })
+}
+
+fn validate_root_path(path: &Path) -> AppResult<()> {
+    if !path.is_absolute() {
+        return Err(AppError::Validation("数据目录必须是绝对路径".into()));
     }
+    Ok(())
 }
 
 pub fn initialize_data_root(root: &Path) -> AppResult<()> {
@@ -93,16 +122,109 @@ pub fn resolve_runtime_data_root() -> AppResult<DataRootResolution> {
     let executable_directory = executable
         .parent()
         .ok_or_else(|| AppError::Validation("无法确定程序目录".into()))?;
-    let portable_root = executable_directory
-        .join("portable.flag")
-        .is_file()
-        .then(|| executable_directory.join("data"));
+    let portable_mode = executable_directory.join("portable.flag").is_file();
+    let portable_custom_root = if portable_mode {
+        crate::core::portable_root::load(&executable_directory.join("data-root.json"))?
+    } else {
+        None
+    };
 
-    Ok(resolve_data_root(DataRootInputs {
+    let resolution = resolve_data_root(DataRootInputs {
         env_override: std::env::var_os("QINGZHOU_DATA_ROOT").map(PathBuf::from),
-        portable_root,
-        registry_root: crate::core::root_registry::load_data_root()?,
+        portable_mode,
+        portable_custom_root,
+        portable_default_root: portable_mode.then(|| executable_directory.join("data")),
+        registry_root: if portable_mode {
+            None
+        } else {
+            crate::core::root_registry::load_data_root()?
+        },
+    })?;
+    recover_runtime_resolution(resolution, executable_directory)
+}
+
+pub fn migration_recovery_resolution(
+    current: &DataRootResolution,
+    journal: &crate::core::data_migration::DataMigrationJournal,
+    completion_marker_valid: bool,
+) -> AppResult<Option<DataRootResolution>> {
+    let Some(current_root) = current.path.as_deref() else {
+        return Ok(None);
+    };
+    if current.source == DataRootSource::Environment
+        || !same_runtime_path(current_root, &journal.target)
+    {
+        return Ok(None);
+    }
+    if journal.phase == crate::core::data_migration::DataMigrationPhase::Completed
+        && completion_marker_valid
+    {
+        return Ok(None);
+    }
+    if !journal.source.is_absolute()
+        || !journal.source.is_dir()
+        || same_runtime_path(&journal.source, &journal.target)
+        || matches!(
+            journal.source_mode,
+            DataRootSource::Environment | DataRootSource::NeedsSelection
+        )
+    {
+        return Err(AppError::Security(
+            "迁移目标状态无效，且无法验证旧数据目录".into(),
+        ));
+    }
+    Ok(Some(DataRootResolution {
+        source: journal.source_mode,
+        path: Some(journal.source.clone()),
+        mutable: true,
     }))
+}
+
+fn same_runtime_path(left: &Path, right: &Path) -> bool {
+    let left = fs::canonicalize(left).unwrap_or_else(|_| left.to_path_buf());
+    let right = fs::canonicalize(right).unwrap_or_else(|_| right.to_path_buf());
+    #[cfg(windows)]
+    {
+        left.to_string_lossy()
+            .eq_ignore_ascii_case(&right.to_string_lossy())
+    }
+    #[cfg(not(windows))]
+    {
+        left == right
+    }
+}
+
+fn recover_runtime_resolution(
+    resolution: DataRootResolution,
+    executable_directory: &Path,
+) -> AppResult<DataRootResolution> {
+    let Some(root) = resolution.path.as_deref() else {
+        return Ok(resolution);
+    };
+    let journal_path = root.join(crate::core::data_migration::MIGRATION_JOURNAL_FILE);
+    if !journal_path.is_file() {
+        return Ok(resolution);
+    }
+    let journal = crate::core::data_migration::MigrationJournalStore::load(&journal_path)?;
+    let marker_valid = crate::core::data_migration::completion_marker_is_valid(root, &journal);
+    let Some(recovered) = migration_recovery_resolution(&resolution, &journal, marker_valid)?
+    else {
+        return Ok(resolution);
+    };
+    match recovered.source {
+        DataRootSource::Registry => {
+            crate::core::root_registry::save_data_root(recovered.path.as_deref().unwrap())?
+        }
+        DataRootSource::PortableDefault => {
+            crate::core::portable_root::clear(&executable_directory.join("data-root.json"))?
+        }
+        DataRootSource::PortableCustom => crate::core::portable_root::save(
+            &executable_directory.join("data-root.json"),
+            recovered.path.as_deref().unwrap(),
+        )?,
+        DataRootSource::Environment | DataRootSource::NeedsSelection => unreachable!(),
+    }
+    Ok(recovered)
 }
 
 #[cfg(test)]
@@ -114,10 +236,12 @@ mod tests {
     fn environment_override_wins_over_portable_and_registry() {
         let input = DataRootInputs {
             env_override: Some(r"D:\work\data".into()),
-            portable_root: Some(r"D:\app\data".into()),
+            portable_mode: true,
+            portable_custom_root: Some(r"D:\app\custom".into()),
+            portable_default_root: Some(r"D:\app\data".into()),
             registry_root: Some(r"E:\saved".into()),
         };
-        let resolved = resolve_data_root(input);
+        let resolved = resolve_data_root(input).unwrap();
         assert_eq!(resolved.source, DataRootSource::Environment);
         assert_eq!(
             resolved.path.unwrap(),
@@ -127,7 +251,7 @@ mod tests {
 
     #[test]
     fn no_source_requires_user_selection_instead_of_appdata_fallback() {
-        let resolved = resolve_data_root(DataRootInputs::default());
+        let resolved = resolve_data_root(DataRootInputs::default()).unwrap();
         assert_eq!(resolved.source, DataRootSource::NeedsSelection);
         assert!(resolved.path.is_none());
     }
@@ -159,5 +283,14 @@ mod tests {
         initialize_data_root(temp.path()).unwrap();
 
         assert_eq!(std::fs::read(existing_probe).unwrap(), b"keep me");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn runtime_path_comparison_matches_windows_case_insensitively() {
+        assert!(same_runtime_path(
+            Path::new(r"D:\Qingzhou\Data"),
+            Path::new(r"d:\qingzhou\data")
+        ));
     }
 }

@@ -9,6 +9,7 @@ pub mod services;
 mod state;
 pub mod window;
 
+pub use core::data_migration::run_process_mode;
 use core::data_root::{initialize_data_root, resolve_runtime_data_root};
 use services::app_services::AppServices;
 use services::update_service::UpdateManager;
@@ -32,6 +33,13 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::bootstrap::bootstrap_status,
             commands::bootstrap::initialize_data_root,
+            commands::data_migration::preflight_data_root_migration,
+            commands::data_migration::preflight_retry_data_root_migration,
+            commands::data_migration::preflight_portable_default_data_root_migration,
+            commands::data_migration::start_data_root_migration,
+            commands::data_migration::get_data_root_migration_status,
+            commands::data_migration::acknowledge_data_root_migration,
+            commands::data_migration::open_data_root_folder,
             commands::servers::list_servers,
             commands::servers::create_server,
             commands::servers::inspect_server_host_key,
@@ -108,7 +116,8 @@ pub fn run() {
             let resolution = resolve_runtime_data_root()?;
             if let Some(root) = resolution.path.as_deref() {
                 initialize_data_root(root)?;
-                let services = tauri::async_runtime::block_on(AppServices::open(root))?;
+                let services = tauri::async_runtime::block_on(AppServices::open(root))?
+                    .with_data_root_resolution(&resolution);
                 let updater = UpdateManager::new(
                     app.package_info().version.to_string(),
                     root,

@@ -47,6 +47,10 @@ impl TransferService {
         }
     }
 
+    pub async fn is_idle(&self) -> bool {
+        self.registry.is_empty().await
+    }
+
     pub async fn upload<E: EventSink>(
         &self,
         server_id: &str,

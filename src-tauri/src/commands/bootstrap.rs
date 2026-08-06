@@ -4,7 +4,7 @@ use serde::Serialize;
 use tauri::{AppHandle, State};
 
 use crate::{
-    core::root_registry,
+    core::{data_migration::DataMigrationJournal, data_root::DataRootSource, root_registry},
     error::{AppError, AppResult},
     services::app_services::AppServices,
     services::update_service::UpdateManager,
@@ -20,6 +20,12 @@ pub enum BootstrapStatus {
     Ready {
         #[serde(rename = "dataRoot")]
         data_root: String,
+        #[serde(rename = "dataRootSource")]
+        data_root_source: DataRootSource,
+        #[serde(rename = "dataRootMutable")]
+        data_root_mutable: bool,
+        #[serde(rename = "lastDataMigration")]
+        last_data_migration: Option<DataMigrationJournal>,
     },
 }
 
@@ -27,6 +33,9 @@ impl BootstrapStatus {
     fn ready(services: &AppServices) -> Self {
         Self::Ready {
             data_root: services.data_root().to_string_lossy().into_owned(),
+            data_root_source: services.data_root_source(),
+            data_root_mutable: services.data_root_mutable(),
+            last_data_migration: services.data_migration_service().status().ok().flatten(),
         }
     }
 }
@@ -78,9 +87,18 @@ mod tests {
         assert_eq!(
             serde_json::to_value(BootstrapStatus::Ready {
                 data_root: r"D:\QingzhouData".into(),
+                data_root_source: DataRootSource::Registry,
+                data_root_mutable: true,
+                last_data_migration: None,
             })
             .unwrap(),
-            serde_json::json!({ "state": "ready", "dataRoot": r"D:\QingzhouData" })
+            serde_json::json!({
+                "state": "ready",
+                "dataRoot": r"D:\QingzhouData",
+                "dataRootSource": "registry",
+                "dataRootMutable": true,
+                "lastDataMigration": null
+            })
         );
     }
 }

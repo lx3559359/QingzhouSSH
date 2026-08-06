@@ -143,6 +143,10 @@ impl ExecutionRegistry {
     pub async fn contains(&self, id: Uuid) -> bool {
         self.tokens.lock().await.contains_key(&id)
     }
+
+    pub async fn is_empty(&self) -> bool {
+        self.tokens.lock().await.is_empty()
+    }
 }
 
 #[derive(Clone)]
@@ -217,6 +221,10 @@ impl ExecutionService {
                 }
             })
             .collect())
+    }
+
+    pub async fn is_idle(&self) -> bool {
+        self.registry.is_empty().await
     }
 
     pub async fn execute_task<E: EventSink>(

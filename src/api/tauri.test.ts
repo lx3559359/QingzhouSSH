@@ -139,6 +139,28 @@ describe('Tauri API wrapper', () => {
     expect(received).toEqual([1, 3]);
   });
 
+  it('uses token-bound data migration commands without accepting executable paths', async () => {
+    await tauriApi.preflightDataRootMigration('D:\\QingzhouData-New');
+    await tauriApi.preflightRetryDataRootMigration();
+    await tauriApi.preflightPortableDefaultDataRootMigration();
+    await tauriApi.startDataRootMigration('preview-1', 'token-1');
+    await tauriApi.getDataRootMigrationStatus();
+    await tauriApi.acknowledgeDataRootMigration('migration-1');
+    await tauriApi.openDataRootFolder('last_source');
+
+    expect(invoke.mock.calls).toEqual([
+      ['preflight_data_root_migration', { targetPath: 'D:\\QingzhouData-New' }],
+      ['preflight_retry_data_root_migration'],
+      ['preflight_portable_default_data_root_migration'],
+      ['start_data_root_migration', { previewId: 'preview-1', confirmationToken: 'token-1' }],
+      ['get_data_root_migration_status'],
+      ['acknowledge_data_root_migration', { migrationId: 'migration-1' }],
+      ['open_data_root_folder', { kind: 'last_source' }],
+    ]);
+    expect(JSON.stringify(invoke.mock.calls)).not.toContain('executable');
+    expect(JSON.stringify(invoke.mock.calls)).not.toContain('sourcePath');
+  });
+
   it('previews and confirms only token-bound component remediation', async () => {
     const received: number[] = [];
     await tauriApi.previewTaskRemediation('server-1', 'network.packet_capture');

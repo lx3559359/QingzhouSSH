@@ -2,6 +2,8 @@ import type {
   CreateServerRequest,
   ConfirmTaskRemediationRequest,
   CustomExecutionRequest,
+  DataMigrationJournal,
+  DataMigrationPreview,
   DownloadRequest,
   DirectoryListing,
   ExecutionDetails,
@@ -74,6 +76,8 @@ let previewPersonalScripts = new Map<string, PersonalScriptDetails>();
 let previewPersonalScriptVersions = new Map<string, PersonalScriptVersion[]>();
 let previewPersonalScriptRuns = new Map<string, PersonalScriptRunPreview>();
 let previewLogTarget: LogSearchRequest['target'] = 'content';
+let previewDataMigration: DataMigrationJournal | null = null;
+let previewDataMigrationTarget: string | null = null;
 const previewDataRoot =
   import.meta.env.VITE_QINGZHOU_DATA_ROOT ?? '.local\\dev-data（项目目录内）';
 
@@ -1178,14 +1182,84 @@ function createPreviewPersonalScript(
   return clone(details);
 }
 
+function previewMigration(target: string, retryable: boolean): DataMigrationPreview {
+  return {
+    previewId: crypto.randomUUID(),
+    confirmationToken: crypto.randomUUID(),
+    expiresAt: Date.now() + 5 * 60 * 1000,
+    source: previewDataRoot,
+    target,
+    fileCount: 128,
+    totalBytes: 42 * 1024 * 1024,
+    requiredBytes: 106 * 1024 * 1024,
+    availableBytes: 300 * 1024 * 1024 * 1024,
+    oldRootWillBeKept: true,
+    retryable,
+  };
+}
+
 export const previewApi = {
   ...updatePreviewApi,
   ...workflowPreviewApi,
   bootstrapStatus: async () => ({
     state: 'ready' as const,
     dataRoot: previewDataRoot,
+    dataRootSource: 'registry' as const,
+    dataRootMutable: true,
+    lastDataMigration: previewDataMigration,
   }),
-  initializeDataRoot: async (path: string) => ({ state: 'ready' as const, dataRoot: path }),
+  initializeDataRoot: async (path: string) => ({
+    state: 'ready' as const,
+    dataRoot: path,
+    dataRootSource: 'registry' as const,
+    dataRootMutable: true,
+    lastDataMigration: null,
+  }),
+  preflightDataRootMigration: async (targetPath: string): Promise<DataMigrationPreview> => {
+    previewDataMigrationTarget = targetPath;
+    return previewMigration(targetPath, false);
+  },
+  preflightRetryDataRootMigration: async (): Promise<DataMigrationPreview> => {
+    const target = previewDataMigration?.target ?? `${previewDataRoot}-migrated`;
+    previewDataMigrationTarget = target;
+    return previewMigration(target, true);
+  },
+  preflightPortableDefaultDataRootMigration: async (): Promise<DataMigrationPreview> => {
+    const target = `${previewDataRoot}\\portable-data`;
+    previewDataMigrationTarget = target;
+    return previewMigration(target, false);
+  },
+  startDataRootMigration: async (
+    previewId: string,
+    _confirmationToken: string,
+  ): Promise<DataMigrationJournal> => {
+    const now = Date.now();
+    previewDataMigration = {
+      schemaVersion: 1,
+      migrationId: previewId,
+      source: previewDataRoot,
+      target: previewDataMigrationTarget ?? `${previewDataRoot}-migrated`,
+      sourceMode: 'registry',
+      parentPid: 1,
+      fileCount: 128,
+      totalBytes: 42 * 1024 * 1024,
+      copiedFiles: 0,
+      copiedBytes: 0,
+      phase: 'prepared',
+      errorSummary: null,
+      startedAt: now,
+      updatedAt: now,
+      acknowledged: false,
+    };
+    return previewDataMigration;
+  },
+  getDataRootMigrationStatus: async () => previewDataMigration,
+  acknowledgeDataRootMigration: async (_migrationId: string) => {
+    if (!previewDataMigration) throw new Error('没有迁移结果');
+    previewDataMigration = { ...previewDataMigration, acknowledged: true };
+    return previewDataMigration;
+  },
+  openDataRootFolder: async (_kind: 'current' | 'last_source') => undefined,
   listServers: async () => previewServers,
   createServer: async (request: CreateServerRequest) => {
     const profile: ServerProfile = {

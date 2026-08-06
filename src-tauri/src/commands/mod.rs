@@ -1,4 +1,5 @@
 pub mod bootstrap;
+pub mod data_migration;
 pub mod executions;
 pub mod logs;
 pub mod operations;
@@ -9,6 +10,7 @@ pub mod transfers;
 pub mod updates;
 pub mod workflows;
 
+use std::sync::atomic::Ordering;
 use tauri::{ipc::Channel, State};
 
 use crate::{
@@ -22,6 +24,11 @@ use crate::{
 };
 
 pub(crate) async fn services(state: &State<'_, AppState>) -> AppResult<AppServices> {
+    if state.migration_starting.load(Ordering::SeqCst) {
+        return Err(AppError::Validation(
+            "客户端正在退出并迁移数据目录，不能开始新的操作".into(),
+        ));
+    }
     state
         .services
         .read()
@@ -31,6 +38,11 @@ pub(crate) async fn services(state: &State<'_, AppState>) -> AppResult<AppServic
 }
 
 pub(crate) async fn updater(state: &State<'_, AppState>) -> AppResult<UpdateManager> {
+    if state.migration_starting.load(Ordering::SeqCst) {
+        return Err(AppError::Validation(
+            "客户端正在退出并迁移数据目录，不能开始更新操作".into(),
+        ));
+    }
     state.updater.read().await.clone().ok_or(AppError::NotReady)
 }
 

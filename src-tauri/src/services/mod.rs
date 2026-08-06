@@ -1,4 +1,5 @@
 pub mod app_services;
+pub mod data_migration_service;
 pub mod event_sink;
 pub mod execution_service;
 pub mod log_service;

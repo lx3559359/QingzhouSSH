@@ -10,7 +10,7 @@ use zeroize::Zeroizing;
 
 use crate::{
     core::{
-        data_root::initialize_data_root,
+        data_root::{initialize_data_root, DataRootResolution, DataRootSource},
         database::Database,
         secret_protector::{DpapiProtector, SecretProtector},
         ssh::{
@@ -34,6 +34,7 @@ use crate::{
         workflow_repository::WorkflowRepository,
     },
     services::{
+        data_migration_service::DataMigrationService,
         execution_service::{
             CustomExecutionRequest, ExecutionRegistry, ExecutionService, TaskAvailability,
             TaskExecutionRequest,
@@ -75,6 +76,9 @@ pub struct HostKeyCheck {
 #[derive(Clone)]
 pub struct AppServices {
     data_root: PathBuf,
+    data_root_source: DataRootSource,
+    data_root_mutable: bool,
+    data_migration: DataMigrationService,
     servers: ServerRepository,
     vault: Vault,
     executions: ExecutionService,
@@ -186,8 +190,12 @@ impl AppServices {
             workflow_repository.clone(),
             ServerConnector::new(servers.clone(), vault.clone()),
         );
+        let data_migration = DataMigrationService::new(root.to_path_buf());
         Ok(Self {
             data_root: root.to_path_buf(),
+            data_root_source: DataRootSource::Registry,
+            data_root_mutable: true,
+            data_migration,
             servers,
             vault,
             executions,
@@ -209,6 +217,38 @@ impl AppServices {
 
     pub fn data_root(&self) -> &Path {
         &self.data_root
+    }
+
+    pub fn with_data_root_resolution(mut self, resolution: &DataRootResolution) -> Self {
+        self.data_root_source = resolution.source;
+        self.data_root_mutable = resolution.mutable;
+        self
+    }
+
+    pub fn data_root_source(&self) -> DataRootSource {
+        self.data_root_source
+    }
+
+    pub fn data_root_mutable(&self) -> bool {
+        self.data_root_mutable
+    }
+
+    pub fn data_migration_service(&self) -> DataMigrationService {
+        self.data_migration.clone()
+    }
+
+    pub async fn ensure_idle_for_data_migration(&self) -> AppResult<()> {
+        let idle = self.executions.is_idle().await
+            && self.transfers.is_idle().await
+            && self.scripts.is_idle().await
+            && self.operation_batches.is_idle().await
+            && self.workflow_runner.is_idle().await;
+        if !idle {
+            return Err(AppError::Validation(
+                "仍有任务、脚本、文件传输或工作流正在运行，请等待完成后再迁移数据目录".into(),
+            ));
+        }
+        Ok(())
     }
 
     pub fn execution_service(&self) -> ExecutionService {

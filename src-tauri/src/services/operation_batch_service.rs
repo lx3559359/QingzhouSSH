@@ -90,6 +90,10 @@ impl OperationBatchRegistry {
     async fn remove(&self, id: Uuid) {
         self.tokens.lock().await.remove(&id);
     }
+
+    async fn is_empty(&self) -> bool {
+        self.tokens.lock().await.is_empty()
+    }
 }
 
 #[derive(Clone)]
@@ -186,6 +190,10 @@ impl OperationBatchService {
         self.registry.cancel(id).await?;
         self.repository.cancel_queued_items(id).await?;
         Ok(())
+    }
+
+    pub async fn is_idle(&self) -> bool {
+        self.registry.is_empty().await
     }
 
     pub async fn get(&self, id: Uuid) -> AppResult<Option<OperationBatchDetails>> {

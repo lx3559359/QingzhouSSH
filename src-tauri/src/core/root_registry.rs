@@ -20,3 +20,15 @@ pub fn save_data_root(path: &Path) -> AppResult<()> {
     key.set_value(VALUE, &path.to_string_lossy().to_string())?;
     Ok(())
 }
+
+pub fn clear_data_root() -> AppResult<()> {
+    match HKCU.open_subkey_with_flags(KEY, winreg::enums::KEY_SET_VALUE) {
+        Ok(key) => match key.delete_value(VALUE) {
+            Ok(()) => Ok(()),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(error) => Err(error.into()),
+        },
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error.into()),
+    }
+}

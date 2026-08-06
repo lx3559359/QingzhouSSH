@@ -1,6 +1,61 @@
 export type BootstrapStatus =
   | { state: 'needs_selection' }
-  | { state: 'ready'; dataRoot: string };
+  | {
+      state: 'ready';
+      dataRoot: string;
+      dataRootSource: DataRootSource;
+      dataRootMutable: boolean;
+      lastDataMigration: DataMigrationJournal | null;
+    };
+
+export type DataRootSource =
+  | 'environment'
+  | 'portable_custom'
+  | 'portable_default'
+  | 'registry'
+  | 'needs_selection';
+
+export type DataMigrationPhase =
+  | 'prepared'
+  | 'copying'
+  | 'verifying'
+  | 'switched'
+  | 'completed'
+  | 'failed';
+
+export interface DataMigrationJournal {
+  schemaVersion: number;
+  migrationId: string;
+  source: string;
+  target: string;
+  sourceMode: DataRootSource;
+  parentPid: number;
+  fileCount: number;
+  totalBytes: number;
+  copiedFiles: number;
+  copiedBytes: number;
+  phase: DataMigrationPhase;
+  errorSummary: string | null;
+  startedAt: number;
+  updatedAt: number;
+  acknowledged: boolean;
+}
+
+export interface DataMigrationPreview {
+  previewId: string;
+  confirmationToken: string;
+  expiresAt: number;
+  source: string;
+  target: string;
+  fileCount: number;
+  totalBytes: number;
+  requiredBytes: number;
+  availableBytes: number;
+  oldRootWillBeKept: true;
+  retryable: boolean;
+}
+
+export type ReadyBootstrapStatus = Extract<BootstrapStatus, { state: 'ready' }>;
 
 export type CredentialInput =
   | { kind: 'password'; password: string }

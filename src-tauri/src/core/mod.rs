@@ -1,6 +1,8 @@
+pub mod data_migration;
 pub mod data_root;
 pub mod database;
 pub mod logs;
+pub mod portable_root;
 pub mod redaction;
 pub mod root_registry;
 pub mod scripts;

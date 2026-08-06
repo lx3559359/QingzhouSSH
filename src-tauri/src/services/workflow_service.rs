@@ -375,6 +375,10 @@ impl WorkflowService {
         self.registry.current_child(run_id).await
     }
 
+    pub async fn is_idle(&self) -> bool {
+        self.registry.is_empty().await
+    }
+
     pub async fn retry_failed_node<S: WorkflowEventSink>(
         &self,
         run_id: Uuid,

@@ -1362,6 +1362,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "fs2"
+version = "0.4.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9564fc758e15025b46aa6643b1b77d047d1a56a1aea6e01002ac0c7026876213"
+dependencies = [
+ "libc",
+ "winapi",
+]
+
+[[package]]
 name = "futures"
 version = "0.3.33"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3367,6 +3377,7 @@ version = "0.1.6"
 dependencies = [
  "atomicwrites",
  "base64 0.22.1",
+ "fs2",
  "minisign-verify",
  "reqwest",
  "russh",
@@ -3389,6 +3400,7 @@ dependencies = [
  "url",
  "uuid",
  "windows-dpapi",
+ "windows-sys 0.59.0",
  "winreg 0.56.0",
  "zeroize",
 ]

@@ -5,6 +5,8 @@ import type {
   CreateServerRequest,
   ConfirmTaskRemediationRequest,
   CustomExecutionRequest,
+  DataMigrationJournal,
+  DataMigrationPreview,
   DownloadRequest,
   DirectoryListing,
   ExecutionDetails,
@@ -83,6 +85,20 @@ export const tauriApi = {
   bootstrapStatus: () => invoke<BootstrapStatus>('bootstrap_status'),
   initializeDataRoot: (path: string) =>
     invoke<BootstrapStatus>('initialize_data_root', { path }),
+  preflightDataRootMigration: (targetPath: string) =>
+    invoke<DataMigrationPreview>('preflight_data_root_migration', { targetPath }),
+  preflightRetryDataRootMigration: () =>
+    invoke<DataMigrationPreview>('preflight_retry_data_root_migration'),
+  preflightPortableDefaultDataRootMigration: () =>
+    invoke<DataMigrationPreview>('preflight_portable_default_data_root_migration'),
+  startDataRootMigration: (previewId: string, confirmationToken: string) =>
+    invoke<DataMigrationJournal>('start_data_root_migration', { previewId, confirmationToken }),
+  getDataRootMigrationStatus: () =>
+    invoke<DataMigrationJournal | null>('get_data_root_migration_status'),
+  acknowledgeDataRootMigration: (migrationId: string) =>
+    invoke<DataMigrationJournal>('acknowledge_data_root_migration', { migrationId }),
+  openDataRootFolder: (kind: 'current' | 'last_source') =>
+    invoke<void>('open_data_root_folder', { kind }),
   listServers: () => invoke<ServerProfile[]>('list_servers'),
   createServer: (request: CreateServerRequest) =>
     invoke<ServerProfile>('create_server', { request }),
