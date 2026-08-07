@@ -166,6 +166,7 @@ pub(super) fn tasks() -> Vec<TaskDefinition> {
         ),
         hostname_change(),
         timezone_change(),
+        time_sync_change(),
     ]
 }
 
@@ -229,6 +230,40 @@ fn timezone_change() -> TaskDefinition {
             "timedatectl set-timezone -- {{timezone}}",
             "test \"$(timedatectl show -p Timezone --value)\" = {{timezone}}; timedatectl status",
             "timedatectl set-timezone -- {{restore:timezone-before}}",
+            ResultParserKind::KeyValue,
+        )],
+        OutputKind::KeyValue,
+    )
+}
+
+fn time_sync_change() -> TaskDefinition {
+    dangerous_task(
+        "system.time_sync_change",
+        TaskCategory::System,
+        "设置自动校时",
+        "自动识别当前时间同步状态，可开启或关闭系统的网络自动校时",
+        45,
+        vec![parameter(
+            "enabled",
+            "自动校时",
+            "开启后由系统时间服务持续校准时间；关闭后保留当前时间",
+            ParameterKind::Boolean,
+            true,
+            None,
+        )],
+        vec![dangerous_implementation(
+            "timedatectl",
+            &[],
+            &["timedatectl"],
+            "printf 'current_time='; date -Is; printf 'ntp='; timedatectl show -p NTP --value; printf 'synchronized='; timedatectl show -p NTPSynchronized --value; timedatectl status",
+            vec![backup_item(
+                "time-sync-before",
+                BackupItemKind::RuntimeState,
+                r#"qz_ntp=$(timedatectl show -p NTP --value); case "$qz_ntp" in yes|true|1) qz_ntp=true ;; *) qz_ntp=false ;; esac; printf 'ntp=%s\n' "$qz_ntp""#,
+            )],
+            "timedatectl set-ntp {{enabled}}",
+            r#"qz_target={{enabled}}; qz_ntp=$(timedatectl show -p NTP --value); case "$qz_ntp" in yes|true|1) qz_current=true ;; *) qz_current=false ;; esac; test "$qz_current" = "$qz_target"; timedatectl status"#,
+            "timedatectl set-ntp {{restore:time-sync-before}}",
             ResultParserKind::KeyValue,
         )],
         OutputKind::KeyValue,

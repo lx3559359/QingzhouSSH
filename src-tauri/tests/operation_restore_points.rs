@@ -88,6 +88,12 @@ fn task5_snapshots_build_fixed_rollback_and_verification_commands() {
     .unwrap();
     assert!(timezone.command.contains("set-timezone"));
 
+    let time_sync =
+        build_snapshot_rollback_command("system.time_sync_change", "stdout:\nntp=true\nstderr:\n")
+            .unwrap();
+    assert_eq!(time_sync.command, "timedatectl set-ntp true");
+    assert!(time_sync.verify.contains("qz_current"));
+
     let permissions = build_snapshot_rollback_command(
         "security.file_permissions",
         "stdout:\npath=/etc/nginx/nginx.conf\nuid=100\ngid=101\nmode=640\nstderr:\n",
@@ -268,6 +274,7 @@ async fn failed_operation_capture_is_persisted_without_creating_local_assets() {
                 commands: vec!["systemctl".into()],
                 services: vec!["nginx".into()],
                 containers: Vec::new(),
+                ..SystemCapabilities::default()
             },
         )
         .await

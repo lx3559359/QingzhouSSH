@@ -33,6 +33,7 @@ import type {
   ServerProfile,
   SystemCapabilities,
   TaskAvailability,
+  TaskLibrarySnapshot,
   TaskRemediationPreview,
   TaskExecutionRequest,
   UploadRequest,
@@ -110,6 +111,8 @@ export const tauriApi = {
     invoke<SystemCapabilities>('test_server_connection', { serverId }),
   listTaskDefinitions: (serverId: string) =>
     invoke<TaskAvailability[]>('list_task_definitions', { serverId }),
+  getTaskLibrarySnapshot: (serverId: string, forceRefresh = false) =>
+    invoke<TaskLibrarySnapshot>('get_task_library_snapshot', { serverId, forceRefresh }),
   previewTaskRemediation: (serverId: string, taskId: string) =>
     invoke<TaskRemediationPreview>('preview_task_remediation', { serverId, taskId }),
   confirmTaskRemediation: (

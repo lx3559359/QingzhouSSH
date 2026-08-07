@@ -3,7 +3,7 @@ use std::{collections::BTreeMap, sync::Arc};
 use qingzhou_ssh_lib::{
     core::{
         secret_protector::SecretProtector,
-        system_probe::SystemCapabilities,
+        system_probe::{NetworkInterfaceCapability, SystemCapabilities},
         tasks::{built_in_catalog, plan_task, validate_parameters, ParameterKind},
     },
     domain::server::{CreateServerRequest, CredentialInput},
@@ -45,6 +45,15 @@ fn capabilities(commands: &[&str]) -> SystemCapabilities {
         commands: commands.iter().map(|command| (*command).into()).collect(),
         services: Vec::new(),
         containers: Vec::new(),
+        interfaces: vec![NetworkInterfaceCapability {
+            name: "eth0".into(),
+            is_up: true,
+            is_default: true,
+            addresses: vec!["192.0.2.10/24".into()],
+            gateway4: Some("192.0.2.1".into()),
+            gateway6: None,
+        }],
+        ..SystemCapabilities::default()
     }
 }
 

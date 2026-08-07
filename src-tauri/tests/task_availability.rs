@@ -1,5 +1,5 @@
 use qingzhou_ssh_lib::core::{
-    system_probe::SystemCapabilities,
+    system_probe::{SystemCapabilities, PROBE_COMMAND},
     tasks::{
         built_in_catalog, evaluate_task_availability, remediation_for, TaskAvailabilityState,
         TaskDefinition,
@@ -32,6 +32,7 @@ fn capabilities_for(definition: &TaskDefinition) -> SystemCapabilities {
         commands,
         services: Vec::new(),
         containers: Vec::new(),
+        ..SystemCapabilities::default()
     }
 }
 
@@ -75,13 +76,13 @@ fn reports_service_manager_mismatch_separately() {
 }
 
 #[test]
-fn keeps_ip_change_disabled_until_delayed_recovery_is_real() {
+fn enables_ip_change_after_delayed_recovery_and_reconnect_verification_exist() {
     let definition = task("network.ip_change");
     let evaluation = evaluate_task_availability(&definition, &capabilities_for(&definition));
 
-    assert_eq!(evaluation.state, TaskAvailabilityState::Unsupported);
-    assert!(evaluation.summary.contains("延迟回滚"));
-    assert!(evaluation.summary.contains("重连验证"));
+    assert_eq!(evaluation.state, TaskAvailabilityState::Ready);
+    assert!(evaluation.implementation_id.is_some());
+    assert!(evaluation.blocking_capabilities.is_empty());
 }
 
 #[test]
@@ -114,4 +115,30 @@ fn maps_only_the_fixed_package_whitelist() {
 
     assert!(remediation_for(Some("apt"), &["made-up-command".into()]).is_none());
     assert!(remediation_for(Some("apk"), &["tcpdump".into()]).is_none());
+}
+
+#[test]
+fn capability_probe_checks_every_command_required_by_the_builtin_catalog() {
+    let scanned = PROBE_COMMAND
+        .split("for cmd in ")
+        .nth(1)
+        .and_then(|tail| tail.split("; do").next())
+        .expect("probe command allowlist");
+    let scanned = scanned
+        .split_whitespace()
+        .collect::<std::collections::BTreeSet<_>>();
+    let required = built_in_catalog()
+        .into_iter()
+        .flat_map(|definition| definition.implementations)
+        .flat_map(|implementation| implementation.compatibility.required_commands)
+        .collect::<std::collections::BTreeSet<_>>();
+    let missing = required
+        .into_iter()
+        .filter(|command| !scanned.contains(command.as_str()))
+        .collect::<Vec<_>>();
+
+    assert!(
+        missing.is_empty(),
+        "probe does not detect required commands: {missing:?}"
+    );
 }

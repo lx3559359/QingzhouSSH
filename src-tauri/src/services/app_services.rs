@@ -37,7 +37,7 @@ use crate::{
         data_migration_service::DataMigrationService,
         execution_service::{
             CustomExecutionRequest, ExecutionRegistry, ExecutionService, TaskAvailability,
-            TaskExecutionRequest,
+            TaskExecutionRequest, TaskLibrarySnapshot,
         },
         log_service::LogService,
         operation_batch_service::OperationBatchService,
@@ -397,6 +397,16 @@ impl AppServices {
 
     pub async fn list_task_definitions(&self, server_id: &str) -> AppResult<Vec<TaskAvailability>> {
         self.executions.list_task_definitions(server_id).await
+    }
+
+    pub async fn get_task_library_snapshot(
+        &self,
+        server_id: &str,
+        force_refresh: bool,
+    ) -> AppResult<TaskLibrarySnapshot> {
+        self.executions
+            .get_task_library_snapshot(server_id, force_refresh)
+            .await
     }
 
     pub async fn start_task_execution<E: EventSink>(

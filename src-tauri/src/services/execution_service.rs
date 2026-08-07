@@ -10,11 +10,12 @@ use crate::{
     core::{
         sftp::sha256_local_file,
         ssh::executor::{execute_streaming, CommandRequest, EventSink},
+        system_probe::SystemCapabilities,
         tasks::{
             built_in_catalog, evaluate_task_availability, metadata_for, probe_privilege,
             remediation_for, render_command, select_implementation, validate_parameters,
-            RenderedTaskStep, RiskLevel, TaskAvailabilityState, TaskDefinition,
-            TaskRemediationSummary, ToolLibraryMetadata, ValidatedParameters,
+            PrivilegeRequirement, RenderedTaskStep, RiskLevel, TaskAvailabilityState,
+            TaskDefinition, TaskRemediationSummary, ToolLibraryMetadata, ValidatedParameters,
         },
     },
     domain::{
@@ -30,6 +31,7 @@ use crate::{
 };
 
 const DEFAULT_OUTPUT_LIMIT: u64 = 32 * 1024 * 1024;
+const TASK_LIBRARY_CACHE_TTL: Duration = Duration::from_secs(5 * 60);
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -49,6 +51,21 @@ pub struct TaskAvailability {
     pub missing_commands: Vec<String>,
     pub remediation: Option<TaskRemediationSummary>,
     pub library: ToolLibraryMetadata,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskLibrarySnapshot {
+    pub tasks: Vec<TaskAvailability>,
+    pub capabilities: SystemCapabilities,
+    pub detected_at: i64,
+    pub cache_expires_at: i64,
+}
+
+#[derive(Clone)]
+struct CachedTaskLibrary {
+    snapshot: TaskLibrarySnapshot,
+    expires_at: std::time::Instant,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -155,6 +172,7 @@ pub struct ExecutionService {
     repository: ExecutionRepository,
     connector: ServerConnector,
     registry: ExecutionRegistry,
+    task_library_cache: Arc<Mutex<HashMap<String, CachedTaskLibrary>>>,
 }
 
 impl ExecutionService {
@@ -169,23 +187,44 @@ impl ExecutionService {
             repository,
             connector,
             registry,
+            task_library_cache: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
     pub async fn list_task_definitions(&self, server_id: &str) -> AppResult<Vec<TaskAvailability>> {
+        Ok(self.get_task_library_snapshot(server_id, true).await?.tasks)
+    }
+
+    pub async fn get_task_library_snapshot(
+        &self,
+        server_id: &str,
+        force_refresh: bool,
+    ) -> AppResult<TaskLibrarySnapshot> {
+        if !force_refresh {
+            let cache = self.task_library_cache.lock().await;
+            if let Some(cached) = cache.get(server_id) {
+                if cached.expires_at > std::time::Instant::now() {
+                    return Ok(cached.snapshot.clone());
+                }
+            }
+        }
+
         let connected = self.connector.connect(server_id).await?;
         let capabilities = connected.capabilities.clone();
         let definitions = built_in_catalog();
         let permission_available = if definitions.iter().any(|definition| {
-            evaluate_task_availability(definition, &capabilities).state
-                == TaskAvailabilityState::Remediable
+            definition.privilege == PrivilegeRequirement::RootOrPasswordlessSudo
+                && matches!(
+                    evaluate_task_availability(definition, &capabilities).state,
+                    TaskAvailabilityState::Ready | TaskAvailabilityState::Remediable
+                )
         }) {
             probe_privilege(&connected.session).await.is_ok()
         } else {
             true
         };
         connected.session.disconnect().await;
-        Ok(definitions
+        let tasks = definitions
             .into_iter()
             .map(|definition| {
                 let evaluation = evaluate_task_availability(&definition, &capabilities);
@@ -198,15 +237,23 @@ impl ExecutionService {
                 } else {
                     None
                 };
-                let (state, summary) = if evaluation.state == TaskAvailabilityState::Remediable
-                    && !permission_available
-                {
+                let permission_required = definition.privilege
+                    == PrivilegeRequirement::RootOrPasswordlessSudo
+                    && matches!(
+                        evaluation.state,
+                        TaskAvailabilityState::Ready | TaskAvailabilityState::Remediable
+                    );
+                let (state, summary) = if permission_required && !permission_available {
                     (
                         TaskAvailabilityState::PermissionBlocked,
-                        format!(
-                            "{}；当前账号需要 root 或免密 sudo 才能补齐组件",
-                            evaluation.summary
-                        ),
+                        if evaluation.state == TaskAvailabilityState::Remediable {
+                            format!(
+                                "{}；当前账号需要 root 或免密 sudo 才能补齐组件",
+                                evaluation.summary
+                            )
+                        } else {
+                            "已识别服务器参数，但当前账号没有 root 或免密 sudo 权限".into()
+                        },
                     )
                 } else {
                     (evaluation.state, evaluation.summary)
@@ -220,7 +267,22 @@ impl ExecutionService {
                     library,
                 }
             })
-            .collect())
+            .collect();
+        let detected_at = now_millis();
+        let snapshot = TaskLibrarySnapshot {
+            tasks,
+            capabilities,
+            detected_at,
+            cache_expires_at: detected_at + TASK_LIBRARY_CACHE_TTL.as_millis() as i64,
+        };
+        self.task_library_cache.lock().await.insert(
+            server_id.to_string(),
+            CachedTaskLibrary {
+                snapshot: snapshot.clone(),
+                expires_at: std::time::Instant::now() + TASK_LIBRARY_CACHE_TTL,
+            },
+        );
+        Ok(snapshot)
     }
 
     pub async fn is_idle(&self) -> bool {

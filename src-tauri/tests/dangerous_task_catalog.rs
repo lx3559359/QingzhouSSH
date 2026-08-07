@@ -10,6 +10,7 @@ use serde_json::json;
 const REQUIRED_DANGEROUS_IDS: &[&str] = &[
     "system.hostname_change",
     "system.timezone_change",
+    "system.time_sync_change",
     "storage.swap_manage",
     "security.file_permissions",
     "network.hosts_manage",
@@ -79,6 +80,7 @@ fn dangerous_recovery_matrix_uses_the_expected_backup_kinds() {
     let expected = [
         ("system.hostname_change", BackupItemKind::RuntimeState),
         ("system.timezone_change", BackupItemKind::RuntimeState),
+        ("system.time_sync_change", BackupItemKind::RuntimeState),
         ("storage.swap_manage", BackupItemKind::CommandSnapshot),
         ("security.file_permissions", BackupItemKind::RuntimeState),
         ("network.hosts_manage", BackupItemKind::RemoteFile),
@@ -199,6 +201,7 @@ fn system_storage_permission_previews_are_read_only() {
     let forbidden = [
         "set-hostname",
         "set-timezone",
+        "set-ntp",
         "fallocate",
         "mkswap",
         "swapoff",
@@ -211,6 +214,7 @@ fn system_storage_permission_previews_are_read_only() {
             task.id.as_str(),
             "system.hostname_change"
                 | "system.timezone_change"
+                | "system.time_sync_change"
                 | "storage.swap_manage"
                 | "security.file_permissions"
         )
@@ -255,6 +259,7 @@ fn system_storage_permission_plans_carry_every_recovery_phase() {
         .collect(),
         services: Vec::new(),
         containers: Vec::new(),
+        ..SystemCapabilities::default()
     };
     let cases = [
         ("system.hostname_change", json!({"hostname":"node-2"})),
@@ -262,6 +267,7 @@ fn system_storage_permission_plans_carry_every_recovery_phase() {
             "system.timezone_change",
             json!({"timezone":"Asia/Shanghai"}),
         ),
+        ("system.time_sync_change", json!({"enabled":true})),
         (
             "storage.swap_manage",
             json!({"action":"create", "path":"/swapfile", "sizeMiB":1024}),
@@ -343,6 +349,7 @@ fn service_cron_container_plans_are_concrete_and_recoverable() {
         .collect(),
         services: vec!["nginx.service".into()],
         containers: vec!["web".into()],
+        ..SystemCapabilities::default()
     };
     let entry_id = "9af25f52-72ab-4d53-b793-20f02f38d78a";
     let cases = [
@@ -417,6 +424,7 @@ fn traditional_service_and_podman_are_selected_without_fallback_commands() {
             .collect(),
         services: vec!["nginx".into()],
         containers: vec!["web".into()],
+        ..SystemCapabilities::default()
     };
     let catalog = built_in_catalog()
         .into_iter()

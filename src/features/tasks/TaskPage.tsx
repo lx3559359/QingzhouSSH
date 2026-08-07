@@ -8,6 +8,7 @@ import type {
   PersonalScriptDetails,
   PersonalScriptSummary,
   ServerProfile,
+  SystemCapabilities,
   TaskAvailability,
   TaskRemediationPreview,
 } from '../../api/contracts';
@@ -24,12 +25,16 @@ import { ToolLibraryFilters } from './library/ToolLibraryFilters';
 import { TaskRemediationDialog } from './library/TaskRemediationDialog';
 import { buildToolLibrary, filterToolLibrary, groupCounts } from './library/toolLibrary';
 import type { ToolLibraryItem, UnifiedToolCategory } from './library/types';
+import { buildInitialParameters, updateDependentParameters } from './parameterDefaults';
 
 export function TaskPage() {
   const [view, setView] = useState<'library' | 'scripts' | 'advanced'>('library');
   const [servers, setServers] = useState<ServerProfile[]>([]);
   const [serverId, setServerId] = useState('');
   const [tasks, setTasks] = useState<TaskAvailability[]>([]);
+  const [capabilities, setCapabilities] = useState<SystemCapabilities | null>(null);
+  const [capabilitiesDetectedAt, setCapabilitiesDetectedAt] = useState<number | null>(null);
+  const [refreshingCapabilities, setRefreshingCapabilities] = useState(false);
   const [scripts, setScripts] = useState<PersonalScriptSummary[]>([]);
   const [selectedKey, setSelectedKey] = useState('');
   const [category, setCategory] = useState<UnifiedToolCategory | 'all'>('all');
@@ -59,16 +64,19 @@ export function TaskPage() {
   useEffect(() => {
     if (!serverId) {
       setTasks([]);
+      setCapabilities(null);
       setScripts([]);
       return;
     }
     setLoading(true);
     Promise.all([
-      api.listTaskDefinitions(serverId),
+      api.getTaskLibrarySnapshot(serverId, false),
       api.listPersonalScripts({ enabled: true }),
     ])
-      .then(([nextTasks, nextScripts]) => {
-        setTasks(nextTasks);
+      .then(([snapshot, nextScripts]) => {
+        setTasks(snapshot.tasks);
+        setCapabilities(snapshot.capabilities);
+        setCapabilitiesDetectedAt(snapshot.detectedAt);
         setScripts(nextScripts);
       })
       .catch((cause) => setError(describeTaskError(cause)))
@@ -106,14 +114,7 @@ export function TaskPage() {
     if (!item) return;
     setSelectedKey(`${item.source}:${item.id}`);
     setParameters(item.availability
-      ? Object.fromEntries(
-          item.availability.definition.parameters
-            .filter((parameter) => parameter.defaultValue !== null || parameter.kind.type === 'managedId')
-            .map((parameter) => [
-              parameter.name,
-              parameter.kind.type === 'managedId' ? crypto.randomUUID() : parameter.defaultValue,
-            ]),
-        )
+      ? buildInitialParameters(item.availability.definition, capabilities)
       : {});
     setEvents([]);
     setDetails(null);
@@ -234,12 +235,49 @@ export function TaskPage() {
         appendEvent,
       );
       setRemediationPreview(null);
-      setTasks(await api.listTaskDefinitions(serverId));
+      const snapshot = await api.getTaskLibrarySnapshot(serverId, true);
+      setTasks(snapshot.tasks);
+      setCapabilities(snapshot.capabilities);
+      setCapabilitiesDetectedAt(snapshot.detectedAt);
     } catch (cause) {
       setError(describeTaskError(cause));
     } finally {
       setRemediationBusy(false);
     }
+  }
+
+  async function refreshCapabilities() {
+    if (!serverId || refreshingCapabilities) return;
+    setRefreshingCapabilities(true);
+    setError(null);
+    try {
+      const snapshot = await api.getTaskLibrarySnapshot(serverId, true);
+      setTasks(snapshot.tasks);
+      setCapabilities(snapshot.capabilities);
+      setCapabilitiesDetectedAt(snapshot.detectedAt);
+      if (selected?.availability) {
+        setParameters((current) => ({
+          ...buildInitialParameters(selected.availability!.definition, snapshot.capabilities),
+          ...current,
+        }));
+      }
+    } catch (cause) {
+      setError(describeTaskError(cause));
+    } finally {
+      setRefreshingCapabilities(false);
+    }
+  }
+
+  function changeParameter(name: string, value: unknown) {
+    setParameters((current) => selected?.availability
+      ? updateDependentParameters(
+          selected.availability.definition.id,
+          current,
+          name,
+          value,
+          capabilities,
+        )
+      : { ...current, [name]: value });
   }
 
   function appendEvent(event: ExecutionEvent) {
@@ -302,7 +340,11 @@ export function TaskPage() {
               events={events}
               details={details}
               running={running}
-              onParameterChange={(name, value) => setParameters((current) => ({ ...current, [name]: value }))}
+              capabilities={capabilities}
+              capabilitiesDetectedAt={capabilitiesDetectedAt}
+              refreshingCapabilities={refreshingCapabilities}
+              onParameterChange={changeParameter}
+              onRefreshCapabilities={() => void refreshCapabilities()}
               onRun={() => void requestRun()}
               onCancel={() => void cancel()}
               onRemediate={() => void previewRemediation()}

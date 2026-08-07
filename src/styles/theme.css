@@ -2800,6 +2800,36 @@ select {
 .tool-status-note--permission_blocked,
 .tool-status-note--unsupported { border-color: rgb(183 89 101 / 42%); color: #8e3944; background: #f9e8eb; }
 
+.task-capability-status {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 11px 12px;
+  border: 1px solid rgb(81 122 184 / 34%);
+  border-radius: 12px;
+  color: #294d7b;
+  background: linear-gradient(145deg, rgb(244 249 255 / 96%), rgb(218 231 247 / 88%));
+  box-shadow: inset 0 1px 0 #fff, 0 8px 16px rgb(45 74 112 / 11%);
+}
+
+.task-capability-status > div {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.task-capability-status span {
+  color: #64748b;
+  font-size: 0.7rem;
+}
+
+.compact-button {
+  min-height: 36px;
+  padding: 7px 10px;
+  white-space: nowrap;
+}
+
 .tool-empty-state {
   margin: auto;
   padding: 28px 18px;
@@ -2888,6 +2918,20 @@ select {
   color: #34435b;
   font-size: 0.78rem;
   font-weight: 750;
+}
+
+.parameter-choice-list {
+  max-height: 210px;
+  margin: 0;
+  padding: 12px;
+  overflow: auto;
+  border: 1px solid #b8c2cf;
+  border-radius: 11px;
+}
+
+.parameter-choice-list > .checkbox-field {
+  display: grid;
+  padding: 6px 2px;
 }
 
 .parameter-form small,

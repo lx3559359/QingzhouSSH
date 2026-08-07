@@ -102,6 +102,22 @@ export interface SystemCapabilities {
   commands: string[];
   services: string[];
   containers: string[];
+  interfaces: NetworkInterfaceCapability[];
+  dnsServers: string[];
+  currentTimezone: string | null;
+  currentTime: string | null;
+  ntpEnabled: boolean | null;
+  ntpSynchronized: boolean | null;
+  timezones: string[];
+}
+
+export interface NetworkInterfaceCapability {
+  name: string;
+  isUp: boolean;
+  isDefault: boolean;
+  addresses: string[];
+  gateway4: string | null;
+  gateway6: string | null;
 }
 
 export type ExecutionStatus =
@@ -139,6 +155,7 @@ export type ParameterKind =
   | { type: 'host' }
   | { type: 'port' }
   | { type: 'interfaceName' }
+  | { type: 'timezone' }
   | { type: 'cidr' }
   | { type: 'containerName' }
   | { type: 'fileMode' }
@@ -233,6 +250,13 @@ export interface TaskAvailability {
   missingCommands: string[];
   remediation: TaskRemediationSummary | null;
   library: ToolLibraryMetadata;
+}
+
+export interface TaskLibrarySnapshot {
+  tasks: TaskAvailability[];
+  capabilities: SystemCapabilities;
+  detectedAt: number;
+  cacheExpiresAt: number;
 }
 
 export type TaskAvailabilityState =

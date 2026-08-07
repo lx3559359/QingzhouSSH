@@ -46,6 +46,7 @@ pub fn run() {
             commands::servers::trust_server_host_key,
             commands::servers::test_server_connection,
             commands::executions::list_task_definitions,
+            commands::executions::get_task_library_snapshot,
             commands::executions::start_task_execution,
             commands::executions::start_custom_execution,
             commands::executions::cancel_execution,

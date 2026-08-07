@@ -1,5 +1,5 @@
 use qingzhou_ssh_lib::core::{
-    system_probe::SystemCapabilities,
+    system_probe::{NetworkInterfaceCapability, SystemCapabilities},
     tasks::{built_in_catalog, plan_task, validate_scope},
 };
 use serde_json::json;
@@ -16,6 +16,15 @@ fn capabilities(os_id: &str, family: &str, service: &str, commands: &[&str]) -> 
         commands: commands.iter().map(|value| (*value).into()).collect(),
         services: vec!["nginx".into(), "nginx.service".into()],
         containers: vec!["web".into()],
+        interfaces: vec![NetworkInterfaceCapability {
+            name: "eth0".into(),
+            is_up: true,
+            is_default: true,
+            addresses: vec!["192.0.2.10/24".into()],
+            gateway4: Some("192.0.2.1".into()),
+            gateway6: None,
+        }],
+        ..SystemCapabilities::default()
     }
 }
 
@@ -62,4 +71,31 @@ fn planner_rejects_batch_for_non_safe_tasks() {
         .unwrap();
     assert!(validate_scope(safe, 2).is_ok());
     assert!(validate_scope(safe, 0).is_err());
+}
+
+#[test]
+fn planner_requires_ip_change_interface_to_come_from_server_discovery() {
+    let definition = built_in_catalog()
+        .into_iter()
+        .find(|item| item.id == "network.ip_change")
+        .unwrap();
+    let mut detected = capabilities("ubuntu", "debian", "systemd", &[]);
+    detected.commands = definition.implementations[0]
+        .compatibility
+        .required_commands
+        .clone();
+
+    let error = plan_task(
+        &definition,
+        &detected,
+        &json!({
+            "interface": "eth9",
+            "cidr": "192.0.2.20/24",
+            "gateway": "192.0.2.1",
+            "rollbackSeconds": 120
+        }),
+    )
+    .unwrap_err();
+
+    assert_eq!(error.code(), "compatibility");
 }

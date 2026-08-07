@@ -51,6 +51,13 @@ const capabilities: SystemCapabilities = {
   commands: ['grep', 'gzip', 'awk', 'systemctl'],
   services: ['nginx.service', 'sshd.service'],
   containers: ['web'],
+  interfaces: [],
+  dnsServers: [],
+  currentTimezone: null,
+  currentTime: null,
+  ntpEnabled: null,
+  ntpSynchronized: null,
+  timezones: [],
 };
 
 async function submitServer(user: ReturnType<typeof userEvent.setup>) {

@@ -61,6 +61,7 @@ fn capabilities(service_manager: &str, commands: &[&str]) -> SystemCapabilities 
         commands: commands.iter().map(|value| (*value).into()).collect(),
         services: vec!["nginx".into(), "sshd".into()],
         containers: vec!["web".into()],
+        ..SystemCapabilities::default()
     }
 }
 

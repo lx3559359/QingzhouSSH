@@ -147,6 +147,9 @@ fn validate_discovered_targets(
             ParameterKind::ContainerName => value
                 .as_str()
                 .is_some_and(|value| capabilities.has_container(value)),
+            ParameterKind::InterfaceName => value
+                .as_str()
+                .is_some_and(|value| capabilities.has_interface(value)),
             ParameterKind::ServiceMultiSelect { .. } => value.as_array().is_some_and(|values| {
                 values.iter().all(|value| {
                     value

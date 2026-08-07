@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use qingzhou_ssh_lib::core::{
-    system_probe::{SystemCapabilities, PROBE_COMMAND},
+    system_probe::{NetworkInterfaceCapability, SystemCapabilities, PROBE_COMMAND},
     tasks::{
         built_in_catalog, plan_task, select_implementation, ExecutionScope, ParameterKind,
         RiskLevel, TaskCategory, TaskDefinition,
@@ -116,6 +116,7 @@ fn system_and_storage_tasks_are_bounded_and_safe() {
         [
             "storage.swap_manage",
             "system.hostname_change",
+            "system.time_sync_change",
             "system.timezone_change",
         ]
         .into_iter()
@@ -173,6 +174,15 @@ fn packet_capture_builds_only_fixed_optional_filters() {
             .collect(),
         services: Vec::new(),
         containers: Vec::new(),
+        interfaces: vec![NetworkInterfaceCapability {
+            name: "eth0".into(),
+            is_up: true,
+            is_default: true,
+            addresses: vec!["192.0.2.10/24".into()],
+            gateway4: Some("192.0.2.1".into()),
+            gateway6: None,
+        }],
+        ..SystemCapabilities::default()
     };
     let plan = plan_task(
         &catalog["network.packet_capture"],
@@ -341,5 +351,6 @@ fn detected_capabilities(
         commands: commands.iter().map(|value| (*value).into()).collect(),
         services: services.iter().map(|value| (*value).into()).collect(),
         containers: containers.iter().map(|value| (*value).into()).collect(),
+        ..SystemCapabilities::default()
     }
 }

@@ -6,6 +6,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const apiMocks = vi.hoisted(() => ({
   listServers: vi.fn(),
   listTaskDefinitions: vi.fn(),
+  getTaskLibrarySnapshot: vi.fn(),
   startTaskExecution: vi.fn(),
   previewOperation: vi.fn(),
   confirmOperation: vi.fn(),
@@ -26,6 +27,7 @@ import type {
   PersonalScriptDetails,
   PersonalScriptSummary,
   ServerProfile,
+  SystemCapabilities,
   TaskAvailability,
 } from '../../api/contracts';
 import { TaskPage } from './TaskPage';
@@ -38,6 +40,33 @@ const server: ServerProfile = {
   username: 'ops',
   authKind: 'password',
   credentialId: 'credential-1',
+};
+
+const capabilities: SystemCapabilities = {
+  osId: 'openeuler',
+  osFamily: 'openeuler',
+  versionId: '24.03',
+  packageManager: 'dnf',
+  serviceManager: 'systemd',
+  architecture: 'x86_64',
+  shell: '/bin/bash',
+  commands: ['ip', 'systemctl', 'timedatectl'],
+  services: ['nginx.service', 'sshd.service'],
+  containers: ['web'],
+  interfaces: [{
+    name: 'eth0',
+    isUp: true,
+    isDefault: true,
+    addresses: ['192.0.2.10/24'],
+    gateway4: '192.0.2.1',
+    gateway6: null,
+  }],
+  dnsServers: ['1.1.1.1'],
+  currentTimezone: 'Asia/Shanghai',
+  currentTime: '2026-08-07T00:20:00+08:00',
+  ntpEnabled: true,
+  ntpSynchronized: true,
+  timezones: ['Asia/Shanghai', 'UTC'],
 };
 
 const readyLibrary = {
@@ -298,6 +327,12 @@ describe('TaskPage', () => {
     vi.clearAllMocks();
     apiMocks.listServers.mockResolvedValue([server]);
     apiMocks.listTaskDefinitions.mockResolvedValue(tasks);
+    apiMocks.getTaskLibrarySnapshot.mockResolvedValue({
+      tasks,
+      capabilities,
+      detectedAt: 1,
+      cacheExpiresAt: 300_001,
+    });
     apiMocks.startTaskExecution.mockImplementation(
       async (_serverId, request, onEvent) => {
         onEvent({
@@ -377,7 +412,12 @@ describe('TaskPage', () => {
 
   it('keeps category, list and details visible while hiding unavailable tools by default', async () => {
     const user = userEvent.setup();
-    apiMocks.listTaskDefinitions.mockResolvedValue([...tasks, ...unavailableTasks]);
+    apiMocks.getTaskLibrarySnapshot.mockResolvedValue({
+      tasks: [...tasks, ...unavailableTasks],
+      capabilities,
+      detectedAt: 1,
+      cacheExpiresAt: 300_001,
+    });
     render(<TaskPage />);
 
     expect(await screen.findByLabelText('工具分类')).toBeVisible();
@@ -411,7 +451,7 @@ describe('TaskPage', () => {
     render(<TaskPage />);
 
     expect(await screen.findByRole('heading', { name: '系统概览' })).toBeVisible();
-    expect(apiMocks.listTaskDefinitions).toHaveBeenCalledWith('server-1');
+    expect(apiMocks.getTaskLibrarySnapshot).toHaveBeenCalledWith('server-1', false);
     await user.click(screen.getByRole('button', { name: '选择任务 系统概览' }));
     await user.click(screen.getByRole('button', { name: '运行任务' }));
 
@@ -429,7 +469,7 @@ describe('TaskPage', () => {
     await screen.findByRole('heading', { name: '重启服务' });
 
     await user.click(screen.getByRole('button', { name: '选择任务 重启服务' }));
-    await user.type(screen.getByLabelText('服务名'), 'nginx.service');
+    await user.selectOptions(screen.getByLabelText('服务名'), 'nginx.service');
     await user.click(screen.getByRole('button', { name: '运行任务' }));
 
     expect(await screen.findByRole('heading', { name: '确认危险操作' })).toBeVisible();
@@ -454,6 +494,17 @@ describe('TaskPage', () => {
         expect.any(Function),
       ),
     );
+  });
+
+  it('lets the user refresh detected interfaces and service choices on demand', async () => {
+    const user = userEvent.setup();
+    render(<TaskPage />);
+    await screen.findByRole('heading', { name: '重启服务' });
+
+    await user.click(screen.getByRole('button', { name: '选择任务 重启服务' }));
+    await user.click(screen.getByRole('button', { name: '重新检测服务器参数' }));
+
+    await waitFor(() => expect(apiMocks.getTaskLibrarySnapshot).toHaveBeenLastCalledWith('server-1', true));
   });
 
   it('turns structured backend failures into actionable Chinese guidance', async () => {
@@ -489,9 +540,19 @@ describe('TaskPage', () => {
 
   it('previews missing packages and refreshes compatibility without auto-running the task', async () => {
     const user = userEvent.setup();
-    apiMocks.listTaskDefinitions
-      .mockResolvedValueOnce([...tasks, remediableTask])
-      .mockResolvedValueOnce([...tasks, { ...remediableTask, state: 'ready', missingCommands: [], remediation: null }]);
+    apiMocks.getTaskLibrarySnapshot
+      .mockResolvedValueOnce({
+        tasks: [...tasks, remediableTask],
+        capabilities,
+        detectedAt: 1,
+        cacheExpiresAt: 300_001,
+      })
+      .mockResolvedValueOnce({
+        tasks: [...tasks, { ...remediableTask, state: 'ready', missingCommands: [], remediation: null }],
+        capabilities,
+        detectedAt: 2,
+        cacheExpiresAt: 300_002,
+      });
     render(<TaskPage />);
 
     await user.click(await screen.findByRole('button', { name: '选择任务 限时抓包摘要' }));
@@ -512,7 +573,7 @@ describe('TaskPage', () => {
       { previewId: 'remediation-preview-1', confirmationToken: 'remediation-token-1' },
       expect.any(Function),
     ));
-    await waitFor(() => expect(apiMocks.listTaskDefinitions).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(apiMocks.getTaskLibrarySnapshot).toHaveBeenCalledTimes(2));
     expect(apiMocks.startTaskExecution).not.toHaveBeenCalledWith(
       'server-1',
       expect.objectContaining({ taskId: 'network.packet_capture' }),

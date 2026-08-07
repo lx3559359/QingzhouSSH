@@ -634,6 +634,7 @@ fn is_snapshot_rollback_task(task_id: &str) -> bool {
         task_id,
         "system.hostname_change"
             | "system.timezone_change"
+            | "system.time_sync_change"
             | "storage.swap_manage"
             | "security.file_permissions"
             | "service.start"
@@ -701,6 +702,18 @@ pub fn build_snapshot_rollback_command(
             Ok(SnapshotRollbackCommand {
                 command: format!("timedatectl set-timezone -- {timezone}"),
                 verify: format!("test \"$(timedatectl show -p Timezone --value)\" = {timezone}"),
+            })
+        }
+        "system.time_sync_change" => {
+            let ntp = required_snapshot_value(&values, "ntp")?;
+            if ntp != "true" && ntp != "false" {
+                return Err(AppError::Integrity("恢复点中的原自动校时状态无效".into()));
+            }
+            Ok(SnapshotRollbackCommand {
+                command: format!("timedatectl set-ntp {ntp}"),
+                verify: format!(
+                    "qz_ntp=$(timedatectl show -p NTP --value); case \"$qz_ntp\" in yes|true|1) qz_current=true ;; *) qz_current=false ;; esac; test \"$qz_current\" = '{ntp}'"
+                ),
             })
         }
         "security.file_permissions" => {

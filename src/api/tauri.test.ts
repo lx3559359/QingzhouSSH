@@ -86,6 +86,7 @@ describe('Tauri API wrapper', () => {
     };
 
     await api.listTaskDefinitions('server-1');
+    await api.getTaskLibrarySnapshot('server-1', true);
     await api.startTaskExecution('server-1', taskRequest, onEvent);
     await api.startCustomExecution(
       'server-1',
@@ -118,6 +119,7 @@ describe('Tauri API wrapper', () => {
 
     expect(invoke.mock.calls.map(([command, args]) => [command, args && Object.keys(args)])).toEqual([
       ['list_task_definitions', ['serverId']],
+      ['get_task_library_snapshot', ['serverId', 'forceRefresh']],
       ['start_task_execution', ['serverId', 'request', 'onEvent']],
       ['start_custom_execution', ['serverId', 'request', 'onEvent']],
       ['cancel_execution', ['executionId']],

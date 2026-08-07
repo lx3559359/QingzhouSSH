@@ -19,6 +19,7 @@ fn capabilities(commands: &[&str]) -> SystemCapabilities {
         commands: commands.iter().map(|value| (*value).into()).collect(),
         services: Vec::new(),
         containers: Vec::new(),
+        ..SystemCapabilities::default()
     }
 }
 

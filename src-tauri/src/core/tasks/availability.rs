@@ -49,16 +49,6 @@ pub fn evaluate_task_availability(
     definition: &TaskDefinition,
     capabilities: &SystemCapabilities,
 ) -> TaskAvailabilityEvaluation {
-    if definition.id == "network.ip_change" {
-        return TaskAvailabilityEvaluation {
-            state: TaskAvailabilityState::Unsupported,
-            implementation_id: None,
-            summary: "安全的延迟回滚与重连验证尚未实现，暂不开放 IP 修改".into(),
-            missing_commands: Vec::new(),
-            blocking_capabilities: vec!["缺少延迟回滚与重连验证能力".into()],
-        };
-    }
-
     let best = definition
         .implementations
         .iter()

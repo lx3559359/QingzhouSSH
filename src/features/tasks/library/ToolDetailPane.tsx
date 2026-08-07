@@ -1,7 +1,7 @@
-import { ShieldWarning } from '@phosphor-icons/react';
+import { ArrowClockwise, ShieldWarning } from '@phosphor-icons/react';
 import { useEffect, useState } from 'react';
 
-import type { ExecutionDetails, ExecutionEvent } from '../../../api/contracts';
+import type { ExecutionDetails, ExecutionEvent, SystemCapabilities } from '../../../api/contracts';
 import { ExecutionDrawer } from '../ExecutionDrawer';
 import { ParameterForm } from '../ParameterForm';
 import type { ToolLibraryItem } from './types';
@@ -12,7 +12,11 @@ interface ToolDetailPaneProps {
   events: ExecutionEvent[];
   details: ExecutionDetails | null;
   running: boolean;
+  capabilities: SystemCapabilities | null;
+  capabilitiesDetectedAt: number | null;
+  refreshingCapabilities: boolean;
   onParameterChange: (name: string, value: unknown) => void;
+  onRefreshCapabilities: () => void;
   onRun: () => void;
   onCancel: () => void;
   onRemediate: () => void;
@@ -24,7 +28,11 @@ export function ToolDetailPane({
   events,
   details,
   running,
+  capabilities,
+  capabilitiesDetectedAt,
+  refreshingCapabilities,
   onParameterChange,
+  onRefreshCapabilities,
   onRun,
   onCancel,
   onRemediate,
@@ -64,7 +72,33 @@ export function ToolDetailPane({
                 <strong>{item.availability.summary}</strong>
                 {item.availability.missingCommands.length > 0 && <span>缺少：{item.availability.missingCommands.join('、')}</span>}
               </div>
-              <ParameterForm definitions={item.availability.definition.parameters} values={parameters} onChange={onParameterChange} />
+              {item.availability.definition.parameters.length > 0 && (
+                <div className="task-capability-status">
+                  <div>
+                    <strong>已自动识别服务器参数</strong>
+                    <span>
+                      {capabilitySummary(item, capabilities)}
+                      {capabilitiesDetectedAt ? ` · ${new Date(capabilitiesDetectedAt).toLocaleTimeString()}` : ''}
+                    </span>
+                  </div>
+                  <button
+                    className="secondary-button compact-button"
+                    type="button"
+                    disabled={refreshingCapabilities}
+                    onClick={onRefreshCapabilities}
+                    aria-label="重新检测服务器参数"
+                  >
+                    <ArrowClockwise className={refreshingCapabilities ? 'spin' : ''} />
+                    {refreshingCapabilities ? '检测中' : '重新检测'}
+                  </button>
+                </div>
+              )}
+              <ParameterForm
+                definitions={item.availability.definition.parameters}
+                values={parameters}
+                capabilities={capabilities}
+                onChange={onParameterChange}
+              />
               {item.state === 'remediable' ? (
                 <button className="success-button" type="button" onClick={onRemediate}>查看并补齐组件</button>
               ) : (
@@ -83,4 +117,27 @@ export function ToolDetailPane({
       )}
     </aside>
   );
+}
+
+function capabilitySummary(
+  item: ToolLibraryItem,
+  capabilities: SystemCapabilities | null,
+): string {
+  if (!capabilities) return '尚未取得识别结果';
+  if (item.id === 'network.ip_change') {
+    const network = capabilities.interfaces.find((candidate) => candidate.isDefault)
+      ?? capabilities.interfaces.find((candidate) => candidate.isUp && candidate.name !== 'lo');
+    return network
+      ? `默认网卡 ${network.name} · 当前 IP ${network.addresses.join('、') || '无'} · 网关 ${network.gateway4 ?? network.gateway6 ?? '未识别'}`
+      : '未识别到可用网卡';
+  }
+  if (item.id === 'system.timezone_change' || item.id === 'system.time_sync_change') {
+    const ntp = capabilities.ntpEnabled === null
+      ? '自动校时未知'
+      : capabilities.ntpEnabled
+        ? capabilities.ntpSynchronized ? '自动校时已同步' : '自动校时已开启，等待同步'
+        : '自动校时未开启';
+    return `${capabilities.currentTime ?? '当前时间未知'} · ${capabilities.currentTimezone ?? '时区未知'} · ${ntp}`;
+  }
+  return `${capabilities.interfaces.length} 个网卡 · ${capabilities.services.length} 个服务 · ${capabilities.containers.length} 个容器`;
 }

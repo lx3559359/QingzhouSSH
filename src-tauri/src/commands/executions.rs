@@ -7,7 +7,9 @@ use crate::{
         execution::{ExecutionDetails, ExecutionFilter, ExecutionRecord},
     },
     error::AppResult,
-    services::execution_service::{CustomExecutionRequest, TaskAvailability, TaskExecutionRequest},
+    services::execution_service::{
+        CustomExecutionRequest, TaskAvailability, TaskExecutionRequest, TaskLibrarySnapshot,
+    },
     state::AppState,
 };
 
@@ -21,6 +23,18 @@ pub async fn list_task_definitions(
     services(&state)
         .await?
         .list_task_definitions(&server_id)
+        .await
+}
+
+#[tauri::command]
+pub async fn get_task_library_snapshot(
+    server_id: String,
+    force_refresh: Option<bool>,
+    state: State<'_, AppState>,
+) -> AppResult<TaskLibrarySnapshot> {
+    services(&state)
+        .await?
+        .get_task_library_snapshot(&server_id, force_refresh.unwrap_or(false))
         .await
 }
 

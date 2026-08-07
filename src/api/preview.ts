@@ -1300,6 +1300,20 @@ export const previewApi = {
     commands: ['grep', 'gzip', 'awk', 'systemctl', 'ps', 'df', 'sh'],
     services: ['nginx.service', 'sshd.service'],
     containers: ['web'],
+    interfaces: [{
+      name: 'eth0',
+      isUp: true,
+      isDefault: true,
+      addresses: ['192.0.2.10/24'],
+      gateway4: '192.0.2.1',
+      gateway6: null,
+    }],
+    dnsServers: ['223.5.5.5'],
+    currentTimezone: 'Asia/Shanghai',
+    currentTime: '2026-08-07T00:20:00+08:00',
+    ntpEnabled: true,
+    ntpSynchronized: true,
+    timezones: ['Asia/Shanghai', 'Asia/Hong_Kong', 'UTC'],
   }),
   listPersonalScripts: async (
     filter: PersonalScriptListFilter,
@@ -1450,6 +1464,12 @@ export const previewApi = {
     previewPersonalScriptRuns.delete(operationRunId);
   },
   listTaskDefinitions: async (_serverId: string) => previewTasks,
+  getTaskLibrarySnapshot: async (_serverId: string, _forceRefresh = false) => ({
+    tasks: previewTasks,
+    capabilities: await previewApi.testConnection(_serverId),
+    detectedAt: Date.now(),
+    cacheExpiresAt: Date.now() + 300_000,
+  }),
   previewTaskRemediation: async (
     _serverId: string,
     taskId: string,

@@ -523,6 +523,7 @@ impl OperationService {
             definition.id.as_str(),
             "system.hostname_change"
                 | "system.timezone_change"
+                | "system.time_sync_change"
                 | "storage.swap_manage"
                 | "security.file_permissions"
                 | "service.start"
