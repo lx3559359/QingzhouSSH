@@ -1,5 +1,5 @@
 import { Lightning, SpinnerGap } from '@phosphor-icons/react';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 
 import type {
   ExecutionDetails,
@@ -28,6 +28,7 @@ import type { ToolLibraryItem, UnifiedToolCategory } from './library/types';
 import { buildInitialParameters, updateDependentParameters } from './parameterDefaults';
 
 export function TaskPage() {
+  const detailPaneRef = useRef<HTMLDivElement>(null);
   const [view, setView] = useState<'library' | 'scripts' | 'advanced'>('library');
   const [servers, setServers] = useState<ServerProfile[]>([]);
   const [serverId, setServerId] = useState('');
@@ -110,7 +111,7 @@ export function TaskPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visibleItems, selectedKey]);
 
-  function chooseItem(item: ToolLibraryItem | undefined) {
+  function chooseItem(item: ToolLibraryItem | undefined, revealDetails = false) {
     if (!item) return;
     setSelectedKey(`${item.source}:${item.id}`);
     setParameters(item.availability
@@ -119,6 +120,9 @@ export function TaskPage() {
     setEvents([]);
     setDetails(null);
     setError(null);
+    if (revealDetails) {
+      detailPaneRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
   }
 
   async function executeSafeTask() {
@@ -333,22 +337,24 @@ export function TaskPage() {
           <ToolLibraryFilters query={query} showUnavailable={showUnavailable} onQueryChange={setQuery} onToggleUnavailable={() => setShowUnavailable((current) => !current)} />
           <div className="tool-library-workspace">
             <ToolCategoryRail selected={category} counts={counts} total={libraryItems.length} onSelect={setCategory} />
-            <ToolCatalogList items={visibleItems} selectedKey={selectedKey} onSelect={chooseItem} />
-            <ToolDetailPane
-              item={selected}
-              parameters={parameters}
-              events={events}
-              details={details}
-              running={running}
-              capabilities={capabilities}
-              capabilitiesDetectedAt={capabilitiesDetectedAt}
-              refreshingCapabilities={refreshingCapabilities}
-              onParameterChange={changeParameter}
-              onRefreshCapabilities={() => void refreshCapabilities()}
-              onRun={() => void requestRun()}
-              onCancel={() => void cancel()}
-              onRemediate={() => void previewRemediation()}
-            />
+            <ToolCatalogList items={visibleItems} selectedKey={selectedKey} onSelect={(item) => chooseItem(item, true)} />
+            <div ref={detailPaneRef} className="tool-detail-anchor">
+              <ToolDetailPane
+                item={selected}
+                parameters={parameters}
+                events={events}
+                details={details}
+                running={running}
+                capabilities={capabilities}
+                capabilitiesDetectedAt={capabilitiesDetectedAt}
+                refreshingCapabilities={refreshingCapabilities}
+                onParameterChange={changeParameter}
+                onRefreshCapabilities={() => void refreshCapabilities()}
+                onRun={() => void requestRun()}
+                onCancel={() => void cancel()}
+                onRemediate={() => void previewRemediation()}
+              />
+            </div>
           </div>
         </>
       )}

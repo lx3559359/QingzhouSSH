@@ -22,6 +22,21 @@ fn assert_ubuntu(capabilities: &SystemCapabilities) {
     assert_eq!(capabilities.os_family, "debian");
     assert_eq!(capabilities.package_manager.as_deref(), Some("apt"));
     assert_eq!(capabilities.service_manager, "systemd");
+    let interface = capabilities.default_interface().unwrap();
+    assert_eq!(interface.name, "eth0");
+    assert_eq!(interface.addresses, ["192.0.2.10/24"]);
+    assert_eq!(interface.gateway4.as_deref(), Some("192.0.2.1"));
+    assert_eq!(capabilities.dns_servers, ["1.1.1.1", "223.5.5.5"]);
+    assert_eq!(capabilities.current_timezone.as_deref(), Some("UTC"));
+    assert_eq!(
+        capabilities.current_time.as_deref(),
+        Some("2026-08-07 04:00:00 UTC")
+    );
+    assert_eq!(capabilities.ntp_enabled, Some(true));
+    assert_eq!(capabilities.ntp_synchronized, Some(true));
+    assert!(capabilities.timezones.contains(&"Asia/Shanghai".into()));
+    assert!(capabilities.has_service("qingzhou-fixture.service"));
+    assert!(capabilities.has_container("fixture-container"));
 }
 
 #[tokio::test]

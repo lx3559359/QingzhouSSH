@@ -9,19 +9,20 @@ import {
   FileMagnifyingGlass,
   UploadSimple,
 } from '@phosphor-icons/react';
-import { useEffect, useRef, useState } from 'react';
+import { lazy, Suspense, useEffect, useRef, useState } from 'react';
 
-import { ServerListPage } from '../features/servers/ServerListPage';
-import { TaskPage } from '../features/tasks/TaskPage';
-import { LogSearchPage } from '../features/logs/LogSearchPage';
-import { FileTransferPage } from '../features/transfers/FileTransferPage';
 import type { RemoteFileSearchIntent } from '../features/transfers/FileTransferPage';
-import { DownloadsPage } from '../features/downloads/DownloadsPage';
-import { ExecutionHistoryPage } from '../features/history/ExecutionHistoryPage';
-import { WorkflowPage } from '../features/workflows/WorkflowPage';
-import { SettingsPage } from '../features/settings/SettingsPage';
 import { DataMigrationResultNotice } from '../features/settings/DataMigrationResultNotice';
 import type { ReadyBootstrapStatus } from '../api/contracts';
+
+const ServerListPage = lazy(() => import('../features/servers/ServerListPage').then((module) => ({ default: module.ServerListPage })));
+const TaskPage = lazy(() => import('../features/tasks/TaskPage').then((module) => ({ default: module.TaskPage })));
+const LogSearchPage = lazy(() => import('../features/logs/LogSearchPage').then((module) => ({ default: module.LogSearchPage })));
+const FileTransferPage = lazy(() => import('../features/transfers/FileTransferPage').then((module) => ({ default: module.FileTransferPage })));
+const DownloadsPage = lazy(() => import('../features/downloads/DownloadsPage').then((module) => ({ default: module.DownloadsPage })));
+const ExecutionHistoryPage = lazy(() => import('../features/history/ExecutionHistoryPage').then((module) => ({ default: module.ExecutionHistoryPage })));
+const WorkflowPage = lazy(() => import('../features/workflows/WorkflowPage').then((module) => ({ default: module.WorkflowPage })));
+const SettingsPage = lazy(() => import('../features/settings/SettingsPage').then((module) => ({ default: module.SettingsPage })));
 
 type PageKey =
   | 'home'
@@ -87,17 +88,30 @@ export function AppShell({ bootstrap }: { bootstrap: ReadyBootstrapStatus }) {
 
       <section className="workspace-content" ref={contentRef}>
         <DataMigrationResultNotice journal={bootstrap.lastDataMigration} onRetry={() => setPage('settings')} />
-        {page === 'home' && <HomePage onNavigate={setPage} />}
-        {page === 'servers' && <ServerListPage />}
-        {page === 'tasks' && <TaskPage />}
-        {page === 'logs' && <LogSearchPage searchIntent={searchIntent} onSearchIntentConsumed={() => setSearchIntent(null)} />}
-        {page === 'transfers' && <FileTransferPage onSearchRemoteFile={(intent) => { setSearchIntent(intent); setPage('logs'); }} />}
-        {page === 'workflows' && <WorkflowPage />}
-        {page === 'history' && <ExecutionHistoryPage />}
-        {page === 'downloads' && <DownloadsPage />}
-        {page === 'settings' && <SettingsPage bootstrap={bootstrap} />}
+        <Suspense fallback={<PageLoadingState />}>
+          {page === 'home' && <HomePage onNavigate={setPage} />}
+          {page === 'servers' && <ServerListPage />}
+          {page === 'tasks' && <TaskPage />}
+          {page === 'logs' && <LogSearchPage searchIntent={searchIntent} onSearchIntentConsumed={() => setSearchIntent(null)} />}
+          {page === 'transfers' && <FileTransferPage onSearchRemoteFile={(intent) => { setSearchIntent(intent); setPage('logs'); }} />}
+          {page === 'workflows' && <WorkflowPage />}
+          {page === 'history' && <ExecutionHistoryPage />}
+          {page === 'downloads' && <DownloadsPage />}
+          {page === 'settings' && <SettingsPage bootstrap={bootstrap} />}
+        </Suspense>
       </section>
     </div>
+  );
+}
+
+function PageLoadingState() {
+  return (
+    <section className="page-loading-state" role="status" aria-live="polite">
+      <div className="silver-card page-loading-state__card">
+        <strong>正在打开功能…</strong>
+        <span>首次打开会加载对应模块</span>
+      </div>
+    </section>
   );
 }
 

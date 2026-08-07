@@ -2673,6 +2673,35 @@ select {
   flex-direction: column;
 }
 
+.page-loading-state {
+  display: grid;
+  min-height: 260px;
+  place-items: center;
+}
+
+.page-loading-state__card {
+  display: grid;
+  min-width: min(320px, 100%);
+  gap: 6px;
+  padding: 22px 26px;
+  text-align: center;
+}
+
+.page-loading-state__card span {
+  color: var(--ink-muted);
+  font-size: 13px;
+}
+
+.tool-detail-anchor {
+  min-width: 0;
+  display: flex;
+  scroll-margin-top: 12px;
+}
+
+.tool-detail-anchor > .tool-detail-pane {
+  width: 100%;
+}
+
 .tool-detail-pane__header {
   display: flex;
   align-items: flex-start;

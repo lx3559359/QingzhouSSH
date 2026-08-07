@@ -5,6 +5,7 @@ $theme = Get-Content -Raw -Encoding utf8 -LiteralPath (Join-Path $projectRoot 's
 $workflowTheme = Get-Content -Raw -Encoding utf8 -LiteralPath (Join-Path $projectRoot 'src\features\workflows\workflow.css')
 $entrypoint = Get-Content -Raw -Encoding utf8 -LiteralPath (Join-Path $projectRoot 'src-tauri\src\main.rs')
 $windowSource = Get-Content -Raw -Encoding utf8 -LiteralPath (Join-Path $projectRoot 'src-tauri\src\window.rs')
+$appShellSource = Get-Content -Raw -Encoding utf8 -LiteralPath (Join-Path $projectRoot 'src\app\AppShell.tsx')
 $capabilities = Get-Content -Raw -Encoding utf8 -LiteralPath (Join-Path $projectRoot 'src-tauri\capabilities\default.json') | ConvertFrom-Json
 
 if ($theme -notmatch '(?s)\.app-window\s*\{.*?width:\s*100%') {
@@ -58,6 +59,26 @@ if ($theme -notmatch '(?s)@container\s+transfer-page\s*\(max-width:\s*920px\).*?
 }
 if ($theme -notmatch '(?s)@container\s+transfer-page\s*\(max-width:\s*620px\).*?\.sftp-workspace\s*\{.*?grid-template-areas:\s*"local"\s*"actions"\s*"remote"') {
   throw 'Very compact content areas must stack the complete SFTP workflow.'
+}
+if ($appShellSource -notmatch "lazy\(\(\)\s*=>\s*import\('") {
+  throw 'Feature pages must be loaded on demand instead of being bundled into the initial desktop view.'
+}
+if ($appShellSource -notmatch '<Suspense\s+fallback=') {
+  throw 'Lazy feature pages must show an explicit loading state.'
+}
+foreach ($eagerFeatureImport in @(
+  'ServerListPage',
+  'TaskPage',
+  'LogSearchPage',
+  'FileTransferPage',
+  'DownloadsPage',
+  'ExecutionHistoryPage',
+  'WorkflowPage',
+  'SettingsPage'
+)) {
+  if ($appShellSource -match "import\s+\{\s*$eagerFeatureImport\s*\}\s+from") {
+    throw "Feature page remains eagerly imported: $eagerFeatureImport"
+  }
 }
 
 Write-Host 'Desktop UX source contracts passed.'

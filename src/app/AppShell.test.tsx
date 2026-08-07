@@ -96,7 +96,7 @@ describe('AppShell', () => {
 
     expect(screen.getByText('数据目录迁移失败，原目录仍在使用')).toBeVisible();
     await user.click(screen.getByRole('button', { name: '前往设置重试' }));
-    expect(screen.getByLabelText('设置内容')).toBeVisible();
+    expect(await screen.findByLabelText('设置内容')).toBeVisible();
   });
 
   it('offers the complete navigation and opens the workflow builder', async () => {
@@ -111,18 +111,18 @@ describe('AppShell', () => {
     }
 
     await user.click(screen.getByRole('button', { name: '快捷任务' }));
-    expect(screen.getByLabelText('快捷任务内容')).toBeVisible();
+    expect(await screen.findByLabelText('快捷任务内容')).toBeVisible();
     expect(scrollTo).toHaveBeenLastCalledWith({ top: 0, left: 0 });
 
     await user.click(screen.getByRole('button', { name: '日志检索' }));
-    expect(screen.getByLabelText('日志检索内容')).toBeVisible();
+    expect(await screen.findByLabelText('日志检索内容')).toBeVisible();
 
     await user.click(screen.getByRole('button', { name: '工作流' }));
-    expect(screen.getByLabelText('工作流内容')).toBeVisible();
+    expect(await screen.findByLabelText('工作流内容')).toBeVisible();
     expect(screen.queryByText('工作流将在下一里程碑开放')).not.toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: '设置' }));
-    expect(screen.getByLabelText('设置内容')).toBeVisible();
+    expect(await screen.findByLabelText('设置内容')).toBeVisible();
   });
 
   it('carries a one-shot remote-file search intent from SFTP to log search', async () => {
@@ -130,9 +130,9 @@ describe('AppShell', () => {
     render(<AppShell bootstrap={bootstrap} />);
 
     await user.click(screen.getByRole('button', { name: '文件传输' }));
-    await user.click(screen.getByRole('button', { name: '模拟搜索远程文件' }));
+    await user.click(await screen.findByRole('button', { name: '模拟搜索远程文件' }));
 
-    expect(screen.getByLabelText('日志检索内容')).toBeVisible();
+    expect(await screen.findByLabelText('日志检索内容')).toBeVisible();
     expect(screen.getByText('server-1|/srv/report.log|report.log')).toBeVisible();
     await user.click(screen.getByRole('button', { name: '消费搜索意图' }));
     await user.click(screen.getByRole('button', { name: '文件传输' }));

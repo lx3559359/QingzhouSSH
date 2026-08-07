@@ -323,8 +323,14 @@ function details(taskId: string): ExecutionDetails {
 }
 
 describe('TaskPage', () => {
+  const scrollIntoView = vi.fn();
+
   beforeEach(() => {
     vi.clearAllMocks();
+    Object.defineProperty(Element.prototype, 'scrollIntoView', {
+      configurable: true,
+      value: scrollIntoView,
+    });
     apiMocks.listServers.mockResolvedValue([server]);
     apiMocks.listTaskDefinitions.mockResolvedValue(tasks);
     apiMocks.getTaskLibrarySnapshot.mockResolvedValue({
@@ -429,6 +435,19 @@ describe('TaskPage', () => {
     await user.click(screen.getByRole('button', { name: '查看受限与不支持' }));
     expect(await screen.findByText('UDP 探测')).toBeVisible();
     expect(screen.getByText('修改 IP 地址')).toBeVisible();
+  });
+
+  it('reveals the task details after the user selects a tool', async () => {
+    const user = userEvent.setup();
+    render(<TaskPage />);
+
+    await waitFor(() => expect(document.querySelector('.tool-list-item')).not.toBeNull());
+    const firstTool = document.querySelector<HTMLButtonElement>('.tool-list-item');
+    expect(scrollIntoView).not.toHaveBeenCalled();
+
+    await user.click(firstTool!);
+
+    expect(scrollIntoView).toHaveBeenCalledWith({ behavior: 'smooth', block: 'start' });
   });
 
   it('opens the personal script center as a first-class task mode', async () => {

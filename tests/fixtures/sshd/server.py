@@ -26,6 +26,18 @@ SHELL=/bin/bash
 COMMANDS=grep,gzip,awk,systemctl,systemd-run,service,ps,head,df,uptime,uname,free,ip,nmcli,hostname,hostnamectl,timedatectl,swapon,swapoff,mkswap,stat,chmod,chown,fallocate,sha256sum,mktemp,cat,mv,rm,mkdir,rmdir,find,sh,docker,base64,sed,tr,id
 SERVICES=qingzhou-fixture.service,qingzhou-verify-fail.service,
 CONTAINERS=fixture-container,
+INTERFACES=eth0,lo,
+ACTIVE_INTERFACES=eth0,lo,
+DEFAULT_INTERFACE=eth0
+ADDRESSES=eth0|192.0.2.10/24;lo|127.0.0.1/8;
+GATEWAYS4=eth0|192.0.2.1;
+GATEWAYS6=
+DNS_SERVERS=223.5.5.5,1.1.1.1,
+CURRENT_TIMEZONE=UTC
+CURRENT_TIME=2026-08-07 04:00:00 UTC
+NTP_ENABLED=yes
+NTP_SYNCHRONIZED=yes
+TIMEZONES=UTC,Asia/Shanghai,
 """
 
 DISK_OUTPUT = """Filesystem 1024-blocks Used Available Capacity Mounted on
@@ -251,6 +263,58 @@ def command_result(command: str, username: str = "testuser") -> tuple[str, str, 
     if command.startswith("hostnamectl status --static"):
         hostname = read_state("hostname")
         return f"{hostname}\n{hostname}\n", "", 0
+    if "printf 'timezone=%s\\n'" in command:
+        return f"timezone={read_state('timezone')}\n", "", 0
+    if "timedatectl set-timezone --" in command:
+        match = re.search(r"timedatectl set-timezone -- '([^']+)'", command)
+        if not match:
+            return "", "fixture rejected malformed timezone command\n", 64
+        write_state("timezone", match.group(1))
+        return "timezone updated\n", "", 0
+    if 'test "$(timedatectl show -p Timezone --value)" =' in command:
+        match = re.search(
+            r'test "\$\(timedatectl show -p Timezone --value\)" = \'([^\']+)\'',
+            command,
+        )
+        if not match:
+            return "", "fixture rejected malformed timezone verification\n", 64
+        expected = match.group(1)
+        actual = read_state("timezone")
+        return ("timezone verified\n", "", 0) if actual == expected else (
+            "",
+            f"timezone is {actual}, expected {expected}\n",
+            1,
+        )
+    if command.strip() == "timedatectl show -p Timezone --value; timedatectl status":
+        timezone = read_state("timezone")
+        return f"{timezone}\nTime zone: {timezone}\n", "", 0
+    if "printf 'ntp=%s\\n'" in command and "qz_ntp=" in command:
+        return f"ntp={read_state('ntp')}\n", "", 0
+    if command.startswith("timedatectl set-ntp "):
+        match = re.match(r"timedatectl set-ntp '?(true|false)'?", command)
+        if not match:
+            return "", "fixture rejected malformed time sync command\n", 64
+        write_state("ntp", match.group(1))
+        return "time synchronization updated\n", "", 0
+    if command.startswith("qz_target=") and "timedatectl show -p NTP --value" in command:
+        match = re.match(r"qz_target='?(true|false)'?;", command)
+        if not match:
+            return "", "fixture rejected malformed time sync verification\n", 64
+        expected = match.group(1)
+        actual = read_state("ntp")
+        return ("time synchronization verified\n", "", 0) if actual == expected else (
+            "",
+            f"time synchronization is {actual}, expected {expected}\n",
+            1,
+        )
+    if "printf 'current_time='" in command and "timedatectl show -p NTP --value" in command:
+        ntp = read_state("ntp")
+        return (
+            f"current_time=2026-08-07T04:00:00+00:00\n"
+            f"ntp={ntp}\nsynchronized={ntp}\n",
+            "",
+            0,
+        )
     if command.strip() == "df -P -B1":
         return DISK_OUTPUT, "", 0
     if command.startswith("systemctl status -- qingzhou-fixture.service"):
@@ -307,6 +371,8 @@ def prepare_remote_root(remote_root: Path) -> None:
     (remote_root / "etc").mkdir(parents=True, exist_ok=True)
     (remote_root / "etc" / "fstab").write_text("# fixture fstab\n", encoding="utf-8")
     write_state("hostname", "qingzhou-fixture", remote_root)
+    write_state("timezone", "UTC", remote_root)
+    write_state("ntp", "true", remote_root)
     for service in ["qingzhou-fixture.service", "qingzhou-verify-fail.service"]:
         write_state(service_state_key(service), "active", remote_root)
         write_state(service_policy_key(service), "enabled", remote_root)

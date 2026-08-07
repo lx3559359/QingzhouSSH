@@ -209,6 +209,52 @@ async fn dangerous_hostname_success_and_verify_failure_close_the_recovery_loop()
 
 #[tokio::test]
 #[ignore = "requires scripts/ssh-fixture.ps1 -Action Start"]
+async fn timezone_and_time_sync_changes_use_detected_current_state() {
+    let data_root = project_root()
+        .join(".local/test-data")
+        .join(format!("operations-time-live-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir_all(&data_root).unwrap();
+    let _cleanup = Cleanup(data_root.clone());
+    let services = AppServices::open_with_protector(&data_root, Arc::new(XorProtector))
+        .await
+        .unwrap();
+    let server_id = trusted_fixture(&services).await;
+
+    let timezone = run_dangerous_task(
+        &services,
+        &server_id,
+        "system.timezone_change",
+        json!({"timezone":"Asia/Shanghai"}),
+    )
+    .await;
+    assert_eq!(
+        timezone.run.status,
+        OperationStatus::Succeeded,
+        "{timezone:#?}"
+    );
+    assert_eq!(fixture_state("timezone"), "Asia/Shanghai");
+
+    for enabled in [false, true] {
+        let time_sync = run_dangerous_task(
+            &services,
+            &server_id,
+            "system.time_sync_change",
+            json!({"enabled":enabled}),
+        )
+        .await;
+        assert_eq!(
+            time_sync.run.status,
+            OperationStatus::Succeeded,
+            "{time_sync:#?}"
+        );
+        assert_eq!(fixture_state("ntp"), enabled.to_string());
+    }
+
+    assert!(data_root.join("backups/tasks").is_dir());
+}
+
+#[tokio::test]
+#[ignore = "requires scripts/ssh-fixture.ps1 -Action Start"]
 async fn service_and_container_actions_use_stateful_backup_verify_and_rollback() {
     let data_root = project_root()
         .join(".local/test-data")
