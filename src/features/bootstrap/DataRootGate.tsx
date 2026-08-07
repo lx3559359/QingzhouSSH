@@ -1,7 +1,7 @@
 import { FolderOpen, HardDrives } from '@phosphor-icons/react';
 import { useState } from 'react';
-import { open } from '@tauri-apps/plugin-dialog';
 
+import { chooseDirectory as selectDirectory } from '../../api/dialogs';
 import { api } from '../../api/tauri';
 import type { BootstrapStatus } from '../../api/contracts';
 
@@ -19,10 +19,9 @@ export function DataRootGate({ status, onReady }: DataRootGateProps) {
 
   async function chooseDirectory() {
     setError('');
-    const path = await open({
-      directory: true,
-      multiple: false,
+    const path = await selectDirectory({
       title: '选择轻舟 SSH 数据目录',
+      previewPath: '.local\\dev-data（项目目录内）',
     });
     if (!path) return;
 

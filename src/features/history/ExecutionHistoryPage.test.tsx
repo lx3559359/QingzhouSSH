@@ -22,6 +22,11 @@ describe('ExecutionHistoryPage', () => {
     const user = userEvent.setup();
     render(<ExecutionHistoryPage />);
     expect(await screen.findByText('service.restart')).toBeVisible();
+    expect(screen.getByText('中断时仍在运行的记录会被标记为“状态待确认”，避免误报成功。')).toBeVisible();
+    expect(screen.queryByText(/running|uncertain/)).not.toBeInTheDocument();
+    expect(screen.getByRole('option', { name: '成功' })).toHaveValue('succeeded');
+    expect(screen.getAllByText('成功')).toHaveLength(2);
+    expect(screen.queryByText('succeeded')).not.toBeInTheDocument();
 
     await user.selectOptions(screen.getByLabelText('历史服务器'), 'server-1');
     await user.selectOptions(screen.getByLabelText('执行类别'), 'service');
@@ -31,6 +36,8 @@ describe('ExecutionHistoryPage', () => {
 
     await user.click(screen.getByRole('button', { name: /查看 service.restart/ }));
     expect(await screen.findByRole('heading', { name: '执行详情' })).toBeVisible();
+    expect(screen.getAllByText('成功')).toHaveLength(3);
+    expect(screen.queryByText('succeeded')).not.toBeInTheDocument();
     expect(screen.getByText('nginx.service')).toBeVisible();
     expect(screen.getByText('退出码 0')).toBeVisible();
     expect(screen.getByText(/token=\[REDACTED\]/)).toBeVisible();

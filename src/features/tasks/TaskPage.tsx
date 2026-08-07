@@ -85,7 +85,12 @@ export function TaskPage() {
   }, [serverId]);
 
   const libraryItems = useMemo(() => buildToolLibrary(tasks, scripts), [tasks, scripts]);
-  const counts = useMemo(() => groupCounts(libraryItems), [libraryItems]);
+  const countableItems = useMemo(() => filterToolLibrary(libraryItems, {
+    states: showUnavailable
+      ? ['ready', 'remediable', 'permission_blocked', 'unsupported']
+      : undefined,
+  }), [libraryItems, showUnavailable]);
+  const counts = useMemo(() => groupCounts(countableItems), [countableItems]);
   const visibleItems = useMemo(() => filterToolLibrary(libraryItems, {
     query,
     categories: category === 'all' ? undefined : [category],
@@ -98,6 +103,10 @@ export function TaskPage() {
     [libraryItems, selectedKey],
   );
   const selectedServer = servers.find((server) => server.id === serverId) ?? null;
+
+  useEffect(() => {
+    if (category !== 'all' && counts[category] === 0) setCategory('all');
+  }, [category, counts]);
 
   useEffect(() => {
     if (visibleItems.length === 0) {
@@ -336,7 +345,7 @@ export function TaskPage() {
         <>
           <ToolLibraryFilters query={query} showUnavailable={showUnavailable} onQueryChange={setQuery} onToggleUnavailable={() => setShowUnavailable((current) => !current)} />
           <div className="tool-library-workspace">
-            <ToolCategoryRail selected={category} counts={counts} total={libraryItems.length} onSelect={setCategory} />
+            <ToolCategoryRail selected={category} counts={counts} total={countableItems.length} onSelect={setCategory} />
             <ToolCatalogList items={visibleItems} selectedKey={selectedKey} onSelect={(item) => chooseItem(item, true)} />
             <div ref={detailPaneRef} className="tool-detail-anchor">
               <ToolDetailPane

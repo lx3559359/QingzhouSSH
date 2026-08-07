@@ -9,7 +9,6 @@ import {
   SpinnerGap,
   StopCircle,
 } from '@phosphor-icons/react';
-import { open } from '@tauri-apps/plugin-dialog';
 import { useEffect, useRef, useState } from 'react';
 import type { MouseEvent as ReactMouseEvent } from 'react';
 
@@ -20,6 +19,7 @@ import type {
   ExecutionEvent,
   ServerProfile,
 } from '../../api/contracts';
+import { chooseDirectory } from '../../api/dialogs';
 import { api, asAppError } from '../../api/tauri';
 import { ContextMenu } from '../../components/ContextMenu';
 import type { ContextMenuItem } from '../../components/ContextMenu';
@@ -321,7 +321,10 @@ export function FileTransferPage({ onSearchRemoteFile }: FileTransferPageProps =
   };
 
   const chooseLocalDirectory = async () => {
-    const selected = await open({ directory: true, multiple: false, title: '选择本地目录' });
+    const selected = await chooseDirectory({
+      title: '选择本地目录',
+      previewPath: localListing?.path ?? '.local\\dev-data（项目目录内）',
+    });
     if (typeof selected === 'string') await loadLocal(selected);
   };
 

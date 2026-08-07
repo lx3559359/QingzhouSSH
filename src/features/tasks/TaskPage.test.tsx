@@ -431,10 +431,13 @@ describe('TaskPage', () => {
     expect(screen.getByLabelText('工具详情')).toBeVisible();
     expect(screen.queryByText('UDP 探测')).not.toBeInTheDocument();
     expect(screen.queryByText('修改 IP 地址')).not.toBeInTheDocument();
+    await screen.findByRole('button', { name: '全部工具 3' });
+    expect(screen.queryByRole('button', { name: /网络与端口/ })).not.toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: '查看受限与不支持' }));
     expect(await screen.findByText('UDP 探测')).toBeVisible();
     expect(screen.getByText('修改 IP 地址')).toBeVisible();
+    expect(screen.getByRole('button', { name: '网络与端口 2' })).toBeVisible();
   });
 
   it('reveals the task details after the user selects a tool', async () => {

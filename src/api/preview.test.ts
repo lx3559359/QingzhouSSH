@@ -47,6 +47,26 @@ describe('log search preview API', () => {
       path: '/home/app/requirements.txt',
     }));
   });
+
+  it('filters filename preview results by the requested keyword', async () => {
+    const details = await previewApi.searchLogs(
+      'preview-openeuler',
+      {
+        target: 'filename',
+        path: '',
+        keyword: 'secure',
+        caseSensitive: false,
+        contextLines: 0,
+        limit: 200,
+        startTime: null,
+        endTime: null,
+      },
+      () => undefined,
+    );
+
+    const page = await previewApi.readLogResultPage(details.record.id, null, 50);
+    expect(page.items).toEqual([]);
+  });
 });
 
 describe('operations preview API', () => {
@@ -155,6 +175,10 @@ describe('workflow preview API', () => {
 });
 
 describe('update preview API', () => {
+  it('reports the version injected from the package manifest', async () => {
+    expect((await previewApi.getUpdateStatus()).currentVersion).toBe(__APP_VERSION__);
+  });
+
   it('models the GitHub primary source, progress, confirmation and install state', async () => {
     resetUpdatePreviewForTests('github');
     expect((await previewApi.getUpdateStatus()).phase).toBe('idle');

@@ -133,6 +133,7 @@ export function LogSearchPage({ searchIntent, onSearchIntentConsumed }: LogSearc
     setNextCursor(page.nextCursor);
     setPageNumber(targetPage);
     setSearched(true);
+    return page;
   };
 
   const onEvent = (event: ExecutionEvent) => {
@@ -185,11 +186,15 @@ export function LogSearchPage({ searchIntent, onSearchIntentConsumed }: LogSearc
         });
         return;
       }
-      if (matchCount === null && result.record.outputSummary) {
-        const count = Number.parseInt(result.record.outputSummary, 10);
-        if (Number.isFinite(count)) setMatchCount(count);
+      const summaryCount = result.record.outputSummary
+        ? Number.parseInt(result.record.outputSummary, 10)
+        : Number.NaN;
+      const firstPage = await loadPage(result.record.id, null, 1);
+      if (Number.isFinite(summaryCount)) {
+        setMatchCount((current) => current ?? summaryCount);
+      } else if (!firstPage.nextCursor) {
+        setMatchCount((current) => current ?? firstPage.items.length);
       }
-      await loadPage(result.record.id, null, 1);
     } catch (error) {
       const payload = errorPayload(error);
       setMessage({ kind: 'error', text: classifiedError(payload.code, payload.message) });

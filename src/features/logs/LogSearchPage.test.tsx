@@ -154,6 +154,55 @@ describe('LogSearchPage', () => {
     ));
   });
 
+  it('derives a completed result count from the final page when the backend summary has no number', async () => {
+    const user = userEvent.setup();
+    apiMocks.searchLogs.mockImplementation(async (_serverId, _request, onEvent) => {
+      onEvent({
+        type: 'finished',
+        sequence: 1,
+        emittedAt: 2,
+        status: 'succeeded',
+        exitCode: 0,
+        durationMs: 1,
+        result: null,
+      });
+      const result = details();
+      return {
+        ...result,
+        record: { ...result.record, outputSummary: '检索完成' },
+      };
+    });
+    apiMocks.readLogResultPage.mockResolvedValueOnce({
+      items: [
+        {
+          resultType: 'content',
+          path: '/var/log/app.log',
+          lineNumber: 18,
+          kind: 'match',
+          timestamp: null,
+          text: 'ERROR request failed',
+        },
+        {
+          resultType: 'content',
+          path: '/var/log/app.log',
+          lineNumber: 19,
+          kind: 'match',
+          timestamp: null,
+          text: 'ERROR retry failed',
+        },
+      ],
+      nextCursor: null,
+    });
+    render(<LogSearchPage />);
+
+    await screen.findByRole('option', { name: server.name });
+    await user.type(screen.getByLabelText('搜索内容'), 'ERROR');
+    await user.click(screen.getByRole('button', { name: '开始检索' }));
+
+    expect(await screen.findByText('共匹配 2 条')).toBeVisible();
+    expect(screen.queryByText('尚未检索')).not.toBeInTheDocument();
+  });
+
   it('finds remote files by a fuzzy filename without exposing content-only controls', async () => {
     const user = userEvent.setup();
     apiMocks.readLogResultPage.mockResolvedValueOnce({

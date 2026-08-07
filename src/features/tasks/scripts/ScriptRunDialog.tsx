@@ -8,6 +8,7 @@ import type {
   PersonalScriptRunPreview,
   PersonalScriptRunResult,
 } from '../../../api/contracts';
+import { executionStatusLabel } from '../../../presentation/executionLabels';
 import { ParameterForm } from '../ParameterForm';
 import type { PersonalScriptApi } from './types';
 
@@ -106,7 +107,7 @@ export function ScriptRunDialog({ apiClient, script, serverId, serverName, onClo
           </div>
         )}
 
-        {result && <div className={`inline-message ${result.execution.record.status === 'succeeded' ? 'inline-message--success' : 'inline-message--error'}`}><strong>运行状态：{result.execution.record.status}</strong><span>完整输出可在执行记录中查看。</span></div>}
+        {result && <div className={`inline-message ${result.execution.record.status === 'succeeded' ? 'inline-message--success' : 'inline-message--error'}`}><strong>运行状态：{executionStatusLabel(result.execution.record.status)}</strong><span>完整输出可在执行记录中查看。</span></div>}
         {events.length > 0 && <pre className="script-run-output">{events.filter((event) => event.type === 'stdout' || event.type === 'stderr').map((event) => event.type === 'stdout' || event.type === 'stderr' ? event.text : '').join('')}</pre>}
         {error && <div className="inline-message inline-message--error" role="alert">{error}</div>}
         <footer className="modal-actions"><button className="secondary-button" type="button" onClick={() => void close()}>{result ? '完成' : '取消'}</button></footer>

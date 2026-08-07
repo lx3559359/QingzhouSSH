@@ -1,6 +1,7 @@
 import { CheckCircle, SpinnerGap, StopCircle, XCircle } from '@phosphor-icons/react';
 
 import type { ExecutionDetails, ExecutionEvent } from '../../api/contracts';
+import { executionStatusLabel } from '../../presentation/executionLabels';
 
 interface ExecutionDrawerProps {
   events: ExecutionEvent[];
@@ -28,7 +29,7 @@ export function ExecutionDrawer({ events, details, running, onCancel }: Executio
         {running ? <SpinnerGap className="spin" weight="bold" /> : details?.record.status === 'succeeded' ? <CheckCircle weight="fill" /> : failed ? <XCircle weight="fill" /> : null}
       </header>
       <div className="execution-meta">
-        <span>状态 <strong>{details?.record.status ?? (running ? 'running' : 'idle')}</strong></span>
+        <span>状态 <strong>{executionStatusLabel(details?.record.status ?? (running ? 'running' : 'idle'))}</strong></span>
         <span>退出码 <strong>{details?.record.exitCode ?? '—'}</strong></span>
         <span>耗时 <strong>{details?.record.durationMs != null ? `${details.record.durationMs} ms` : '—'}</strong></span>
       </div>

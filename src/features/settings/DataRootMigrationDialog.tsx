@@ -1,8 +1,8 @@
 import { ArrowRight, Database, FolderOpen, ShieldCheck, SpinnerGap, X } from '@phosphor-icons/react';
-import { open } from '@tauri-apps/plugin-dialog';
 import { useEffect, useState } from 'react';
 
 import type { DataMigrationPreview, ReadyBootstrapStatus } from '../../api/contracts';
+import { chooseDirectory } from '../../api/dialogs';
 import { api, asAppError } from '../../api/tauri';
 
 interface DataRootMigrationDialogProps {
@@ -34,10 +34,9 @@ export function DataRootMigrationDialog({ bootstrap, intent = 'choose', onClose 
 
   async function chooseTarget() {
     setError('');
-    const target = await open({
-      directory: true,
-      multiple: false,
+    const target = await chooseDirectory({
       title: '选择新的轻舟 SSH 数据目录',
+      previewPath: `${bootstrap.dataRoot}\\preview-migration-target`,
     });
     if (!target) return;
     setBusy('choosing');

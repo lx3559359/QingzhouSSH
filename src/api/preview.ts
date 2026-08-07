@@ -76,6 +76,8 @@ let previewPersonalScripts = new Map<string, PersonalScriptDetails>();
 let previewPersonalScriptVersions = new Map<string, PersonalScriptVersion[]>();
 let previewPersonalScriptRuns = new Map<string, PersonalScriptRunPreview>();
 let previewLogTarget: LogSearchRequest['target'] = 'content';
+let previewLogKeyword = '';
+let previewLogCaseSensitive = false;
 let previewDataMigration: DataMigrationJournal | null = null;
 let previewDataMigrationTarget: string | null = null;
 const previewDataRoot =
@@ -983,7 +985,7 @@ function updateScenarioFromUrl(): UpdatePreviewScenario {
 
 function emptyUpdateStatus(autoCheck = true): UpdateStatus {
   return {
-    currentVersion: '0.1.0',
+    currentVersion: __APP_VERSION__,
     phase: 'idle',
     autoCheck,
     lastCheckedAt: null,
@@ -1706,22 +1708,29 @@ export const previewApi = {
     onEvent: (event: ExecutionEvent) => void,
   ) => {
     previewLogTarget = request.target;
+    previewLogKeyword = request.keyword;
+    previewLogCaseSensitive = request.caseSensitive;
     const details = createPreviewExecution(serverId, 'logs.search');
     emitPreview(onEvent, details);
     return details;
   },
   readLogResultPage: async (_executionId: string, cursor: string | null, pageSize: number) => {
     if (previewLogTarget === 'filename') {
+      const files = [
+        {
+          resultType: 'file' as const,
+          path: '/home/app/requirements.txt',
+          name: 'requirements.txt',
+          size: 96,
+          modifiedAt: 1_785_801_600,
+        },
+      ];
+      const keyword = previewLogCaseSensitive ? previewLogKeyword : previewLogKeyword.toLocaleLowerCase();
       return {
-        items: [
-          {
-            resultType: 'file' as const,
-            path: '/home/app/requirements.txt',
-            name: 'requirements.txt',
-            size: 96,
-            modifiedAt: 1_785_801_600,
-          },
-        ],
+        items: files.filter((file) => {
+          const candidate = `${file.name} ${file.path}`;
+          return (previewLogCaseSensitive ? candidate : candidate.toLocaleLowerCase()).includes(keyword);
+        }),
         nextCursor: null,
       };
     }

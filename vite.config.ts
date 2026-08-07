@@ -1,8 +1,12 @@
 import react from '@vitejs/plugin-react';
 import { configDefaults, defineConfig } from 'vitest/config';
+import packageMetadata from './package.json';
 
 export default defineConfig({
   plugins: [react()],
+  define: {
+    __APP_VERSION__: JSON.stringify(packageMetadata.version),
+  },
   clearScreen: false,
   server: {
     host: '127.0.0.1',

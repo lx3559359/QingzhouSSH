@@ -162,6 +162,9 @@ describe('ScriptCenter', () => {
     await user.click(screen.getByRole('button', { name: '运行脚本' }));
     expect(await screen.findByText(/不可自动回滚/)).toBeVisible();
     expect(api.previewPersonalScriptRun).toHaveBeenCalledWith('script-1', 'server-1', {});
+    await user.click(screen.getByRole('button', { name: '确认并运行' }));
+    expect(await screen.findByText('运行状态：成功')).toBeVisible();
+    expect(screen.queryByText('运行状态：succeeded')).not.toBeInTheDocument();
   });
 
   it('never writes an edited script body to browser storage or console', async () => {
