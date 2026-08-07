@@ -29,13 +29,54 @@ function Command-Path([string]$Value) {
   if ($Value -match '^"([^"]+)"') { return $Matches[1] }
   return ($Value -split '\s+')[0]
 }
+function Stop-ReleaseProcessTree([int]$RootProcessId, [string]$ExpectedDataRoot) {
+  $knownIds = [Collections.Generic.HashSet[int]]::new()
+  [void]$knownIds.Add($RootProcessId)
+  for ($attempt = 1; $attempt -le 20; $attempt++) {
+    $processes = @(Get-CimInstance Win32_Process | Select-Object ProcessId, ParentProcessId, Name, CommandLine)
+    $expanded = $true
+    while ($expanded) {
+      $expanded = $false
+      foreach ($candidate in $processes) {
+        if ($knownIds.Contains([int]$candidate.ParentProcessId) -and $knownIds.Add([int]$candidate.ProcessId)) {
+          $expanded = $true
+        }
+      }
+    }
+    $targets = @($processes | Where-Object {
+      $knownIds.Contains([int]$_.ProcessId) -or
+      ($_.Name -eq 'msedgewebview2.exe' -and
+        -not [string]::IsNullOrWhiteSpace([string]$_.CommandLine) -and
+        ([string]$_.CommandLine).IndexOf($ExpectedDataRoot, [StringComparison]::OrdinalIgnoreCase) -ge 0)
+    })
+    if ($targets.Count -eq 0) { return }
+
+    # Stop the app first so it cannot create another WebView child while cleanup is running.
+    foreach ($target in @($targets | Sort-Object { if ([int]$_.ProcessId -eq $RootProcessId) { 0 } else { 1 } })) {
+      Stop-Process -Id ([int]$target.ProcessId) -Force -ErrorAction SilentlyContinue
+    }
+    Start-Sleep -Milliseconds 250
+  }
+  throw "Application processes did not release the smoke profile: $ExpectedDataRoot"
+}
+function Remove-SmokeDirectoryWithRetry([string]$Path, [int]$Attempts = 20) {
+  for ($attempt = 1; $attempt -le $Attempts; $attempt++) {
+    if (-not (Test-Path -LiteralPath $Path)) { return }
+    try {
+      Remove-Item -LiteralPath $Path -Recurse -Force -ErrorAction Stop
+      return
+    } catch {
+      if ($attempt -eq $Attempts) { throw }
+      Start-Sleep -Milliseconds 250
+    }
+  }
+}
 function Start-And-Check([string]$Executable, [string]$ExpectedDataRoot) {
   $process = Start-Process -FilePath $Executable -PassThru
   Start-Sleep -Seconds $StartupSeconds
   if ($process.HasExited) { throw "Application exited during smoke launch: $Executable" }
   if (-not (Test-Path -LiteralPath $ExpectedDataRoot -PathType Container)) { throw "Application did not initialize its expected data root: $ExpectedDataRoot" }
-  Stop-Process -Id $process.Id -Force
-  $process.WaitForExit()
+  Stop-ReleaseProcessTree -RootProcessId $process.Id -ExpectedDataRoot $ExpectedDataRoot
 }
 
 $installer = File-ForRole 'installer-updater'
@@ -97,7 +138,7 @@ try {
     Start-Process -FilePath $uninstaller -ArgumentList '/S' -Wait | Out-Null
   }
   if ($null -eq $oldDataRoot) { Remove-Item Env:QINGZHOU_DATA_ROOT -ErrorAction SilentlyContinue } else { $env:QINGZHOU_DATA_ROOT = $oldDataRoot }
-  if (Test-Path -LiteralPath $smokeRoot) { Remove-Item -LiteralPath $smokeRoot -Recurse -Force }
+  Remove-SmokeDirectoryWithRetry -Path $smokeRoot
 }
 
 Write-Output "PASS: portable, install, update replacement and uninstall smoke completed for $($metadata.version)"

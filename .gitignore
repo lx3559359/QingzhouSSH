@@ -12,6 +12,8 @@ dist/
 src-tauri/gen/
 artifacts/
 coverage/
+__pycache__/
+*.py[cod]
 
 # Runtime data belongs in the user-selected data root
 data/
