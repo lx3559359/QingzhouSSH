@@ -1,5 +1,6 @@
 pub mod data_migration;
 pub mod data_root;
+pub mod data_root_store;
 pub mod database;
 pub mod logs;
 pub mod portable_root;
@@ -7,6 +8,7 @@ pub mod redaction;
 pub mod root_registry;
 pub mod scripts;
 pub mod secret_protector;
+pub mod secret_store;
 pub mod sftp;
 pub mod ssh;
 pub mod system_probe;

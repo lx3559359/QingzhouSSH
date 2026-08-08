@@ -32,13 +32,22 @@ tokio-util = { version = "0.7", features = ["rt"] }
 tracing = "0.1"
 url = "2"
 uuid = { version = "1", features = ["v4", "serde"] }
-windows-dpapi = "0.2"
-winreg = "0.56"
 zeroize = { version = "1", features = ["derive"] }
 
 [target.'cfg(windows)'.dependencies]
+windows-dpapi = "0.2"
 windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_System_Threading"] }
+winreg = "0.56"
+
+[target.'cfg(any(target_os = "macos", target_os = "linux"))'.dependencies]
+keyring = { version = "4.1.6", default-features = true }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
 
 [dev-dependencies]
 minisign-verify = "0.2.5"
 tempfile = "3"
+
+[profile.test]
+debug = 0

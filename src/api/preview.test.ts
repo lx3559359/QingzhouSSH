@@ -15,7 +15,7 @@ describe('preview data root', () => {
     expect(status).toEqual({
       state: 'ready',
       dataRoot: import.meta.env.VITE_QINGZHOU_DATA_ROOT ?? '.local\\dev-data（项目目录内）',
-      dataRootSource: 'registry',
+      dataRootSource: 'platform',
       dataRootMutable: true,
       lastDataMigration: null,
     });

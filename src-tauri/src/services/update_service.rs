@@ -368,10 +368,7 @@ impl UpdateService {
         let bytes = self.adapter.download(&release, progress).await?;
         verify_bytes(&release, &bytes)?;
 
-        let relative_path = format!(
-            "staged/{}/QingzhouSSH-{}-windows-x86_64.nsis",
-            release.version, release.version
-        );
+        let relative_path = staged_relative_path(&release)?;
         let final_path = self.store.resolve_staged_file(&relative_path)?;
         let partial_path = partial_path(&final_path);
         if let Some(parent) = final_path.parent() {
@@ -441,6 +438,19 @@ impl UpdateService {
         self.store.save(&state)?;
         Ok(removed)
     }
+}
+
+fn staged_relative_path(release: &UpdateRelease) -> Result<String, UpdateServiceError> {
+    let extension = match release.platform.as_str() {
+        "windows-x86_64" | "windows-x86_64-nsis" | "windows-aarch64-nsis" => "nsis",
+        "macos-x86_64-dmg" | "macos-aarch64-dmg" => "dmg",
+        "linux-x86_64-appimage" | "linux-aarch64-appimage" => "AppImage",
+        _ => return Err(UpdateServiceError::Integrity),
+    };
+    Ok(format!(
+        "staged/{}/QingzhouSSH-{}-{}.{}",
+        release.version, release.version, release.platform, extension
+    ))
 }
 
 fn verify_bytes(release: &UpdateRelease, bytes: &[u8]) -> Result<(), UpdateServiceError> {

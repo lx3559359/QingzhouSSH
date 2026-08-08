@@ -46,12 +46,16 @@ impl SignedUpdateAdapter for FakeAdapter {
 }
 
 fn release_for(bytes: &[u8]) -> UpdateRelease {
+    release_for_platform(bytes, "windows-x86_64")
+}
+
+fn release_for_platform(bytes: &[u8], platform: &str) -> UpdateRelease {
     let digest = format!("{:x}", Sha256::digest(bytes));
     UpdateRelease::new(UpdateReleaseInput {
         version: "0.2.0".into(),
         notes: "安全更新".into(),
         published_at: Some("2026-08-04T10:00:00Z".into()),
-        platform: "windows-x86_64".into(),
+        platform: platform.into(),
         download_url:
             "https://github.com/lx3559359/QingzhouSSH/releases/download/v0.2.0/update.exe".into(),
         signature: "trusted-signature".into(),
@@ -61,6 +65,32 @@ fn release_for(bytes: &[u8]) -> UpdateRelease {
         source: UpdateSource::Github,
     })
     .unwrap()
+}
+
+#[tokio::test]
+async fn stages_with_the_selected_platform_package_extension() {
+    let root = tempdir().unwrap();
+    let bytes = b"signed macOS package".to_vec();
+    let service = UpdateService::new(
+        root.path(),
+        Arc::new(FakeAdapter {
+            result: Ok(bytes.clone()),
+            installs: Arc::new(Mutex::new(0)),
+        }),
+    )
+    .unwrap();
+
+    let staged = service
+        .download(
+            release_for_platform(&bytes, "macos-aarch64-dmg"),
+            Box::new(|_, _| {}),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        staged.relative_path,
+        "staged/0.2.0/QingzhouSSH-0.2.0-macos-aarch64-dmg.dmg"
+    );
 }
 
 #[tokio::test]

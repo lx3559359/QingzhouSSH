@@ -15,7 +15,8 @@ use crate::{
             MIGRATION_COMPLETE_FILE, MIGRATION_JOURNAL_FILE,
         },
         data_root::DataRootSource,
-        portable_root, root_registry,
+        data_root_store::system_data_root_store,
+        portable_root,
     },
     domain::execution::now_millis,
     error::{AppError, AppResult},
@@ -37,7 +38,7 @@ pub trait ProcessLauncher {
 
 #[derive(Debug, Clone)]
 pub enum RuntimeDataRootPointer {
-    Registry,
+    Platform,
     Portable {
         pointer_path: PathBuf,
         default_root: PathBuf,
@@ -47,7 +48,7 @@ pub enum RuntimeDataRootPointer {
 impl DataRootPointer for RuntimeDataRootPointer {
     fn commit(&self, verified: &VerifiedMigration) -> AppResult<()> {
         match self {
-            Self::Registry => root_registry::save_data_root(verified.target()),
+            Self::Platform => system_data_root_store()?.save(verified.target()),
             Self::Portable {
                 pointer_path,
                 default_root,
@@ -88,9 +89,26 @@ impl ParentProcessWaiter for SystemParentProcessWaiter {
             }
             Ok(())
         }
-        #[cfg(not(windows))]
+        #[cfg(unix)]
+        {
+            let parent_pid = i32::try_from(parent_pid)
+                .map_err(|_| AppError::Validation("数据迁移父进程标识超出范围".into()))?;
+            loop {
+                let result = unsafe { libc::kill(parent_pid, 0) };
+                if result == 0 {
+                    std::thread::sleep(std::time::Duration::from_millis(100));
+                    continue;
+                }
+                let error = std::io::Error::last_os_error();
+                if error.raw_os_error() == Some(libc::ESRCH) {
+                    return Ok(());
+                }
+                return Err(AppError::Io(error));
+            }
+        }
+        #[cfg(not(any(windows, unix)))]
         Err(AppError::Compatibility(
-            "数据目录迁移工作器目前仅支持 Windows".into(),
+            "当前客户端平台尚未实现数据迁移父进程等待".into(),
         ))
     }
 }
@@ -148,7 +166,7 @@ pub fn run_system_worker(journal_path: &Path) -> AppResult<DataMigrationPhase> {
         .parent()
         .ok_or_else(|| AppError::Validation("无法确定程序目录".into()))?;
     let pointer = match journal.source_mode {
-        DataRootSource::Registry => RuntimeDataRootPointer::Registry,
+        DataRootSource::Platform | DataRootSource::Registry => RuntimeDataRootPointer::Platform,
         DataRootSource::PortableCustom | DataRootSource::PortableDefault => {
             RuntimeDataRootPointer::Portable {
                 pointer_path: executable_directory.join("data-root.json"),

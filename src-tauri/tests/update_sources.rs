@@ -2,20 +2,25 @@ use std::{cell::Cell, collections::VecDeque, future::Future, pin::Pin, sync::Mut
 
 use qingzhou_ssh_lib::{
     core::updates::{
-        choose_source, parse_manifest, DualSourceChecker, ManifestDecision, ManifestTransport,
-        SourceCheckError, SourceFailureKind, TrustedSourcePolicy,
+        choose_source, current_platform_key, parse_manifest, parse_manifest_for_platform,
+        DualSourceChecker, ManifestDecision, ManifestTransport, SourceCheckError,
+        SourceFailureKind, TrustedSourcePolicy,
     },
     domain::update::UpdateSource,
 };
 
 fn github_manifest(url: &str) -> Vec<u8> {
+    platform_manifest(current_platform_key(), url)
+}
+
+fn platform_manifest(platform: &str, url: &str) -> Vec<u8> {
     format!(
         r#"{{
           "version":"0.2.0",
           "notes":"安全更新",
           "pub_date":"2026-08-04T10:00:00Z",
           "platforms":{{
-            "windows-x86_64":{{
+            "{platform}":{{
               "url":"{url}",
               "signature":"trusted-signature",
               "sha256":"{}",
@@ -27,6 +32,33 @@ fn github_manifest(url: &str) -> Vec<u8> {
         "a".repeat(64)
     )
     .into_bytes()
+}
+
+#[test]
+fn selects_only_the_requested_os_architecture_and_package() {
+    let policy = TrustedSourcePolicy::new("lx3559359", "domestic-user").unwrap();
+    let url = "https://github.com/lx3559359/QingzhouSSH/releases/download/v0.2.0/QingzhouSSH.dmg";
+    let manifest = platform_manifest("macos-aarch64-dmg", url);
+    let decision = parse_manifest_for_platform(
+        &policy,
+        UpdateSource::Github,
+        "0.1.0",
+        &manifest,
+        "macos-aarch64-dmg",
+    )
+    .unwrap();
+    let ManifestDecision::Available(release) = decision else {
+        panic!("expected available release");
+    };
+    assert_eq!(release.platform, "macos-aarch64-dmg");
+    assert!(parse_manifest_for_platform(
+        &policy,
+        UpdateSource::Github,
+        "0.1.0",
+        &manifest,
+        "linux-aarch64-appimage",
+    )
+    .is_err());
 }
 
 #[test]

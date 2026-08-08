@@ -193,7 +193,7 @@ export function AddServerDialog({ onSubmit, onCancel }: AddServerDialogProps) {
 
           <p className="security-caption">
             <ShieldCheck weight="fill" aria-hidden="true" />
-            凭据使用当前 Windows 用户的 DPAPI 加密后再保存。
+            凭据只写入当前用户的系统安全存储；应用不会保存明文凭据。
           </p>
           {error && (
             <p className="inline-message inline-message--error" role="alert">

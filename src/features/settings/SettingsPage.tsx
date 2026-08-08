@@ -216,7 +216,7 @@ export function SettingsPage({ bootstrap }: { bootstrap: ReadyBootstrapStatus })
               <div>
                 <span>当前版本</span>
                 <strong>v{status.currentVersion}</strong>
-                <small>Windows x64 · 无管理员安装</small>
+                <small>当前客户端平台 · 当前用户安全边界</small>
               </div>
             </article>
 

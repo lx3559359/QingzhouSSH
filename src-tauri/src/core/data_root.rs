@@ -14,7 +14,7 @@ pub struct DataRootInputs {
     pub portable_mode: bool,
     pub portable_custom_root: Option<PathBuf>,
     pub portable_default_root: Option<PathBuf>,
-    pub registry_root: Option<PathBuf>,
+    pub platform_root: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -23,6 +23,7 @@ pub enum DataRootSource {
     Environment,
     PortableCustom,
     PortableDefault,
+    Platform,
     Registry,
     NeedsSelection,
 }
@@ -62,10 +63,10 @@ pub fn resolve_data_root(input: DataRootInputs) -> AppResult<DataRootResolution>
             mutable: true,
         });
     }
-    if let Some(path) = input.registry_root {
+    if let Some(path) = input.platform_root {
         validate_root_path(&path)?;
         return Ok(DataRootResolution {
-            source: DataRootSource::Registry,
+            source: DataRootSource::Platform,
             path: Some(path),
             mutable: true,
         });
@@ -134,10 +135,10 @@ pub fn resolve_runtime_data_root() -> AppResult<DataRootResolution> {
         portable_mode,
         portable_custom_root,
         portable_default_root: portable_mode.then(|| executable_directory.join("data")),
-        registry_root: if portable_mode {
+        platform_root: if portable_mode {
             None
         } else {
-            crate::core::root_registry::load_data_root()?
+            crate::core::data_root_store::system_data_root_store()?.load()?
         },
     })?;
     recover_runtime_resolution(resolution, executable_directory)
@@ -212,8 +213,9 @@ fn recover_runtime_resolution(
         return Ok(resolution);
     };
     match recovered.source {
-        DataRootSource::Registry => {
-            crate::core::root_registry::save_data_root(recovered.path.as_deref().unwrap())?
+        DataRootSource::Platform | DataRootSource::Registry => {
+            crate::core::data_root_store::system_data_root_store()?
+                .save(recovered.path.as_deref().unwrap())?
         }
         DataRootSource::PortableDefault => {
             crate::core::portable_root::clear(&executable_directory.join("data-root.json"))?
@@ -234,19 +236,18 @@ mod tests {
 
     #[test]
     fn environment_override_wins_over_portable_and_registry() {
+        let temp = tempdir().unwrap();
+        let environment_root = temp.path().join("work-data");
         let input = DataRootInputs {
-            env_override: Some(r"D:\work\data".into()),
+            env_override: Some(environment_root.clone()),
             portable_mode: true,
-            portable_custom_root: Some(r"D:\app\custom".into()),
-            portable_default_root: Some(r"D:\app\data".into()),
-            registry_root: Some(r"E:\saved".into()),
+            portable_custom_root: Some(temp.path().join("app-custom")),
+            portable_default_root: Some(temp.path().join("app-data")),
+            platform_root: Some(temp.path().join("saved")),
         };
         let resolved = resolve_data_root(input).unwrap();
         assert_eq!(resolved.source, DataRootSource::Environment);
-        assert_eq!(
-            resolved.path.unwrap(),
-            std::path::PathBuf::from(r"D:\work\data")
-        );
+        assert_eq!(resolved.path.unwrap(), environment_root);
     }
 
     #[test]

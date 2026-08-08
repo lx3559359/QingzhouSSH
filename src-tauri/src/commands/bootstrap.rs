@@ -4,7 +4,10 @@ use serde::Serialize;
 use tauri::{AppHandle, State};
 
 use crate::{
-    core::{data_migration::DataMigrationJournal, data_root::DataRootSource, root_registry},
+    core::{
+        data_migration::DataMigrationJournal, data_root::DataRootSource,
+        data_root_store::system_data_root_store,
+    },
     error::{AppError, AppResult},
     services::app_services::AppServices,
     services::update_service::UpdateManager,
@@ -67,7 +70,7 @@ pub async fn initialize_data_root(
     let initialized = AppServices::open(&root).await?;
     let updater = UpdateManager::new(app.package_info().version.to_string(), &root, app.clone())
         .map_err(|_| AppError::Update("更新服务初始化失败".into()))?;
-    root_registry::save_data_root(&root)?;
+    system_data_root_store()?.save(&root)?;
     let status = BootstrapStatus::ready(&initialized);
     *services = Some(initialized);
     *state.updater.write().await = Some(updater);
@@ -87,7 +90,7 @@ mod tests {
         assert_eq!(
             serde_json::to_value(BootstrapStatus::Ready {
                 data_root: r"D:\QingzhouData".into(),
-                data_root_source: DataRootSource::Registry,
+                data_root_source: DataRootSource::Platform,
                 data_root_mutable: true,
                 last_data_migration: None,
             })
@@ -95,7 +98,7 @@ mod tests {
             serde_json::json!({
                 "state": "ready",
                 "dataRoot": r"D:\QingzhouData",
-                "dataRootSource": "registry",
+                "dataRootSource": "platform",
                 "dataRootMutable": true,
                 "lastDataMigration": null
             })

@@ -15,10 +15,10 @@
   },
   "bundle": {
     "active": true,
-    "targets": "nsis",
+    "targets": "all",
     "createUpdaterArtifacts": true,
     "useLocalToolsDir": true,
-    "icon": ["icons/icon.ico"],
+    "icon": ["icons/icon.ico", "icons/icon.icns", "icons/icon.png"],
     "windows": {
       "nsis": {
         "installMode": "currentUser",

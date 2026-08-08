@@ -8,12 +8,19 @@ use std::{
 use zeroize::Zeroizing;
 
 use crate::{
-    core::secret_protector::SecretProtector,
+    core::{
+        secret_protector::SecretProtector,
+        secret_store::{validate_secret_id, SecretStore},
+    },
     error::{AppError, AppResult},
 };
 
 #[derive(Clone)]
 pub struct Vault {
+    store: Arc<dyn SecretStore>,
+}
+
+struct ProtectedFileSecretStore {
     directory: PathBuf,
     protector: Arc<dyn SecretProtector>,
 }
@@ -21,23 +28,63 @@ pub struct Vault {
 impl Vault {
     pub fn new(root: &Path, protector: Arc<dyn SecretProtector>) -> Self {
         Self {
-            directory: root.join("vault"),
-            protector,
+            store: Arc::new(ProtectedFileSecretStore {
+                directory: root.join("vault"),
+                protector,
+            }),
         }
     }
 
-    fn path_for(&self, id: &str) -> AppResult<PathBuf> {
-        if id.is_empty()
-            || !id
-                .bytes()
-                .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
+    pub fn from_store(store: Arc<dyn SecretStore>) -> Self {
+        Self { store }
+    }
+
+    pub fn platform(root: &Path) -> AppResult<Self> {
+        #[cfg(windows)]
         {
-            return Err(AppError::Validation("凭据标识格式无效".into()));
+            Ok(Self::new(
+                root,
+                Arc::new(crate::core::secret_protector::DpapiProtector),
+            ))
         }
-        Ok(self.directory.join(format!("{id}.bin")))
+        #[cfg(any(target_os = "macos", target_os = "linux"))]
+        {
+            let _ = root;
+            Ok(Self::from_store(Arc::new(
+                crate::core::secret_store::NativeKeyringSecretStore,
+            )))
+        }
+        #[cfg(not(any(windows, target_os = "macos", target_os = "linux")))]
+        {
+            let _ = root;
+            Err(AppError::Compatibility(
+                "当前客户端平台尚未提供安全凭据存储实现".into(),
+            ))
+        }
     }
 
     pub fn put(&self, id: &str, secret: &[u8]) -> AppResult<()> {
+        self.store.put(id, secret)
+    }
+
+    pub fn get(&self, id: &str) -> AppResult<Zeroizing<Vec<u8>>> {
+        self.store.get(id)
+    }
+
+    pub fn delete(&self, id: &str) -> AppResult<()> {
+        self.store.delete(id)
+    }
+}
+
+impl ProtectedFileSecretStore {
+    fn path_for(&self, id: &str) -> AppResult<PathBuf> {
+        validate_secret_id(id)?;
+        Ok(self.directory.join(format!("{id}.bin")))
+    }
+}
+
+impl SecretStore for ProtectedFileSecretStore {
+    fn put(&self, id: &str, secret: &[u8]) -> AppResult<()> {
         let final_path = self.path_for(id)?;
         fs::create_dir_all(&self.directory)?;
         if final_path.exists() {
@@ -67,12 +114,12 @@ impl Vault {
         Ok(())
     }
 
-    pub fn get(&self, id: &str) -> AppResult<Zeroizing<Vec<u8>>> {
+    fn get(&self, id: &str) -> AppResult<Zeroizing<Vec<u8>>> {
         let encrypted = fs::read(self.path_for(id)?)?;
         Ok(Zeroizing::new(self.protector.unprotect(&encrypted)?))
     }
 
-    pub fn delete(&self, id: &str) -> AppResult<()> {
+    fn delete(&self, id: &str) -> AppResult<()> {
         let path = self.path_for(id)?;
         if path.exists() {
             fs::remove_file(path)?;
@@ -84,12 +131,42 @@ impl Vault {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Arc;
+    use std::{collections::HashMap, sync::Mutex};
     use tempfile::tempdir;
 
     use crate::{core::secret_protector::SecretProtector, error::AppResult};
 
     struct XorProtector;
+
+    #[derive(Default)]
+    struct MemorySecretStore(Mutex<HashMap<String, Vec<u8>>>);
+
+    impl SecretStore for MemorySecretStore {
+        fn put(&self, id: &str, secret: &[u8]) -> AppResult<()> {
+            validate_secret_id(id)?;
+            let mut values = self.0.lock().unwrap();
+            if values.contains_key(id) {
+                return Err(AppError::Validation("凭据标识已经存在".into()));
+            }
+            values.insert(id.into(), secret.to_vec());
+            Ok(())
+        }
+
+        fn get(&self, id: &str) -> AppResult<Zeroizing<Vec<u8>>> {
+            self.0
+                .lock()
+                .unwrap()
+                .get(id)
+                .cloned()
+                .map(Zeroizing::new)
+                .ok_or_else(|| AppError::Validation("凭据不存在".into()))
+        }
+
+        fn delete(&self, id: &str) -> AppResult<()> {
+            self.0.lock().unwrap().remove(id);
+            Ok(())
+        }
+    }
 
     impl SecretProtector for XorProtector {
         fn protect(&self, value: &[u8]) -> AppResult<Vec<u8>> {
@@ -131,5 +208,14 @@ mod tests {
         vault.put("cred-2", b"first").unwrap();
         assert!(vault.put("cred-2", b"second").is_err());
         assert_eq!(&*vault.get("cred-2").unwrap(), b"first");
+    }
+
+    #[test]
+    fn delegates_to_a_platform_independent_secret_store() {
+        let vault = Vault::from_store(Arc::new(MemorySecretStore::default()));
+        vault.put("cred-3", b"native-store-canary").unwrap();
+        assert_eq!(&*vault.get("cred-3").unwrap(), b"native-store-canary");
+        vault.delete("cred-3").unwrap();
+        assert!(vault.get("cred-3").is_err());
     }
 }

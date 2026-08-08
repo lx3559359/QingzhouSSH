@@ -3,6 +3,16 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 pub const MAX_UPDATE_BYTES: u64 = 512 * 1024 * 1024;
+pub const SUPPORTED_UPDATE_PLATFORMS: &[&str] = &[
+    "windows-x86_64-nsis",
+    "windows-aarch64-nsis",
+    "macos-x86_64-dmg",
+    "macos-aarch64-dmg",
+    "linux-x86_64-appimage",
+    "linux-aarch64-appimage",
+    // Read-only compatibility for manifests published before the platform matrix.
+    "windows-x86_64",
+];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -102,7 +112,7 @@ pub struct UpdateRelease {
 impl UpdateRelease {
     pub fn new(input: UpdateReleaseInput) -> Result<Self, UpdateValidationError> {
         Version::parse(&input.version).map_err(|_| UpdateValidationError::InvalidVersion)?;
-        if input.platform != "windows-x86_64" {
+        if !SUPPORTED_UPDATE_PLATFORMS.contains(&input.platform.as_str()) {
             return Err(UpdateValidationError::InvalidPlatform);
         }
         if input.download_url.trim().is_empty() {

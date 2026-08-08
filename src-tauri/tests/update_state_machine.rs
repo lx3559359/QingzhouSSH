@@ -32,6 +32,24 @@ fn validates_release_metadata_and_version_policy() {
         Sha256Digest::parse("ABC").unwrap_err(),
         UpdateValidationError::InvalidSha256
     );
+    let mut unsupported = UpdateReleaseInput {
+        version: "0.2.0".into(),
+        notes: "notes".into(),
+        published_at: None,
+        platform: "linux-riscv64-appimage".into(),
+        download_url: "https://example.com/update".into(),
+        signature: "sig".into(),
+        sha256: "b".repeat(64),
+        size: 1,
+        build_id: "build".into(),
+        source: UpdateSource::Github,
+    };
+    assert_eq!(
+        UpdateRelease::new(unsupported.clone()).unwrap_err(),
+        UpdateValidationError::InvalidPlatform
+    );
+    unsupported.platform = "linux-aarch64-appimage".into();
+    assert!(UpdateRelease::new(unsupported).is_ok());
     assert_eq!(
         UpdateRelease::new(UpdateReleaseInput {
             version: "0.2".into(),

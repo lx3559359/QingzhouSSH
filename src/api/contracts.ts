@@ -12,6 +12,7 @@ export type DataRootSource =
   | 'environment'
   | 'portable_custom'
   | 'portable_default'
+  | 'platform'
   | 'registry'
   | 'needs_selection';
 

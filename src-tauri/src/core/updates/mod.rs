@@ -15,7 +15,37 @@ pub use state_store::{
 };
 
 const PROJECT_NAME: &str = "QingzhouSSH";
-const PLATFORM: &str = "windows-x86_64";
+#[cfg(all(target_os = "windows", target_arch = "x86_64"))]
+const PLATFORM: &str = "windows-x86_64-nsis";
+#[cfg(all(target_os = "windows", target_arch = "aarch64"))]
+const PLATFORM: &str = "windows-aarch64-nsis";
+#[cfg(all(target_os = "macos", target_arch = "x86_64"))]
+const PLATFORM: &str = "macos-x86_64-dmg";
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+const PLATFORM: &str = "macos-aarch64-dmg";
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+const PLATFORM: &str = "linux-x86_64-appimage";
+#[cfg(all(target_os = "linux", target_arch = "aarch64"))]
+const PLATFORM: &str = "linux-aarch64-appimage";
+#[cfg(not(any(
+    all(
+        target_os = "windows",
+        any(target_arch = "x86_64", target_arch = "aarch64")
+    ),
+    all(
+        target_os = "macos",
+        any(target_arch = "x86_64", target_arch = "aarch64")
+    ),
+    all(
+        target_os = "linux",
+        any(target_arch = "x86_64", target_arch = "aarch64")
+    )
+)))]
+const PLATFORM: &str = "unsupported";
+
+pub fn current_platform_key() -> &'static str {
+    PLATFORM
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TrustedSourcePolicy {
@@ -328,22 +358,40 @@ pub fn parse_manifest(
     current_version: &str,
     bytes: &[u8],
 ) -> Result<ManifestDecision, SourceCheckError> {
+    parse_manifest_for_platform(policy, source, current_version, bytes, PLATFORM)
+}
+
+pub fn parse_manifest_for_platform(
+    policy: &TrustedSourcePolicy,
+    source: UpdateSource,
+    current_version: &str,
+    bytes: &[u8],
+    platform_key: &str,
+) -> Result<ManifestDecision, SourceCheckError> {
     const MAX_MANIFEST_BYTES: usize = 128 * 1024;
     if bytes.is_empty() || bytes.len() > MAX_MANIFEST_BYTES {
         return Err(invalid_manifest("更新清单大小无效"));
     }
     let manifest: StaticManifest =
         serde_json::from_slice(bytes).map_err(|_| invalid_manifest("更新清单格式无效"))?;
-    let platform = manifest
-        .platforms
-        .get(PLATFORM)
-        .ok_or_else(|| invalid_manifest("更新清单缺少 Windows x64 平台"))?;
+    let selected_key = if manifest.platforms.contains_key(platform_key) {
+        platform_key
+    } else if platform_key == "windows-x86_64-nsis"
+        && manifest.platforms.contains_key("windows-x86_64")
+    {
+        "windows-x86_64"
+    } else {
+        return Err(invalid_manifest(format!(
+            "更新清单缺少当前平台 {platform_key}"
+        )));
+    };
+    let platform = &manifest.platforms[selected_key];
     policy.validate_download_url(source, &platform.url)?;
     let release = UpdateRelease::new(UpdateReleaseInput {
         version: manifest.version,
         notes: manifest.notes,
         published_at: manifest.pub_date,
-        platform: PLATFORM.into(),
+        platform: selected_key.into(),
         download_url: platform.url.clone(),
         signature: platform.signature.clone(),
         sha256: platform.sha256.clone(),

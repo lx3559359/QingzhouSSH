@@ -12,7 +12,7 @@ use crate::{
     core::{
         data_root::{initialize_data_root, DataRootResolution, DataRootSource},
         database::Database,
-        secret_protector::{DpapiProtector, SecretProtector},
+        secret_protector::SecretProtector,
         ssh::{
             transport::{self, HostKeyObservation, SshEndpoint},
             trust::{self, TrustDecision},
@@ -102,17 +102,20 @@ pub struct AppServices {
 
 impl AppServices {
     pub async fn open(root: &Path) -> AppResult<Self> {
-        Self::open_with_protector(root, Arc::new(DpapiProtector)).await
+        Self::open_with_vault(root, Vault::platform(root)?).await
     }
 
     pub async fn open_with_protector(
         root: &Path,
         protector: Arc<dyn SecretProtector>,
     ) -> AppResult<Self> {
+        Self::open_with_vault(root, Vault::new(root, protector)).await
+    }
+
+    async fn open_with_vault(root: &Path, vault: Vault) -> AppResult<Self> {
         initialize_data_root(root)?;
         let database = Database::open(root).await?;
         let servers = ServerRepository::new(database.pool().clone());
-        let vault = Vault::new(root, protector);
         let execution_repository = ExecutionRepository::new(database.pool().clone());
         execution_repository.recover_interrupted().await?;
         let transfer_job_repository = TransferJobRepository::new(database.pool().clone());
@@ -201,7 +204,7 @@ impl AppServices {
         let data_migration = DataMigrationService::new(root.to_path_buf());
         Ok(Self {
             data_root: root.to_path_buf(),
-            data_root_source: DataRootSource::Registry,
+            data_root_source: DataRootSource::Platform,
             data_root_mutable: true,
             data_migration,
             servers,

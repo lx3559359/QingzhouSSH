@@ -5,8 +5,10 @@ pub trait SecretProtector: Send + Sync {
     fn unprotect(&self, value: &[u8]) -> AppResult<Vec<u8>>;
 }
 
+#[cfg(windows)]
 pub struct DpapiProtector;
 
+#[cfg(windows)]
 impl SecretProtector for DpapiProtector {
     fn protect(&self, value: &[u8]) -> AppResult<Vec<u8>> {
         windows_dpapi::encrypt_data(value, windows_dpapi::Scope::User, None)

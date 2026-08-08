@@ -10,7 +10,11 @@ use qingzhou_ssh_lib::core::{
 };
 
 fn path(value: &str) -> Option<PathBuf> {
-    Some(PathBuf::from(value))
+    Some(
+        std::env::temp_dir()
+            .join("qingzhou-data-root-tests")
+            .join(value.replace([':', '\\'], "_")),
+    )
 }
 
 #[test]
@@ -20,7 +24,7 @@ fn environment_override_wins_and_locks_the_root() {
         portable_mode: true,
         portable_custom_root: path(r"E:\portable-custom"),
         portable_default_root: path(r"E:\app\data"),
-        registry_root: path(r"F:\registry-data"),
+        platform_root: path(r"F:\platform-data"),
     })
     .unwrap();
     assert_eq!(resolved.source, DataRootSource::Environment);
@@ -29,12 +33,12 @@ fn environment_override_wins_and_locks_the_root() {
 }
 
 #[test]
-fn portable_mode_uses_custom_then_default_and_never_registry() {
+fn portable_mode_uses_custom_then_default_and_never_platform_store() {
     let custom = resolve_data_root(DataRootInputs {
         portable_mode: true,
         portable_custom_root: path(r"E:\portable-custom"),
         portable_default_root: path(r"E:\app\data"),
-        registry_root: path(r"F:\registry-data"),
+        platform_root: path(r"F:\platform-data"),
         ..DataRootInputs::default()
     })
     .unwrap();
@@ -45,7 +49,7 @@ fn portable_mode_uses_custom_then_default_and_never_registry() {
     let default = resolve_data_root(DataRootInputs {
         portable_mode: true,
         portable_default_root: path(r"E:\app\data"),
-        registry_root: path(r"F:\registry-data"),
+        platform_root: path(r"F:\platform-data"),
         ..DataRootInputs::default()
     })
     .unwrap();
@@ -54,14 +58,14 @@ fn portable_mode_uses_custom_then_default_and_never_registry() {
 }
 
 #[test]
-fn installed_mode_uses_registry_or_requires_selection() {
-    let registry = resolve_data_root(DataRootInputs {
-        registry_root: path(r"F:\registry-data"),
+fn installed_mode_uses_platform_store_or_requires_selection() {
+    let platform = resolve_data_root(DataRootInputs {
+        platform_root: path(r"F:\platform-data"),
         ..DataRootInputs::default()
     })
     .unwrap();
-    assert_eq!(registry.source, DataRootSource::Registry);
-    assert!(registry.mutable);
+    assert_eq!(platform.source, DataRootSource::Platform);
+    assert!(platform.mutable);
 
     let missing = resolve_data_root(DataRootInputs::default()).unwrap();
     assert_eq!(missing.source, DataRootSource::NeedsSelection);
@@ -73,9 +77,9 @@ fn installed_mode_uses_registry_or_requires_selection() {
 fn invalid_portable_pointer_is_rejected_instead_of_falling_back() {
     let error = resolve_data_root(DataRootInputs {
         portable_mode: true,
-        portable_custom_root: path("relative-data"),
+        portable_custom_root: Some(PathBuf::from("relative-data")),
         portable_default_root: path(r"E:\app\data"),
-        registry_root: path(r"F:\registry-data"),
+        platform_root: path(r"F:\platform-data"),
         ..DataRootInputs::default()
     })
     .unwrap_err();
@@ -105,7 +109,7 @@ fn invalid_migration_target_recovers_the_verified_old_root() {
     let mut journal = DataMigrationJournal::prepared(
         source.clone(),
         target.clone(),
-        DataRootSource::Registry,
+        DataRootSource::Platform,
         42,
         &DataMigrationManifest {
             entries: vec![],
@@ -116,7 +120,7 @@ fn invalid_migration_target_recovers_the_verified_old_root() {
     );
     journal.phase = DataMigrationPhase::Failed;
     let current = DataRootResolution {
-        source: DataRootSource::Registry,
+        source: DataRootSource::Platform,
         path: Some(target),
         mutable: true,
     };
