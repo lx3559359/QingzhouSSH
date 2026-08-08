@@ -93,6 +93,10 @@ export interface HostKeyCheck {
 }
 
 export interface SystemCapabilities {
+  probeSchemaVersion?: number;
+  platformFamily?: 'linux' | 'bsd' | 'windows' | 'unknown';
+  remoteShell?: 'posix_sh' | 'bash' | 'powershell' | 'unknown';
+  pathStyle?: 'posix' | 'windows_sftp' | 'unknown';
   osId: string;
   osFamily: string;
   versionId: string | null;

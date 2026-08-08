@@ -1396,6 +1396,10 @@ export const previewApi = {
   }),
   trustHostKey: async (_serverId: string, _observation: HostKeyObservation) => undefined,
   testConnection: async (_serverId: string): Promise<SystemCapabilities> => ({
+    probeSchemaVersion: 1,
+    platformFamily: 'linux',
+    remoteShell: 'bash',
+    pathStyle: 'posix',
     osId: 'openEuler',
     osFamily: 'RHEL / 国产 Linux',
     versionId: '24.03 LTS',

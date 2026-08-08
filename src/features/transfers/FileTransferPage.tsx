@@ -78,7 +78,7 @@ function transferMessage(job: TransferJob) {
 }
 
 function remoteFilePath(directory: string, name: string) {
-  return directory === '/' ? `/${name}` : `${directory}/${name}`;
+  return directory.endsWith('/') ? `${directory}${name}` : `${directory}/${name}`;
 }
 
 interface DirectoryPaneProps {

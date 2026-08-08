@@ -3,7 +3,9 @@ use qingzhou_ssh_lib::core::sftp::{
     remote_partial_path, select_verification, sha256_local_file, validate_remote_path,
     DownloadRequest, UploadRequest, VerificationPolicy, VerificationStrategy,
 };
-use qingzhou_ssh_lib::core::system_probe::SystemCapabilities;
+use qingzhou_ssh_lib::core::system_probe::{
+    RemoteOsFamily, RemotePathStyle, RemoteShell, SystemCapabilities,
+};
 
 #[test]
 fn remote_paths_are_absolute_and_partial_files_stay_in_the_same_directory() {
@@ -17,6 +19,25 @@ fn remote_paths_are_absolute_and_partial_files_stay_in_the_same_directory() {
     let partial = remote_partial_path("/var/tmp/release.zip").unwrap();
     assert!(partial.starts_with("/var/tmp/.qingzhou-release.zip."));
     assert!(partial.ends_with(".partial"));
+}
+
+#[test]
+fn windows_sftp_paths_are_absolute_forward_slash_paths() {
+    for valid in ["C:/Users/ops/report.log", "/C:/Users/ops/report.log"] {
+        assert!(validate_remote_path(valid).is_ok(), "rejected {valid:?}");
+    }
+    for invalid in [
+        "C:relative.txt",
+        "C:\\Users\\ops\\report.log",
+        "C:/Users/../Admin/file",
+    ] {
+        assert!(
+            validate_remote_path(invalid).is_err(),
+            "accepted {invalid:?}"
+        );
+    }
+    let partial = remote_partial_path("C:/Users/ops/report.log").unwrap();
+    assert!(partial.starts_with("C:/Users/ops/.qingzhou-report.log."));
 }
 
 #[test]
@@ -52,6 +73,7 @@ fn parses_only_unambiguous_sha256sum_output() {
         parse_sha256_output(&format!("{digest}  /tmp/payload.bin\n")).unwrap(),
         digest
     );
+    assert_eq!(parse_sha256_output(&format!("{digest}\n")).unwrap(), digest);
     for invalid in [
         "abc  /tmp/payload.bin\n",
         "z123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef  /tmp/payload.bin\n",
@@ -73,6 +95,25 @@ fn builds_only_capability_selected_remote_hash_commands() {
     assert_eq!(
         remote_hash_command(&capabilities, "/tmp/a b").unwrap(),
         Some("sha256sum -- '/tmp/a b'".into())
+    );
+
+    capabilities.commands.clear();
+    capabilities.platform_family = RemoteOsFamily::Bsd;
+    capabilities.remote_shell = RemoteShell::PosixSh;
+    capabilities.path_style = RemotePathStyle::Posix;
+    capabilities.commands.push("sha256".into());
+    assert_eq!(
+        remote_hash_command(&capabilities, "/tmp/a b").unwrap(),
+        Some("sha256 -q '/tmp/a b'".into())
+    );
+
+    capabilities.platform_family = RemoteOsFamily::Windows;
+    capabilities.remote_shell = RemoteShell::PowerShell;
+    capabilities.path_style = RemotePathStyle::WindowsSftp;
+    capabilities.commands = vec!["get-filehash".into()];
+    assert_eq!(
+        remote_hash_command(&capabilities, "C:/Users/ops/a.bin").unwrap(),
+        None
     );
 }
 

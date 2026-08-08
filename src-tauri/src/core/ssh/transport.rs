@@ -19,7 +19,10 @@ use serde::{Deserialize, Serialize};
 use crate::{
     core::{
         ssh::fingerprint::sha256_fingerprint,
-        system_probe::{parse_probe, SystemCapabilities, PROBE_COMMAND},
+        system_probe::{
+            parse_powershell_probe, parse_probe, powershell_probe_command, SystemCapabilities,
+            PROBE_COMMAND,
+        },
     },
     domain::server::StoredCredential,
     error::{AppError, AppResult},
@@ -379,10 +382,18 @@ pub async fn probe_authenticated(
     session: &AuthenticatedSshSession,
 ) -> AppResult<SystemCapabilities> {
     let output = execute_authenticated(session, PROBE_COMMAND).await?;
-    if output.exit_status != 0 {
-        return Err(AppError::ssh_command(output.exit_status, output.stderr));
+    if output.exit_status == 0 && output.stdout.contains("__QZ_OS_BEGIN__") {
+        return parse_probe(&output.stdout);
     }
-    parse_probe(&output.stdout)
+
+    let windows_output = execute_authenticated(session, &powershell_probe_command()).await?;
+    if windows_output.exit_status != 0 {
+        return Err(AppError::ssh_command(
+            windows_output.exit_status,
+            windows_output.stderr,
+        ));
+    }
+    parse_powershell_probe(&windows_output.stdout)
 }
 
 pub async fn probe_system(
@@ -391,18 +402,11 @@ pub async fn probe_system(
     credential: &StoredCredential,
     expected_fingerprint: &str,
 ) -> AppResult<SystemCapabilities> {
-    let output = execute(
-        endpoint,
-        username,
-        credential,
-        expected_fingerprint,
-        PROBE_COMMAND,
-    )
-    .await?;
-    if output.exit_status != 0 {
-        return Err(AppError::ssh_command(output.exit_status, output.stderr));
-    }
-    parse_probe(&output.stdout)
+    let session =
+        connect_authenticated(endpoint, username, credential, expected_fingerprint).await?;
+    let result = probe_authenticated(&session).await;
+    session.disconnect().await;
+    result
 }
 
 #[cfg(test)]

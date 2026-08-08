@@ -230,6 +230,20 @@ describe('FileTransferPage', () => {
     expect(screen.getByText('SHA-256 已校验')).toBeVisible();
   });
 
+  it('joins an upload target at a Windows SFTP drive root without a duplicate slash', async () => {
+    apiMocks.listRemoteDirectory.mockResolvedValue({ path: 'C:/', parent: null, entries: [] });
+    const user = userEvent.setup();
+    render(<FileTransferPage />);
+
+    await user.click(await screen.findByRole('button', { name: '选择本地文件 upload.bin' }));
+    await user.click(screen.getByRole('button', { name: '上传到右侧目录' }));
+
+    expect(apiMocks.enqueueUploadFile).toHaveBeenCalledWith(
+      'server-1',
+      expect.objectContaining({ remotePath: 'C:/upload.bin' }),
+    );
+  });
+
   it('downloads a selected remote file only to the project data directory', async () => {
     const user = userEvent.setup();
     render(<FileTransferPage />);

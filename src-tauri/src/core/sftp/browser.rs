@@ -41,7 +41,11 @@ pub struct DirectoryListing {
 
 pub fn validate_remote_directory_path(path: &str) -> AppResult<()> {
     validate_remote_path(path)?;
-    if path != "/" && path.ends_with('/') {
+    let windows_drive_root = {
+        let bytes = path.as_bytes();
+        bytes.len() == 3 && bytes[0].is_ascii_alphabetic() && &bytes[1..] == b":/"
+    };
+    if path != "/" && !windows_drive_root && path.ends_with('/') {
         return Err(AppError::Validation("远程目录末尾不需要重复的斜杠".into()));
     }
     Ok(())

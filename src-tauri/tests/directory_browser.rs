@@ -7,4 +7,8 @@ fn remote_directory_navigation_is_absolute_and_cannot_escape() {
     assert!(validate_remote_directory_path("/var/log").is_ok());
     assert!(validate_remote_directory_path("relative/path").is_err());
     assert!(validate_remote_directory_path("/var/../root").is_err());
+
+    assert_eq!(remote_parent("C:/Users/ops"), Some("C:/Users".to_string()));
+    assert_eq!(remote_parent("C:/"), None);
+    assert!(validate_remote_directory_path("C:/").is_ok());
 }

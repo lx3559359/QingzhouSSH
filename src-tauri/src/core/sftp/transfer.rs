@@ -134,9 +134,17 @@ pub(crate) struct OperationFileBackup {
 }
 
 pub fn validate_remote_path(path: &str) -> AppResult<()> {
-    if path.is_empty() || path.contains('\0') || !path.starts_with('/') {
+    let windows_drive_absolute = {
+        let bytes = path.as_bytes();
+        bytes.len() >= 3 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':' && bytes[2] == b'/'
+    };
+    if path.is_empty()
+        || path.contains('\0')
+        || path.contains('\\')
+        || !(path.starts_with('/') || windows_drive_absolute)
+    {
         return Err(AppError::Validation(
-            "远程路径必须是无 NUL 的 POSIX 绝对路径".into(),
+            "远程路径必须是无 NUL、使用正斜杠的 SFTP 绝对路径".into(),
         ));
     }
     if path.split('/').any(|component| component == "..") {
@@ -150,9 +158,22 @@ pub fn remote_hash_command(
     remote_path: &str,
 ) -> AppResult<Option<String>> {
     validate_remote_path(remote_path)?;
-    Ok(capabilities
-        .has_command("sha256sum")
-        .then(|| format!("sha256sum -- {}", shell_quote(remote_path))))
+    if capabilities.platform_family == crate::core::system_probe::RemoteOsFamily::Windows
+        || capabilities.path_style == crate::core::system_probe::RemotePathStyle::WindowsSftp
+        || !remote_path.starts_with('/')
+    {
+        return Ok(None);
+    }
+    let quoted = shell_quote(remote_path);
+    Ok(if capabilities.has_command("sha256sum") {
+        Some(format!("sha256sum -- {quoted}"))
+    } else if capabilities.has_command("sha256") {
+        Some(format!("sha256 -q {quoted}"))
+    } else if capabilities.has_command("shasum") {
+        Some(format!("shasum -a 256 -- {quoted}"))
+    } else {
+        None
+    })
 }
 
 pub fn parse_sha256_output(output: &str) -> AppResult<String> {
@@ -163,16 +184,14 @@ pub fn parse_sha256_output(output: &str) -> AppResult<String> {
             "远端 SHA-256 输出包含多行或歧义内容".into(),
         ));
     }
-    let digest_end = line
+    let (digest, trailing) = line
         .find(char::is_whitespace)
-        .ok_or_else(|| AppError::Integrity("远端 SHA-256 输出缺少文件路径".into()))?;
-    let digest = &line[..digest_end];
-    let path = line[digest_end..].trim_start();
-    if digest.len() != 64
-        || !digest.bytes().all(|byte| byte.is_ascii_hexdigit())
-        || path.is_empty()
-        || path.contains('\0')
-    {
+        .map(|index| (&line[..index], Some(line[index..].trim_start())))
+        .unwrap_or((line, None));
+    if digest.len() != 64 || !digest.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return Err(AppError::Integrity("远端 SHA-256 输出格式无效".into()));
+    }
+    if trailing.is_some_and(|path| path.is_empty() || path.contains('\0')) {
         return Err(AppError::Integrity("远端 SHA-256 输出格式无效".into()));
     }
     Ok(digest.to_ascii_lowercase())
@@ -236,8 +255,10 @@ pub async fn upload<E: EventSink>(
     cancel: CancellationToken,
 ) -> AppResult<TransferOutcome> {
     validate_upload_request(request).await?;
-    let verification =
-        select_verification(request.verification, capabilities.has_command("sha256sum"));
+    let verification = select_verification(
+        request.verification,
+        remote_hash_command(capabilities, &request.remote_path)?.is_some(),
+    );
     let total = tokio::fs::metadata(&request.local_path).await?.len();
     let partial_path = remote_partial_path(&request.remote_path)?;
     let sftp = open_sftp(ssh).await?;
@@ -390,8 +411,10 @@ pub async fn download<E: EventSink>(
     }
 
     let sftp = open_sftp(ssh).await?;
-    let verification =
-        select_verification(request.verification, capabilities.has_command("sha256sum"));
+    let verification = select_verification(
+        request.verification,
+        remote_hash_command(capabilities, &request.remote_path)?.is_some(),
+    );
     let total = sftp
         .metadata(&request.remote_path)
         .await

@@ -1,15 +1,17 @@
 use std::collections::HashMap;
 
-use serde::Serialize;
+use base64::{engine::general_purpose::STANDARD, Engine as _};
+use serde::{Deserialize, Serialize};
 
 use crate::error::{AppError, AppResult};
 
-pub const PROBE_COMMAND: &str = r#"printf '__QZ_OS_BEGIN__\n'; cat /etc/os-release; printf '__QZ_OS_END__\n';
-if command -v apt >/dev/null 2>&1; then echo PKG=apt; elif command -v dnf >/dev/null 2>&1; then echo PKG=dnf; elif command -v yum >/dev/null 2>&1; then echo PKG=yum; else echo PKG=; fi;
-if command -v systemctl >/dev/null 2>&1; then echo SERVICE=systemd; elif command -v service >/dev/null 2>&1; then echo SERVICE=service; else echo SERVICE=unknown; fi;
+pub const PROBE_COMMAND: &str = r#"printf '__QZ_OS_BEGIN__\n'; if test -r /etc/os-release; then cat /etc/os-release; fi; printf '__QZ_OS_END__\n';
+printf 'UNAME_SYSTEM='; uname -s 2>/dev/null || printf 'unknown\n';
+if command -v apt >/dev/null 2>&1; then echo PKG=apt; elif command -v dnf >/dev/null 2>&1; then echo PKG=dnf; elif command -v yum >/dev/null 2>&1; then echo PKG=yum; elif command -v apk >/dev/null 2>&1; then echo PKG=apk; elif command -v pkg >/dev/null 2>&1; then echo PKG=pkg; elif command -v pkg_add >/dev/null 2>&1; then echo PKG=pkg_add; else echo PKG=; fi;
+if command -v systemctl >/dev/null 2>&1; then echo SERVICE=systemd; elif command -v rcctl >/dev/null 2>&1; then echo SERVICE=rcctl; elif command -v service >/dev/null 2>&1; then echo SERVICE=service; else echo SERVICE=unknown; fi;
 printf 'ARCH='; uname -m; printf 'SHELL='; printf '%s\n' "${SHELL:-unknown}";
-printf 'COMMANDS='; first=1; for cmd in find grep gzip awk systemctl hostnamectl service ps head df uptime uname free ip hostname sh bash powershell pwsh sed cat tr tail sort du getent ping curl openssl timeout nc ncat tcpdump wc ss netstat date last lsof iostat vmstat findmnt firewall-cmd ufw nft iptables sshd journalctl dmesg timedatectl chronyc ntpq tracepath dig docker podman nginx apachectl crontab mktemp mkdir chown chmod mv rm stat id base64 sha256sum swapon swapoff mkswap nmcli netplan systemd-run at atq atrm; do if command -v "$cmd" >/dev/null 2>&1; then if [ "$first" -eq 0 ]; then printf ','; fi; printf '%s' "$cmd"; first=0; fi; done; printf '\n';
-printf 'SERVICES='; if command -v systemctl >/dev/null 2>&1; then systemctl list-unit-files --type=service --no-legend --no-pager 2>/dev/null | awk 'NR <= 500 { print $1 }' | while IFS= read -r qz_name; do if [ -n "$qz_name" ]; then printf '%s,' "$qz_name"; fi; done; elif test -d /etc/init.d; then find /etc/init.d -maxdepth 1 -type f -printf '%f\n' 2>/dev/null | head -n 500 | while IFS= read -r qz_name; do if [ -n "$qz_name" ]; then printf '%s,' "$qz_name"; fi; done; fi; printf '\n';
+printf 'COMMANDS='; first=1; for cmd in find grep gzip awk systemctl hostnamectl service rcctl pkg pkg_info pkg_add ps head df uptime uname free ip hostname sh bash powershell pwsh sed cat tr tail sort du getent getconf nproc who ping curl openssl timeout nc ncat tcpdump wc ss netstat date last lsof iostat vmstat sysctl findmnt firewall-cmd ufw nft iptables sshd journalctl dmesg timedatectl chronyc ntpq tracepath dig docker podman nginx apachectl crontab mktemp mkdir chown chmod mv rm stat id base64 sha256sum sha256 shasum swapon swapoff mkswap nmcli netplan systemd-run at atq atrm; do if command -v "$cmd" >/dev/null 2>&1; then if [ "$first" -eq 0 ]; then printf ','; fi; printf '%s' "$cmd"; first=0; fi; done; printf '\n';
+printf 'SERVICES='; if command -v systemctl >/dev/null 2>&1; then systemctl list-unit-files --type=service --no-legend --no-pager 2>/dev/null | awk 'NR <= 500 { print $1 }' | while IFS= read -r qz_name; do if [ -n "$qz_name" ]; then printf '%s,' "$qz_name"; fi; done; elif test -d /etc/init.d; then for qz_path in /etc/init.d/*; do test -f "$qz_path" || continue; qz_name=${qz_path##*/}; printf '%s,' "$qz_name"; done; elif test -d /etc/rc.d; then for qz_path in /etc/rc.d/*; do test -f "$qz_path" || continue; qz_name=${qz_path##*/}; printf '%s,' "$qz_name"; done; fi; printf '\n';
 printf 'CONTAINERS='; if command -v docker >/dev/null 2>&1; then docker ps -a --format '{{.Names}}' 2>/dev/null | head -n 500 | while IFS= read -r qz_name; do if [ -n "$qz_name" ]; then printf '%s,' "$qz_name"; fi; done; elif command -v podman >/dev/null 2>&1; then podman ps -a --format '{{.Names}}' 2>/dev/null | head -n 500 | while IFS= read -r qz_name; do if [ -n "$qz_name" ]; then printf '%s,' "$qz_name"; fi; done; fi; printf '\n';
 printf 'INTERFACES='; if command -v ip >/dev/null 2>&1; then ip -o link show 2>/dev/null | awk -F': ' 'NR <= 128 { name=$2; sub(/@.*/, "", name); if (name ~ /^[[:alnum:]_.:-]+$/) printf "%s,", name }'; fi; printf '\n';
 printf 'ACTIVE_INTERFACES='; if command -v ip >/dev/null 2>&1; then ip -o link show up 2>/dev/null | awk -F': ' 'NR <= 128 { name=$2; sub(/@.*/, "", name); if (name ~ /^[[:alnum:]_.:-]+$/) printf "%s,", name }'; fi; printf '\n';
@@ -19,14 +21,79 @@ printf 'GATEWAYS4='; if command -v ip >/dev/null 2>&1; then ip -4 route show def
 printf 'GATEWAYS6='; if command -v ip >/dev/null 2>&1; then ip -6 route show default 2>/dev/null | awk 'NR <= 8 { dev=""; gw=""; for (i=1; i<=NF; i++) { if ($i == "dev" && i < NF) dev=$(i+1); if ($i == "via" && i < NF) gw=$(i+1) } if (dev ~ /^[[:alnum:]_.:-]+$/ && gw ~ /^[0-9A-Fa-f:]+$/) printf "%s|%s;", dev, gw }'; fi; printf '\n';
 printf 'DNS_SERVERS='; if test -r /etc/resolv.conf; then awk 'NR <= 256 && $1 == "nameserver" && $2 ~ /^[0-9A-Fa-f:.]+$/ { printf "%s,", $2 }' /etc/resolv.conf; fi; printf '\n';
 printf 'CURRENT_TIMEZONE='; if command -v timedatectl >/dev/null 2>&1; then timedatectl show -p Timezone --value 2>/dev/null | head -n 1; elif test -r /etc/timezone; then sed -n '1p' /etc/timezone; else printf '\n'; fi;
-printf 'CURRENT_TIME='; date -Is 2>/dev/null | head -n 1;
+printf 'CURRENT_TIME='; date -Is 2>/dev/null | head -n 1 || date -u '+%Y-%m-%dT%H:%M:%SZ' 2>/dev/null | head -n 1;
 printf 'NTP_ENABLED='; if command -v timedatectl >/dev/null 2>&1; then timedatectl show -p NTP --value 2>/dev/null | head -n 1; else printf '\n'; fi;
 printf 'NTP_SYNCHRONIZED='; if command -v timedatectl >/dev/null 2>&1; then timedatectl show -p NTPSynchronized --value 2>/dev/null | head -n 1; else printf '\n'; fi;
 printf 'TIMEZONES='; if command -v timedatectl >/dev/null 2>&1; then timedatectl list-timezones 2>/dev/null | awk 'NR <= 600 { printf "%s,", $1 }'; fi; printf '\n'"#;
 
+const POWERSHELL_PROBE_SCRIPT: &str = r#"$ErrorActionPreference='Stop'
+$commandNames=@('powershell','pwsh','Get-FileHash','Get-Service','Get-Process','Get-CimInstance','Get-NetAdapter','Get-NetIPAddress')
+$commands=@($commandNames | Where-Object { Get-Command $_ -ErrorAction SilentlyContinue } | ForEach-Object { $_.ToLowerInvariant() })
+$services=@(Get-Service -ErrorAction SilentlyContinue | Select-Object -First 500 -ExpandProperty Name)
+$payload=[ordered]@{schemaVersion=1;osId='windows';version=[Environment]::OSVersion.Version.ToString();architecture=$env:PROCESSOR_ARCHITECTURE;shell='powershell';commands=$commands;services=$services}
+Write-Output '__QZ_WINDOWS_JSON_BEGIN__'
+Write-Output ($payload | ConvertTo-Json -Compress -Depth 3)
+Write-Output '__QZ_WINDOWS_JSON_END__'"#;
+
+pub fn powershell_probe_command() -> String {
+    let mut utf16le = Vec::with_capacity(POWERSHELL_PROBE_SCRIPT.len() * 2);
+    for unit in POWERSHELL_PROBE_SCRIPT.encode_utf16() {
+        utf16le.extend_from_slice(&unit.to_le_bytes());
+    }
+    format!(
+        "powershell.exe -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand {}",
+        STANDARD.encode(utf16le)
+    )
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RemoteOsFamily {
+    Linux,
+    Bsd,
+    Windows,
+    #[default]
+    Unknown,
+}
+
+impl RemoteOsFamily {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Linux => "linux",
+            Self::Bsd => "bsd",
+            Self::Windows => "windows",
+            Self::Unknown => "unknown",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RemoteShell {
+    PosixSh,
+    Bash,
+    #[serde(rename = "powershell")]
+    PowerShell,
+    #[default]
+    Unknown,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RemotePathStyle {
+    #[default]
+    Posix,
+    WindowsSftp,
+    Unknown,
+}
+
 #[derive(Debug, Clone, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SystemCapabilities {
+    pub probe_schema_version: u32,
+    pub platform_family: RemoteOsFamily,
+    pub remote_shell: RemoteShell,
+    pub path_style: RemotePathStyle,
     pub os_id: String,
     pub os_family: String,
     pub version_id: Option<String>,
@@ -59,13 +126,17 @@ pub struct NetworkInterfaceCapability {
 
 impl SystemCapabilities {
     pub fn has_command(&self, command: &str) -> bool {
-        self.commands.iter().any(|available| available == command)
+        self.commands
+            .iter()
+            .any(|available| available.eq_ignore_ascii_case(command))
             || (command == "systemctl" && self.service_manager == "systemd")
             || (command == "service" && self.service_manager == "service")
     }
 
     pub fn has_service(&self, service: &str) -> bool {
-        self.services.iter().any(|available| available == service)
+        self.services
+            .iter()
+            .any(|available| available.eq_ignore_ascii_case(service))
     }
 
     pub fn has_container(&self, container: &str) -> bool {
@@ -124,17 +195,24 @@ pub fn parse_probe(output: &str) -> AppResult<SystemCapabilities> {
 
     let mut os_values = key_values(os_block);
     let mut capabilities = key_values(capability_block);
+    let uname_system = capabilities
+        .remove("UNAME_SYSTEM")
+        .unwrap_or_default()
+        .to_ascii_lowercase();
     let os_id = os_values
         .remove("ID")
-        .ok_or_else(|| AppError::Validation("无法识别系统 ID".into()))?
-        .to_ascii_lowercase();
+        .map(|value| value.to_ascii_lowercase())
+        .or_else(|| bsd_id_from_uname(&uname_system).map(str::to_string))
+        .ok_or_else(|| AppError::Validation("无法识别系统 ID".into()))?;
     let id_like = os_values
         .remove("ID_LIKE")
         .unwrap_or_default()
         .to_ascii_lowercase();
     let id_like = id_like.split_whitespace().collect::<Vec<_>>();
 
-    let os_family = if os_id == "openeuler" {
+    let os_family = if ["freebsd", "openbsd", "netbsd", "dragonfly"].contains(&os_id.as_str()) {
+        "bsd"
+    } else if os_id == "openeuler" {
         "openeuler"
     } else if ["debian", "ubuntu", "kylin", "uos"].contains(&os_id.as_str())
         || id_like.contains(&"debian")
@@ -193,7 +271,31 @@ pub fn parse_probe(output: &str) -> AppResult<SystemCapabilities> {
         })
         .collect();
 
+    let platform_family = if os_family == "bsd" {
+        RemoteOsFamily::Bsd
+    } else if uname_system == "linux"
+        || ["debian", "rhel", "openeuler"].contains(&os_family.as_str())
+    {
+        RemoteOsFamily::Linux
+    } else {
+        RemoteOsFamily::Unknown
+    };
+    let shell = capabilities
+        .remove("SHELL")
+        .unwrap_or_else(|| "unknown".into());
+    let remote_shell = if shell.to_ascii_lowercase().contains("bash") {
+        RemoteShell::Bash
+    } else if commands.iter().any(|command| command == "sh") {
+        RemoteShell::PosixSh
+    } else {
+        RemoteShell::Unknown
+    };
+
     Ok(SystemCapabilities {
+        probe_schema_version: 1,
+        platform_family,
+        remote_shell,
+        path_style: RemotePathStyle::Posix,
         os_id,
         os_family,
         version_id: os_values.remove("VERSION_ID"),
@@ -204,9 +306,7 @@ pub fn parse_probe(output: &str) -> AppResult<SystemCapabilities> {
         architecture: capabilities
             .remove("ARCH")
             .unwrap_or_else(|| "unknown".into()),
-        shell: capabilities
-            .remove("SHELL")
-            .unwrap_or_else(|| "unknown".into()),
+        shell,
         commands,
         services,
         containers,
@@ -218,6 +318,108 @@ pub fn parse_probe(output: &str) -> AppResult<SystemCapabilities> {
         ntp_synchronized,
         timezones,
     })
+}
+
+fn bsd_id_from_uname(uname_system: &str) -> Option<&'static str> {
+    match uname_system {
+        "freebsd" => Some("freebsd"),
+        "openbsd" => Some("openbsd"),
+        "netbsd" => Some("netbsd"),
+        "dragonfly" => Some("dragonfly"),
+        _ => None,
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct WindowsProbePayload {
+    schema_version: u32,
+    os_id: String,
+    version: String,
+    architecture: String,
+    shell: String,
+    commands: Vec<String>,
+    services: Vec<String>,
+}
+
+pub fn parse_powershell_probe(output: &str) -> AppResult<SystemCapabilities> {
+    const BEGIN: &str = "__QZ_WINDOWS_JSON_BEGIN__";
+    const END: &str = "__QZ_WINDOWS_JSON_END__";
+    let start = output
+        .find(BEGIN)
+        .map(|index| index + BEGIN.len())
+        .ok_or_else(|| AppError::Validation("Windows 探测输出缺少开始标记".into()))?;
+    let after_start = &output[start..];
+    let end = after_start
+        .find(END)
+        .ok_or_else(|| AppError::Validation("Windows 探测输出缺少结束标记".into()))?;
+    if after_start[end + END.len()..].contains(END) {
+        return Err(AppError::Validation(
+            "Windows 探测输出包含重复结束标记".into(),
+        ));
+    }
+    let payload: WindowsProbePayload = serde_json::from_str(after_start[..end].trim())
+        .map_err(|error| AppError::Validation(format!("Windows 探测 JSON 无效：{error}")))?;
+    if payload.schema_version != 1
+        || !payload.os_id.eq_ignore_ascii_case("windows")
+        || payload.version.is_empty()
+        || payload.version.len() > 64
+        || payload.architecture.is_empty()
+        || payload.architecture.len() > 32
+        || !payload.shell.eq_ignore_ascii_case("powershell")
+        || payload.commands.len() > 256
+        || payload.services.len() > 500
+    {
+        return Err(AppError::Validation(
+            "Windows 探测结果超出受支持边界".into(),
+        ));
+    }
+    let mut commands = bounded_names(payload.commands, 64)?;
+    commands
+        .iter_mut()
+        .for_each(|value| value.make_ascii_lowercase());
+    commands.sort();
+    commands.dedup();
+    let mut services = bounded_names(payload.services, 256)?;
+    services.sort_by_key(|value| value.to_ascii_lowercase());
+    services.dedup_by(|left, right| left.eq_ignore_ascii_case(right));
+
+    Ok(SystemCapabilities {
+        probe_schema_version: payload.schema_version,
+        platform_family: RemoteOsFamily::Windows,
+        remote_shell: RemoteShell::PowerShell,
+        path_style: RemotePathStyle::WindowsSftp,
+        os_id: "windows".into(),
+        os_family: "windows".into(),
+        version_id: Some(payload.version),
+        package_manager: None,
+        service_manager: "windows_service_control_manager".into(),
+        architecture: payload.architecture.to_ascii_lowercase(),
+        shell: "powershell".into(),
+        commands,
+        services,
+        containers: Vec::new(),
+        interfaces: Vec::new(),
+        dns_servers: Vec::new(),
+        current_timezone: None,
+        current_time: None,
+        ntp_enabled: None,
+        ntp_synchronized: None,
+        timezones: Vec::new(),
+    })
+}
+
+fn bounded_names(values: Vec<String>, max_len: usize) -> AppResult<Vec<String>> {
+    if values.iter().any(|value| {
+        value.is_empty()
+            || value.len() > max_len
+            || !value.bytes().all(|byte| {
+                byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-' | b'$')
+            })
+    }) {
+        return Err(AppError::Validation("Windows 探测名称字段无效".into()));
+    }
+    Ok(values)
 }
 
 fn take_interface_records(
@@ -398,5 +600,46 @@ mod tests {
     fn rejects_reversed_or_missing_sentinels_without_panicking() {
         assert!(parse_probe("__QZ_OS_END__\n__QZ_OS_BEGIN__\nID=ubuntu").is_err());
         assert!(parse_probe("ID=ubuntu").is_err());
+    }
+
+    #[test]
+    fn classifies_bsd_from_uname_without_linux_release_files() {
+        let output = "__QZ_OS_BEGIN__\n__QZ_OS_END__\nUNAME_SYSTEM=FreeBSD\nPKG=pkg\nSERVICE=service\nARCH=amd64\nSHELL=/bin/sh\nCOMMANDS=sh,service,sha256,sysctl\nSERVICES=sshd\n";
+
+        let result = parse_probe(output).unwrap();
+
+        assert_eq!(result.os_id, "freebsd");
+        assert_eq!(result.os_family, "bsd");
+        assert_eq!(result.platform_family, RemoteOsFamily::Bsd);
+        assert_eq!(result.remote_shell, RemoteShell::PosixSh);
+        assert_eq!(result.path_style, RemotePathStyle::Posix);
+        assert_eq!(result.package_manager.as_deref(), Some("pkg"));
+    }
+
+    #[test]
+    fn parses_versioned_windows_probe_json_without_localized_text() {
+        let output = r#"noise
+__QZ_WINDOWS_JSON_BEGIN__
+{"schemaVersion":1,"osId":"windows","version":"10.0.20348.0","architecture":"X64","shell":"powershell","commands":["Get-FileHash","powershell"],"services":["sshd","WinRM"]}
+__QZ_WINDOWS_JSON_END__
+"#;
+
+        let result = parse_powershell_probe(output).unwrap();
+
+        assert_eq!(result.os_family, "windows");
+        assert_eq!(result.platform_family, RemoteOsFamily::Windows);
+        assert_eq!(result.remote_shell, RemoteShell::PowerShell);
+        assert_eq!(result.path_style, RemotePathStyle::WindowsSftp);
+        assert_eq!(result.probe_schema_version, 1);
+        assert!(result.has_command("get-filehash"));
+        assert!(result.has_service("sshd"));
+    }
+
+    #[test]
+    fn windows_probe_launcher_is_fixed_and_non_interactive() {
+        let command = powershell_probe_command();
+        assert!(command.starts_with("powershell.exe -NoLogo -NoProfile -NonInteractive"));
+        assert!(command.contains("-EncodedCommand"));
+        assert!(!command.contains("__QZ_WINDOWS_JSON_BEGIN__"));
     }
 }
