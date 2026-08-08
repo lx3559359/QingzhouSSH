@@ -37,6 +37,26 @@ $env:QINGZHOU_ARTIFACTS_DIR = Join-Path $projectRoot 'artifacts'
 ) | ForEach-Object { New-Item -ItemType Directory -Force -Path $_ | Out-Null }
 
 $toolBins = @((Join-Path $env:CARGO_HOME 'bin'), $env:PNPM_HOME)
+$cargoExecutable = if ([Runtime.InteropServices.RuntimeInformation]::IsOSPlatform([Runtime.InteropServices.OSPlatform]::Windows)) { 'cargo.exe' } else { 'cargo' }
+if (-not (Test-Path -LiteralPath (Join-Path $env:CARGO_HOME "bin\$cargoExecutable") -PathType Leaf) -and
+    -not (Get-Command cargo -ErrorAction SilentlyContinue)) {
+  $candidateRoots = @($projectRoot)
+  $projectParent = Split-Path $projectRoot -Parent
+  if ((Split-Path $projectParent -Leaf) -eq '.worktrees') {
+    $candidateRoots += Split-Path $projectParent -Parent
+  }
+  $toolchainCargo = $candidateRoots |
+    ForEach-Object { Join-Path $_ '.local\rustup-home\toolchains' } |
+    Where-Object { Test-Path -LiteralPath $_ -PathType Container } |
+    ForEach-Object { Get-ChildItem -LiteralPath $_ -Directory } |
+    Sort-Object @{ Expression = { if ($_.Name -like 'stable-*') { 0 } else { 1 } } }, Name |
+    ForEach-Object { Join-Path $_.FullName "bin\$cargoExecutable" } |
+    Where-Object { Test-Path -LiteralPath $_ -PathType Leaf } |
+    Select-Object -First 1
+  if ($toolchainCargo) {
+    $toolBins += Split-Path $toolchainCargo -Parent
+  }
+}
 $localPerlBin = Join-Path $env:QINGZHOU_PERL_HOME 'perl\bin'
 if (Test-Path -LiteralPath (Join-Path $localPerlBin 'perl.exe')) {
   $toolBins += $localPerlBin

@@ -6,6 +6,7 @@ use std::time::Duration;
 
 use serde_json::Value;
 use tokio::sync::{mpsc, Notify};
+use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
 use crate::{
@@ -37,6 +38,18 @@ pub struct TransferQueueService {
     registry: ExecutionRegistry,
     notify: Arc<Notify>,
     started: Arc<AtomicBool>,
+    shutdown: CancellationToken,
+    _lifecycle: Option<Arc<QueueLifecycle>>,
+}
+
+struct QueueLifecycle {
+    shutdown: CancellationToken,
+}
+
+impl Drop for QueueLifecycle {
+    fn drop(&mut self) {
+        self.shutdown.cancel();
+    }
 }
 
 impl TransferQueueService {
@@ -45,12 +58,15 @@ impl TransferQueueService {
         transfers: TransferService,
         registry: ExecutionRegistry,
     ) -> Self {
+        let shutdown = CancellationToken::new();
         Self {
             repository,
             transfers,
             registry,
             notify: Arc::new(Notify::new()),
             started: Arc::new(AtomicBool::new(false)),
+            shutdown: shutdown.clone(),
+            _lifecycle: Some(Arc::new(QueueLifecycle { shutdown })),
         }
     }
 
@@ -59,7 +75,15 @@ impl TransferQueueService {
             return;
         }
         for _ in 0..QUEUE_WORKERS {
-            let service = self.clone();
+            let service = Self {
+                repository: self.repository.clone(),
+                transfers: self.transfers.clone(),
+                registry: self.registry.clone(),
+                notify: self.notify.clone(),
+                started: self.started.clone(),
+                shutdown: self.shutdown.clone(),
+                _lifecycle: None,
+            };
             tokio::spawn(async move { service.worker_loop().await });
         }
     }
@@ -151,14 +175,38 @@ impl TransferQueueService {
 
     async fn worker_loop(self) {
         loop {
-            match self.repository.next_runnable().await {
+            let next = tokio::select! {
+                _ = self.shutdown.cancelled() => return,
+                next = self.repository.next_runnable() => next,
+            };
+            match next {
                 Ok(Some(job)) => match self.repository.claim(job.id).await {
-                    Ok(true) => self.execute(job.id).await,
+                    Ok(true) => {
+                        tokio::select! {
+                            _ = self.shutdown.cancelled() => return,
+                            _ = self.execute(job.id) => {}
+                        }
+                    }
                     Ok(false) => tokio::task::yield_now().await,
-                    Err(_) => tokio::time::sleep(Duration::from_millis(250)).await,
+                    Err(_) => {
+                        tokio::select! {
+                            _ = self.shutdown.cancelled() => return,
+                            _ = tokio::time::sleep(Duration::from_millis(250)) => {}
+                        }
+                    }
                 },
-                Ok(None) => self.notify.notified().await,
-                Err(_) => tokio::time::sleep(Duration::from_secs(1)).await,
+                Ok(None) => {
+                    tokio::select! {
+                        _ = self.shutdown.cancelled() => return,
+                        _ = self.notify.notified() => {}
+                    }
+                }
+                Err(_) => {
+                    tokio::select! {
+                        _ = self.shutdown.cancelled() => return,
+                        _ = tokio::time::sleep(Duration::from_secs(1)) => {}
+                    }
+                }
             }
         }
     }

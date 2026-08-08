@@ -472,7 +472,9 @@ impl ExecutionService {
         &self,
         server_id: &str,
         script_version: i32,
-        launcher: String,
+        shell: ScriptShell,
+        body: &str,
+        validated_parameters: &ValidatedParameters,
         timeout_seconds: u64,
         parameters: Vec<ExecutionParameter>,
         events: &mut E,
@@ -488,9 +490,26 @@ impl ExecutionService {
                 parameters,
             })
             .await?;
-        self.run_command_with_limit_and_cancel(
+        let connected_result = tokio::select! {
+            _ = cancel.cancelled() => Err(AppError::Cancelled),
+            result = self.connector.connect(server_id) => result,
+        };
+        let connected = match connected_result {
+            Ok(connected) => connected,
+            Err(error) => return self.fail_before_run(execution.id, error, events).await,
+        };
+        let launcher = match shell
+            .executable(&connected.capabilities)
+            .and_then(|executable| {
+                render_script_launcher(shell, executable, body, validated_parameters)
+            }) {
+            Ok(launcher) => launcher,
+            Err(error) => return self.fail_before_run(execution.id, error, events).await,
+        };
+        self.run_connected_command(
             execution.id,
             launcher,
+            connected,
             Duration::from_secs(timeout_seconds),
             DEFAULT_OUTPUT_LIMIT,
             events,

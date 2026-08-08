@@ -26,14 +26,34 @@ printf 'NTP_ENABLED='; if command -v timedatectl >/dev/null 2>&1; then timedatec
 printf 'NTP_SYNCHRONIZED='; if command -v timedatectl >/dev/null 2>&1; then timedatectl show -p NTPSynchronized --value 2>/dev/null | head -n 1; else printf '\n'; fi;
 printf 'TIMEZONES='; if command -v timedatectl >/dev/null 2>&1; then timedatectl list-timezones 2>/dev/null | awk 'NR <= 600 { printf "%s,", $1 }'; fi; printf '\n'"#;
 
-const POWERSHELL_PROBE_SCRIPT: &str = r#"$ErrorActionPreference='Stop'
-$commandNames=@('powershell','pwsh','Get-Date','Get-FileHash','Get-Service','Get-Process','Get-CimInstance','Get-NetAdapter','Get-NetIPAddress')
+pub const POWERSHELL_PROBE_COMMANDS: &[&str] = &[
+    "powershell",
+    "pwsh",
+    "get-date",
+    "get-filehash",
+    "get-service",
+    "get-process",
+    "get-ciminstance",
+    "get-netadapter",
+    "get-netipaddress",
+];
+
+fn powershell_probe_script() -> String {
+    let command_names = POWERSHELL_PROBE_COMMANDS
+        .iter()
+        .map(|command| format!("'{command}'"))
+        .collect::<Vec<_>>()
+        .join(",");
+    r#"$ErrorActionPreference='Stop'
+$commandNames=@(__QZ_COMMAND_NAMES__)
 $commands=@($commandNames | Where-Object { Get-Command $_ -ErrorAction SilentlyContinue } | ForEach-Object { $_.ToLowerInvariant() })
 $services=@(Get-Service -ErrorAction SilentlyContinue | Select-Object -First 500 -ExpandProperty Name)
 $payload=[ordered]@{schemaVersion=1;osId='windows';version=[Environment]::OSVersion.Version.ToString();architecture=$env:PROCESSOR_ARCHITECTURE;shell='powershell';commands=$commands;services=$services}
 Write-Output '__QZ_WINDOWS_JSON_BEGIN__'
 Write-Output ($payload | ConvertTo-Json -Compress -Depth 3)
-Write-Output '__QZ_WINDOWS_JSON_END__'"#;
+Write-Output '__QZ_WINDOWS_JSON_END__'"#
+        .replace("__QZ_COMMAND_NAMES__", &command_names)
+}
 
 pub fn powershell_probe_command() -> String {
     encoded_powershell_probe_command("powershell.exe")
@@ -44,8 +64,9 @@ pub fn pwsh_probe_command() -> String {
 }
 
 fn encoded_powershell_probe_command(executable: &str) -> String {
-    let mut utf16le = Vec::with_capacity(POWERSHELL_PROBE_SCRIPT.len() * 2);
-    for unit in POWERSHELL_PROBE_SCRIPT.encode_utf16() {
+    let script = powershell_probe_script();
+    let mut utf16le = Vec::with_capacity(script.len() * 2);
+    for unit in script.encode_utf16() {
         utf16le.extend_from_slice(&unit.to_le_bytes());
     }
     format!(

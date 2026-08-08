@@ -1,5 +1,5 @@
 use qingzhou_ssh_lib::core::{
-    system_probe::{RemoteOsFamily, SystemCapabilities, PROBE_COMMAND},
+    system_probe::{RemoteOsFamily, SystemCapabilities, POWERSHELL_PROBE_COMMANDS, PROBE_COMMAND},
     tasks::{
         built_in_catalog, evaluate_task_availability, remediation_for, TaskAvailabilityState,
         TaskDefinition,
@@ -125,9 +125,15 @@ fn capability_probe_checks_every_command_required_by_the_builtin_catalog() {
         .nth(1)
         .and_then(|tail| tail.split("; do").next())
         .expect("probe command allowlist");
-    let scanned = scanned
+    let mut scanned = scanned
         .split_whitespace()
+        .map(str::to_owned)
         .collect::<std::collections::BTreeSet<_>>();
+    scanned.extend(
+        POWERSHELL_PROBE_COMMANDS
+            .iter()
+            .map(|command| (*command).to_owned()),
+    );
     let required = built_in_catalog()
         .into_iter()
         .flat_map(|definition| definition.implementations)

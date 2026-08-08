@@ -40,6 +40,9 @@ $cargoBin = Join-Path $env:CARGO_HOME 'bin'
 if (($env:Path -split ';') -notcontains $cargoBin) {
   throw "Cargo bin is missing from PATH: $cargoBin"
 }
+if (-not (Get-Command cargo -ErrorAction SilentlyContinue)) {
+  throw 'Cargo is unavailable after loading the project development environment'
+}
 
 if (-not (Get-Command perl -ErrorAction SilentlyContinue)) {
   throw 'Perl is unavailable for the vendored OpenSSL build'

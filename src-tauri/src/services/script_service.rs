@@ -9,7 +9,6 @@ use uuid::Uuid;
 use crate::{
     core::{
         scripts::{
-            environment::render_script_launcher,
             package::{export_script_package, import_script_package, ScriptPackageExport},
             validation::{
                 scan_script_body_for, validate_script_parameter_values, ScriptScanWarning,
@@ -200,14 +199,6 @@ impl ScriptService {
         parameter_values: Value,
     ) -> AppResult<ScriptRunPreview> {
         let details = self.require_enabled(definition_id).await?;
-        let snapshot = self
-            .executions
-            .get_task_library_snapshot(server_id, false)
-            .await?;
-        details
-            .active_version
-            .shell
-            .ensure_supported(&snapshot.capabilities)?;
         let parameters = parse_parameters(&details.active_version)?;
         let validated = validate_script_parameter_values(&parameters, &parameter_values)?;
         let scan =
@@ -309,17 +300,6 @@ impl ScriptService {
         }
         let parameters = parse_parameters(&version)?;
         let validated = validate_script_parameter_values(&parameters, &pending.parameter_values)?;
-        let snapshot = self
-            .executions
-            .get_task_library_snapshot(&pending.server_id, false)
-            .await?;
-        version.shell.ensure_supported(&snapshot.capabilities)?;
-        let launcher = render_script_launcher(
-            version.shell,
-            version.shell.executable(&snapshot.capabilities)?,
-            &version.body,
-            &validated,
-        )?;
         let history = execution_history_parameters(
             pending.definition_id,
             version.id,
@@ -355,7 +335,9 @@ impl ScriptService {
             .execute_personal_script_with_cancel(
                 &pending.server_id,
                 version_number,
-                launcher,
+                version.shell,
+                &version.body,
+                &validated,
                 version.timeout_seconds,
                 history,
                 events,

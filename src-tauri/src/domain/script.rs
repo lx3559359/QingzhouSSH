@@ -13,6 +13,7 @@ pub enum ScriptShell {
     #[default]
     PosixSh,
     Bash,
+    #[serde(rename = "powershell")]
     PowerShell,
 }
 
