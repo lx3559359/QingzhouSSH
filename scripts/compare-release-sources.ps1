@@ -8,10 +8,11 @@ param(
 $ErrorActionPreference = 'Stop'
 $projectRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $projectPrefix = $projectRoot.TrimEnd([IO.Path]::DirectorySeparatorChar) + [IO.Path]::DirectorySeparatorChar
+$pathComparison = if ([IO.Path]::DirectorySeparatorChar -eq '\') { [StringComparison]::OrdinalIgnoreCase } else { [StringComparison]::Ordinal }
 
 function Resolve-ProjectDirectory([string]$Label, [string]$Path) {
   $resolved = [IO.Path]::GetFullPath($Path)
-  if (-not $resolved.StartsWith($projectPrefix, [StringComparison]::OrdinalIgnoreCase)) {
+  if (-not $resolved.StartsWith($projectPrefix, $pathComparison)) {
     throw "$Label must remain inside the project folder: $resolved"
   }
   if (-not (Test-Path -LiteralPath $resolved -PathType Container)) { throw "$Label was not found: $resolved" }

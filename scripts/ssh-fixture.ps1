@@ -7,6 +7,7 @@ param(
 $ErrorActionPreference = 'Stop'
 $projectRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..')).Path
 $projectPrefix = $projectRoot.TrimEnd([IO.Path]::DirectorySeparatorChar) + [IO.Path]::DirectorySeparatorChar
+$pathComparison = if ([IO.Path]::DirectorySeparatorChar -eq '\') { [StringComparison]::OrdinalIgnoreCase } else { [StringComparison]::Ordinal }
 $localRoot = Join-Path $projectRoot '.local'
 $pythonPackages = Join-Path $localRoot 'python-packages'
 $pipCache = Join-Path $localRoot 'pip-cache'
@@ -26,7 +27,7 @@ $authorizedKeys = Join-Path $keyRoot 'authorized_keys'
 
 function Assert-ProjectPath([string]$Path) {
   $fullPath = [IO.Path]::GetFullPath($Path)
-  if (-not $fullPath.StartsWith($projectPrefix, [StringComparison]::OrdinalIgnoreCase)) {
+  if (-not $fullPath.StartsWith($projectPrefix, $pathComparison)) {
     throw "Fixture path escapes the project root: $fullPath"
   }
   return $fullPath

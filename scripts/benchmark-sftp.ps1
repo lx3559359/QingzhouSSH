@@ -8,6 +8,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+$pathComparison = if ([IO.Path]::DirectorySeparatorChar -eq '\') { [StringComparison]::OrdinalIgnoreCase } else { [StringComparison]::Ordinal }
 
 if ($RttMs -lt 0) { throw 'RttMs must be zero or greater.' }
 if ($BandwidthMbps -le 0) { throw 'BandwidthMbps must be greater than zero.' }
@@ -24,7 +25,7 @@ $resolvedOutput = if ([IO.Path]::IsPathRooted($OutputPath)) {
 } else {
   [IO.Path]::GetFullPath((Join-Path $projectRoot $OutputPath))
 }
-if (-not $resolvedOutput.StartsWith($benchmarkPrefix, [StringComparison]::OrdinalIgnoreCase)) {
+if (-not $resolvedOutput.StartsWith($benchmarkPrefix, $pathComparison)) {
   throw 'OutputPath must be a file under artifacts/benchmarks.'
 }
 if ([IO.Path]::GetExtension($resolvedOutput) -ne '.json') {
@@ -56,6 +57,9 @@ function Initialize-Cargo {
   $cargoCommand = Get-Command cargo -ErrorAction SilentlyContinue
   if ($cargoCommand) { return $cargoCommand.Source }
 
+  $cargoExecutable = if ([Runtime.InteropServices.RuntimeInformation]::IsOSPlatform([Runtime.InteropServices.OSPlatform]::Windows)) { 'cargo.exe' } else { 'cargo' }
+  $pathSeparator = [IO.Path]::PathSeparator
+
   $candidateRoots = @(
     $projectRoot,
     [IO.Path]::GetFullPath((Join-Path $projectRoot '..\..'))
@@ -63,11 +67,11 @@ function Initialize-Cargo {
   foreach ($candidateRoot in $candidateRoots) {
     $candidateCargoHome = Join-Path $candidateRoot '.local\cargo-home'
     $candidateRustupHome = Join-Path $candidateRoot '.local\rustup-home'
-    $candidateCargo = Join-Path $candidateCargoHome 'bin\cargo.exe'
+    $candidateCargo = Join-Path (Join-Path $candidateCargoHome 'bin') $cargoExecutable
     if (Test-Path -LiteralPath $candidateCargo -PathType Leaf) {
       $env:CARGO_HOME = $candidateCargoHome
       $env:RUSTUP_HOME = $candidateRustupHome
-      $env:Path = "$(Join-Path $candidateCargoHome 'bin');$env:Path"
+      $env:Path = "$(Join-Path $candidateCargoHome 'bin')$pathSeparator$env:Path"
       return $candidateCargo
     }
   }

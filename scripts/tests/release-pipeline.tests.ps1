@@ -1,4 +1,5 @@
 $ErrorActionPreference = 'Stop'
+$pathComparison = if ([IO.Path]::DirectorySeparatorChar -eq '\') { [StringComparison]::OrdinalIgnoreCase } else { [StringComparison]::Ordinal }
 
 $projectRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 $workflowPath = Join-Path $projectRoot '.github\workflows\release.yml'
@@ -56,6 +57,25 @@ foreach ($requiredText in @(
   'refs/tags/v'
 )) {
   if (-not $workflow.Contains($requiredText)) { throw "Release workflow is missing: $requiredText" }
+}
+$nativeBundles = @(
+  @{ platform = 'windows-x86_64-nsis'; bundle = 'nsis' },
+  @{ platform = 'windows-aarch64-nsis'; bundle = 'nsis' },
+  @{ platform = 'macos-x86_64-dmg'; bundle = 'dmg' },
+  @{ platform = 'macos-aarch64-dmg'; bundle = 'dmg' },
+  @{ platform = 'linux-x86_64-appimage'; bundle = 'appimage' },
+  @{ platform = 'linux-aarch64-appimage'; bundle = 'appimage' }
+)
+foreach ($nativeBundle in $nativeBundles) {
+  $escapedPlatform = [regex]::Escape($nativeBundle.platform)
+  $escapedBundle = [regex]::Escape($nativeBundle.bundle)
+  $matrixEntry = [regex]::Match(
+    $workflow,
+    "(?ms)^\s*- platform:\s*$escapedPlatform\s*(?<block>.*?)(?=^\s*- platform:|^\s*env:)"
+  )
+  if (-not $matrixEntry.Success -or $matrixEntry.Groups['block'].Value -notmatch "(?m)^\s*bundle:\s*$escapedBundle\s*$") {
+    throw "Release matrix bundle is missing or incorrect for $($nativeBundle.platform)"
+  }
 }
 $preflightStart = $workflow.IndexOf('name: Validate tagged release credentials before native builds', [StringComparison]::Ordinal)
 $signedBuildStart = $workflow.IndexOf('name: Build signed native bundle', [StringComparison]::Ordinal)
@@ -168,7 +188,7 @@ try {
 } finally {
   if (Test-Path -LiteralPath $testRoot) {
     $resolved = [IO.Path]::GetFullPath($testRoot)
-    if (-not $resolved.StartsWith($projectRoot + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) {
+    if (-not $resolved.StartsWith($projectRoot + [IO.Path]::DirectorySeparatorChar, $pathComparison)) {
       throw 'Refusing to clean a pipeline test path outside the project'
     }
     Remove-Item -LiteralPath $resolved -Recurse -Force

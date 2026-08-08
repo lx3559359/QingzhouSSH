@@ -1,4 +1,5 @@
 $ErrorActionPreference = 'Stop'
+$pathComparison = if ([IO.Path]::DirectorySeparatorChar -eq '\') { [StringComparison]::OrdinalIgnoreCase } else { [StringComparison]::Ordinal }
 
 $projectRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 $builder = Join-Path $projectRoot 'scripts\build-multiplatform-release.ps1'
@@ -119,7 +120,7 @@ try {
 } finally {
   if (Test-Path -LiteralPath $testRoot) {
     $resolved = [IO.Path]::GetFullPath($testRoot)
-    if (-not $resolved.StartsWith($projectRoot + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) {
+    if (-not $resolved.StartsWith($projectRoot + [IO.Path]::DirectorySeparatorChar, $pathComparison)) {
       throw 'Refusing to clean multiplatform fixtures outside the project'
     }
     Remove-Item -LiteralPath $resolved -Recurse -Force

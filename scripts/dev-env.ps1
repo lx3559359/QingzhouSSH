@@ -21,6 +21,7 @@ $env:TMP = $env:TEMP
 $env:QINGZHOU_DATA_ROOT = Join-Path $localRoot 'dev-data'
 $env:VITE_QINGZHOU_DATA_ROOT = $env:QINGZHOU_DATA_ROOT
 $env:QINGZHOU_ARTIFACTS_DIR = Join-Path $projectRoot 'artifacts'
+$pathSeparator = [IO.Path]::PathSeparator
 
 @(
   $env:CARGO_HOME,
@@ -38,7 +39,7 @@ $env:QINGZHOU_ARTIFACTS_DIR = Join-Path $projectRoot 'artifacts'
 
 $toolBins = @((Join-Path $env:CARGO_HOME 'bin'), $env:PNPM_HOME)
 $cargoExecutable = if ([Runtime.InteropServices.RuntimeInformation]::IsOSPlatform([Runtime.InteropServices.OSPlatform]::Windows)) { 'cargo.exe' } else { 'cargo' }
-if (-not (Test-Path -LiteralPath (Join-Path $env:CARGO_HOME "bin\$cargoExecutable") -PathType Leaf) -and
+if (-not (Test-Path -LiteralPath (Join-Path (Join-Path $env:CARGO_HOME 'bin') $cargoExecutable) -PathType Leaf) -and
     -not (Get-Command cargo -ErrorAction SilentlyContinue)) {
   $candidateRoots = @($projectRoot)
   $projectParent = Split-Path $projectRoot -Parent
@@ -50,7 +51,7 @@ if (-not (Test-Path -LiteralPath (Join-Path $env:CARGO_HOME "bin\$cargoExecutabl
     Where-Object { Test-Path -LiteralPath $_ -PathType Container } |
     ForEach-Object { Get-ChildItem -LiteralPath $_ -Directory } |
     Sort-Object @{ Expression = { if ($_.Name -like 'stable-*') { 0 } else { 1 } } }, Name |
-    ForEach-Object { Join-Path $_.FullName "bin\$cargoExecutable" } |
+    ForEach-Object { Join-Path (Join-Path $_.FullName 'bin') $cargoExecutable } |
     Where-Object { Test-Path -LiteralPath $_ -PathType Leaf } |
     Select-Object -First 1
   if ($toolchainCargo) {
@@ -76,8 +77,8 @@ if (Test-Path -LiteralPath (Join-Path $localPerlBin 'perl.exe')) {
 }
 
 foreach ($toolBin in $toolBins) {
-  if (($env:Path -split ';') -notcontains $toolBin) {
-    $env:Path = "$toolBin;$env:Path"
+  if (($env:Path -split [Regex]::Escape([string]$pathSeparator)) -notcontains $toolBin) {
+    $env:Path = "$toolBin$pathSeparator$env:Path"
   }
 }
 

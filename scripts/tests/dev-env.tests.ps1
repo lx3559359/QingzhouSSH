@@ -1,5 +1,6 @@
 $ErrorActionPreference = 'Stop'
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
+$pathComparison = if ([IO.Path]::DirectorySeparatorChar -eq '\') { [StringComparison]::OrdinalIgnoreCase } else { [StringComparison]::Ordinal }
 
 . (Join-Path $repoRoot 'scripts\dev-env.ps1') -Quiet
 
@@ -18,7 +19,7 @@ $paths = @(
 )
 
 foreach ($path in $paths) {
-  if (-not $path.StartsWith($repoRoot, [StringComparison]::OrdinalIgnoreCase)) {
+  if (-not $path.StartsWith($repoRoot, $pathComparison)) {
     throw "Path escaped repository: $path"
   }
   if ((Split-Path -Qualifier $path) -ne (Split-Path -Qualifier $repoRoot)) {
@@ -37,7 +38,7 @@ if ($targetItem.Attributes -band [IO.FileAttributes]::ReparsePoint) {
 }
 
 $cargoBin = Join-Path $env:CARGO_HOME 'bin'
-if (($env:Path -split ';') -notcontains $cargoBin) {
+if (($env:Path -split [Regex]::Escape([string][IO.Path]::PathSeparator)) -notcontains $cargoBin) {
   throw "Cargo bin is missing from PATH: $cargoBin"
 }
 if (-not (Get-Command cargo -ErrorAction SilentlyContinue)) {

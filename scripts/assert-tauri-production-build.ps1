@@ -6,6 +6,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+$pathComparison = if ([IO.Path]::DirectorySeparatorChar -eq '\') { [StringComparison]::OrdinalIgnoreCase } else { [StringComparison]::Ordinal }
 
 function Assert-UnderProject {
   param(
@@ -16,7 +17,7 @@ function Assert-UnderProject {
 
   $resolved = [IO.Path]::GetFullPath($Path)
   $prefix = $ProjectRoot.TrimEnd([IO.Path]::DirectorySeparatorChar) + [IO.Path]::DirectorySeparatorChar
-  if (-not $resolved.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase)) {
+  if (-not $resolved.StartsWith($prefix, $pathComparison)) {
     throw "$Label must remain inside the project folder: $resolved"
   }
   return $resolved

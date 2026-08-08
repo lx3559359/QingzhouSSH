@@ -33,6 +33,12 @@ if ($source -notmatch 'artifacts[\\/]benchmarks' -or $source -notmatch 'GetFullP
 if ($source -match 'ApplicationData|LocalApplicationData|APPDATA') {
   throw 'Benchmark must not write to AppData.'
 }
+if ($source -notmatch '\[IO\.Path\]::PathSeparator') {
+  throw 'Benchmark must use the native PATH separator.'
+}
+if ($source -notmatch "else \{ 'cargo' \}") {
+  throw 'Benchmark must support the Unix Cargo executable.'
+}
 $wrapperSource = Get-Content -Raw -Encoding utf8 -LiteralPath $wrapper
 if ($wrapperSource -notmatch "'-{2}'" -or $wrapperSource -notmatch 'benchmark-sftp\.ps1') {
   throw 'Benchmark wrapper must remove the package-manager separator and forward arguments.'
