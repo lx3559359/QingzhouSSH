@@ -12,7 +12,7 @@ use crate::{
             environment::render_script_launcher,
             package::{export_script_package, import_script_package, ScriptPackageExport},
             validation::{
-                scan_script_body, validate_script_parameter_values, ScriptScanWarning,
+                scan_script_body_for, validate_script_parameter_values, ScriptScanWarning,
                 PERSONAL_SCRIPT_AUTOMATIC_ROLLBACK_AVAILABLE, PERSONAL_SCRIPT_RISK,
             },
         },
@@ -23,8 +23,9 @@ use crate::{
         execution::{now_millis, ExecutionDetails, ExecutionParameter, ExecutionStatus},
         operation::{NewOperationRun, OperationStatus},
         script::{
-            NewPersonalScript, NewScriptRunReference, NewScriptVersion, ScriptDetails,
-            ScriptListFilter, ScriptMetadataUpdate, ScriptSummary, ScriptVersion,
+            NewPersonalScript, NewScriptRunReference, NewScriptVersion, ScriptCompatibility,
+            ScriptDetails, ScriptListFilter, ScriptMetadataUpdate, ScriptShell, ScriptSummary,
+            ScriptVersion,
         },
     },
     error::{AppError, AppResult},
@@ -56,6 +57,8 @@ pub struct ScriptRunPreview {
     pub parameter_names: Vec<String>,
     pub scan_warnings: Vec<ScriptScanWarning>,
     pub timeout_seconds: u64,
+    pub shell: ScriptShell,
+    pub compatibility: ScriptCompatibility,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -170,6 +173,8 @@ impl ScriptService {
                     parameters: details.active_version.parameters,
                     scan_summary: Value::Null,
                     timeout_seconds: details.active_version.timeout_seconds,
+                    shell: details.active_version.shell,
+                    compatibility: details.active_version.compatibility,
                 },
             })
             .await
@@ -195,9 +200,18 @@ impl ScriptService {
         parameter_values: Value,
     ) -> AppResult<ScriptRunPreview> {
         let details = self.require_enabled(definition_id).await?;
+        let snapshot = self
+            .executions
+            .get_task_library_snapshot(server_id, false)
+            .await?;
+        details
+            .active_version
+            .shell
+            .ensure_supported(&snapshot.capabilities)?;
         let parameters = parse_parameters(&details.active_version)?;
         let validated = validate_script_parameter_values(&parameters, &parameter_values)?;
-        let scan = scan_script_body(&details.active_version.body)?;
+        let scan =
+            scan_script_body_for(details.active_version.shell, &details.active_version.body)?;
         let version_number = i32::try_from(details.active_version.version_number)
             .map_err(|_| AppError::Validation("脚本版本超出运行范围".into()))?;
         let operation = self
@@ -212,6 +226,7 @@ impl ScriptService {
                     details.active_version.id,
                     &details.active_version.body_sha256,
                     details.active_version.timeout_seconds,
+                    details.active_version.shell,
                     &validated,
                 ),
             })
@@ -262,6 +277,8 @@ impl ScriptService {
                 .collect(),
             scan_warnings: scan.warnings,
             timeout_seconds: details.active_version.timeout_seconds,
+            shell: details.active_version.shell,
+            compatibility: details.active_version.compatibility,
         })
     }
 
@@ -292,12 +309,23 @@ impl ScriptService {
         }
         let parameters = parse_parameters(&version)?;
         let validated = validate_script_parameter_values(&parameters, &pending.parameter_values)?;
-        let launcher = render_script_launcher(&version.body, &validated)?;
+        let snapshot = self
+            .executions
+            .get_task_library_snapshot(&pending.server_id, false)
+            .await?;
+        version.shell.ensure_supported(&snapshot.capabilities)?;
+        let launcher = render_script_launcher(
+            version.shell,
+            version.shell.executable(&snapshot.capabilities)?,
+            &version.body,
+            &validated,
+        )?;
         let history = execution_history_parameters(
             pending.definition_id,
             version.id,
             &version.body_sha256,
             version.timeout_seconds,
+            version.shell,
             &validated,
         );
         let cancel = CancellationToken::new();
@@ -437,6 +465,7 @@ fn execution_history_parameters(
     version_id: Uuid,
     body_sha256: &str,
     timeout_seconds: u64,
+    shell: ScriptShell,
     parameters: &ValidatedParameters,
 ) -> Vec<ExecutionParameter> {
     let mut values = vec![
@@ -444,6 +473,7 @@ fn execution_history_parameters(
         public_history("scriptVersionId", version_id.to_string()),
         public_history("bodySha256", body_sha256.into()),
         public_history("timeoutSeconds", timeout_seconds.to_string()),
+        public_history("shell", shell.as_str().into()),
     ];
     values.extend(
         parameters
@@ -462,6 +492,7 @@ fn operation_parameter_summary(
     version_id: Uuid,
     body_sha256: &str,
     timeout_seconds: u64,
+    shell: ScriptShell,
     parameters: &ValidatedParameters,
 ) -> Option<String> {
     let values = execution_history_parameters(
@@ -469,6 +500,7 @@ fn operation_parameter_summary(
         version_id,
         body_sha256,
         timeout_seconds,
+        shell,
         parameters,
     );
     let summary = values

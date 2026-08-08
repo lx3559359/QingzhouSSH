@@ -40,6 +40,10 @@ fn new_script(body: &str, enabled: bool) -> NewPersonalScript {
             parameters: json!([]),
             scan_summary: json!({}),
             timeout_seconds: 30,
+            shell: qingzhou_ssh_lib::domain::script::ScriptShell::PosixSh,
+            compatibility: qingzhou_ssh_lib::domain::script::ScriptCompatibility::for_shell(
+                qingzhou_ssh_lib::domain::script::ScriptShell::PosixSh,
+            ),
         },
     }
 }
@@ -119,6 +123,10 @@ async fn personal_script_is_dangerous_unrecoverable_version_locked_and_not_logge
                 parameters: json!([]),
                 scan_summary: json!({}),
                 timeout_seconds: 30,
+                shell: qingzhou_ssh_lib::domain::script::ScriptShell::PosixSh,
+                compatibility: qingzhou_ssh_lib::domain::script::ScriptCompatibility::for_shell(
+                    qingzhou_ssh_lib::domain::script::ScriptShell::PosixSh,
+                ),
             },
         )
         .await

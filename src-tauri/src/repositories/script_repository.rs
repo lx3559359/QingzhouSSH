@@ -5,7 +5,7 @@ use uuid::Uuid;
 use crate::{
     core::{
         scripts::validation::{
-            scan_script_body, validate_script_metadata, validate_script_parameters,
+            scan_script_body_for, validate_script_metadata, validate_script_parameters,
             validate_script_timeout, ScriptScanSummary,
         },
         tasks::ParameterDefinition,
@@ -40,6 +40,8 @@ impl ScriptRepository {
         let tags_json = to_bounded_json(&draft.tags, 8 * 1024, "脚本标签")?;
         let parameters_json = to_bounded_json(&draft.version.parameters, 128 * 1024, "脚本参数")?;
         let scan_summary_json = to_bounded_json(&scan, 64 * 1024, "脚本扫描摘要")?;
+        let compatibility_json =
+            to_bounded_json(&draft.version.compatibility, 16 * 1024, "脚本兼容性")?;
         let body_sha256 = sha256(&draft.version.body);
         let mut transaction = self.pool.begin().await?;
         sqlx::query(
@@ -56,7 +58,7 @@ impl ScriptRepository {
         .execute(&mut *transaction)
         .await?;
         sqlx::query(
-            "INSERT INTO script_versions (id,definition_id,version_number,body,body_sha256,parameters_json,scan_summary_json,timeout_seconds,created_at) VALUES (?,?,1,?,?,?,?,?,?)",
+            "INSERT INTO script_versions (id,definition_id,version_number,body,body_sha256,parameters_json,scan_summary_json,timeout_seconds,shell,compatibility_json,created_at) VALUES (?,?,1,?,?,?,?,?,?,?,?)",
         )
         .bind(version_id.to_string())
         .bind(definition_id.to_string())
@@ -67,6 +69,8 @@ impl ScriptRepository {
         .bind(i64::try_from(draft.version.timeout_seconds).map_err(|_| {
             AppError::Validation("脚本超时时间超出数据库范围".into())
         })?)
+        .bind(draft.version.shell.as_str())
+        .bind(compatibility_json)
         .bind(now)
         .execute(&mut *transaction)
         .await?;
@@ -89,6 +93,7 @@ impl ScriptRepository {
         let scan = validate_version(&draft)?;
         let parameters_json = to_bounded_json(&draft.parameters, 128 * 1024, "脚本参数")?;
         let scan_summary_json = to_bounded_json(&scan, 64 * 1024, "脚本扫描摘要")?;
+        let compatibility_json = to_bounded_json(&draft.compatibility, 16 * 1024, "脚本兼容性")?;
         let body_sha256 = sha256(&draft.body);
         let version_id = Uuid::new_v4();
         let now = now_millis();
@@ -103,7 +108,7 @@ impl ScriptRepository {
             return Err(AppError::Validation("脚本不存在或已删除".into()));
         }
         sqlx::query(
-            "INSERT INTO script_versions (id,definition_id,version_number,body,body_sha256,parameters_json,scan_summary_json,timeout_seconds,created_at) VALUES (?,?,?,?,?,?,?,?,?)",
+            "INSERT INTO script_versions (id,definition_id,version_number,body,body_sha256,parameters_json,scan_summary_json,timeout_seconds,shell,compatibility_json,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
         )
         .bind(version_id.to_string())
         .bind(definition_id.to_string())
@@ -115,6 +120,8 @@ impl ScriptRepository {
         .bind(i64::try_from(draft.timeout_seconds).map_err(|_| {
             AppError::Validation("脚本超时时间超出数据库范围".into())
         })?)
+        .bind(draft.shell.as_str())
+        .bind(compatibility_json)
         .bind(now)
         .execute(&mut *transaction)
         .await?;
@@ -135,7 +142,7 @@ impl ScriptRepository {
 
     pub async fn get_for_editor(&self, id: Uuid) -> AppResult<Option<ScriptDetails>> {
         let row = sqlx::query(
-            "SELECT d.id,d.title,d.category,d.tags_json,d.is_favorite,d.is_enabled,d.active_version_id,d.created_at,d.updated_at,d.deleted_at,v.id AS version_id,v.definition_id,v.version_number,v.body,v.body_sha256,v.parameters_json,v.scan_summary_json,v.timeout_seconds,v.created_at AS version_created_at FROM script_definitions d JOIN script_versions v ON v.id=d.active_version_id AND v.definition_id=d.id WHERE d.id=? AND d.deleted_at IS NULL",
+            "SELECT d.id,d.title,d.category,d.tags_json,d.is_favorite,d.is_enabled,d.active_version_id,d.created_at,d.updated_at,d.deleted_at,v.id AS version_id,v.definition_id,v.version_number,v.body,v.body_sha256,v.parameters_json,v.scan_summary_json,v.timeout_seconds,v.shell,v.compatibility_json,v.created_at AS version_created_at FROM script_definitions d JOIN script_versions v ON v.id=d.active_version_id AND v.definition_id=d.id WHERE d.id=? AND d.deleted_at IS NULL",
         )
         .bind(id.to_string())
         .fetch_optional(&self.pool)
@@ -155,7 +162,7 @@ impl ScriptRepository {
         version_number: u32,
     ) -> AppResult<ScriptVersion> {
         sqlx::query(
-            "SELECT id,definition_id,version_number,body,body_sha256,parameters_json,scan_summary_json,timeout_seconds,created_at FROM script_versions WHERE definition_id=? AND version_number=?",
+            "SELECT id,definition_id,version_number,body,body_sha256,parameters_json,scan_summary_json,timeout_seconds,shell,compatibility_json,created_at FROM script_versions WHERE definition_id=? AND version_number=?",
         )
         .bind(definition_id.to_string())
         .bind(i64::from(version_number))
@@ -168,7 +175,7 @@ impl ScriptRepository {
 
     pub async fn list_versions(&self, definition_id: Uuid) -> AppResult<Vec<ScriptVersion>> {
         sqlx::query(
-            "SELECT id,definition_id,version_number,body,body_sha256,parameters_json,scan_summary_json,timeout_seconds,created_at FROM script_versions WHERE definition_id=? ORDER BY version_number DESC LIMIT 100",
+            "SELECT id,definition_id,version_number,body,body_sha256,parameters_json,scan_summary_json,timeout_seconds,shell,compatibility_json,created_at FROM script_versions WHERE definition_id=? ORDER BY version_number DESC LIMIT 100",
         )
         .bind(definition_id.to_string())
         .fetch_all(&self.pool)
@@ -181,7 +188,7 @@ impl ScriptRepository {
     pub async fn list(&self, filter: ScriptListFilter) -> AppResult<Vec<ScriptSummary>> {
         validate_filter(&filter)?;
         let mut query = QueryBuilder::<Sqlite>::new(
-            "SELECT d.id,d.title,d.category,d.tags_json,d.is_favorite,d.is_enabled,d.active_version_id,d.updated_at,v.version_number,v.body_sha256 FROM script_definitions d JOIN script_versions v ON v.id=d.active_version_id AND v.definition_id=d.id WHERE d.deleted_at IS NULL",
+            "SELECT d.id,d.title,d.category,d.tags_json,d.is_favorite,d.is_enabled,d.active_version_id,d.updated_at,v.version_number,v.body_sha256,v.shell,v.compatibility_json FROM script_definitions d JOIN script_versions v ON v.id=d.active_version_id AND v.definition_id=d.id WHERE d.deleted_at IS NULL",
         );
         if let Some(value) = filter.query.as_deref() {
             query
@@ -317,7 +324,7 @@ impl ScriptRepository {
 
     async fn get_version_by_id(&self, id: Uuid) -> AppResult<Option<ScriptVersion>> {
         sqlx::query(
-            "SELECT id,definition_id,version_number,body,body_sha256,parameters_json,scan_summary_json,timeout_seconds,created_at FROM script_versions WHERE id=?",
+            "SELECT id,definition_id,version_number,body,body_sha256,parameters_json,scan_summary_json,timeout_seconds,shell,compatibility_json,created_at FROM script_versions WHERE id=?",
         )
         .bind(id.to_string())
         .fetch_optional(&self.pool)
@@ -333,10 +340,15 @@ fn validate_definition(draft: &NewPersonalScript) -> AppResult<()> {
 
 fn validate_version(draft: &NewScriptVersion) -> AppResult<ScriptScanSummary> {
     validate_script_timeout(draft.timeout_seconds)?;
+    if draft.compatibility != crate::domain::script::ScriptCompatibility::for_shell(draft.shell) {
+        return Err(AppError::Validation(
+            "脚本兼容性声明必须与版本 Shell 一致".into(),
+        ));
+    }
     let parameters: Vec<ParameterDefinition> = serde_json::from_value(draft.parameters.clone())
         .map_err(|_| AppError::Validation("脚本参数定义格式无效".into()))?;
     validate_script_parameters(&parameters)?;
-    scan_script_body(&draft.body)
+    scan_script_body_for(draft.shell, &draft.body)
 }
 
 fn validate_filter(filter: &ScriptListFilter) -> AppResult<()> {
@@ -402,6 +414,8 @@ fn map_version(row: &SqliteRow) -> AppResult<ScriptVersion> {
         parameters: parse_json(row.try_get("parameters_json")?, "脚本参数")?,
         scan_summary: parse_json(row.try_get("scan_summary_json")?, "脚本扫描摘要")?,
         timeout_seconds: parse_timeout(row.try_get("timeout_seconds")?)?,
+        shell: crate::domain::script::ScriptShell::try_from(row.try_get::<&str, _>("shell")?)?,
+        compatibility: parse_json(row.try_get("compatibility_json")?, "脚本兼容性")?,
         created_at: row.try_get("created_at")?,
     })
 }
@@ -418,6 +432,8 @@ fn map_joined_version(row: &SqliteRow) -> AppResult<ScriptVersion> {
         parameters: parse_json(row.try_get("parameters_json")?, "脚本参数")?,
         scan_summary: parse_json(row.try_get("scan_summary_json")?, "脚本扫描摘要")?,
         timeout_seconds: parse_timeout(row.try_get("timeout_seconds")?)?,
+        shell: crate::domain::script::ScriptShell::try_from(row.try_get::<&str, _>("shell")?)?,
+        compatibility: parse_json(row.try_get("compatibility_json")?, "脚本兼容性")?,
         created_at: row.try_get("version_created_at")?,
     })
 }
@@ -434,6 +450,8 @@ fn map_summary(row: &SqliteRow) -> AppResult<ScriptSummary> {
         active_version_number: u32::try_from(row.try_get::<i64, _>("version_number")?)
             .map_err(|_| AppError::Integrity("脚本版本号无效".into()))?,
         body_sha256: row.try_get("body_sha256")?,
+        shell: crate::domain::script::ScriptShell::try_from(row.try_get::<&str, _>("shell")?)?,
+        compatibility: parse_json(row.try_get("compatibility_json")?, "脚本兼容性")?,
         updated_at: row.try_get("updated_at")?,
     })
 }

@@ -1229,6 +1229,10 @@ function previewScriptVersion(
       warnings,
     },
     timeoutSeconds: request.timeoutSeconds,
+    shell: request.shell,
+    compatibility: request.shell === 'powershell'
+      ? { osFamilies: ['windows', 'linux', 'macos'], requiredCommands: ['powershell_or_pwsh'] }
+      : { osFamilies: ['linux', 'bsd'], requiredCommands: [request.shell === 'bash' ? 'bash' : 'sh'] },
     createdAt: now,
   };
 }
@@ -1244,6 +1248,8 @@ function previewScriptSummary(details: PersonalScriptDetails): PersonalScriptSum
     activeVersionId: details.activeVersion.id,
     activeVersionNumber: details.activeVersion.versionNumber,
     bodySha256: details.activeVersion.bodySha256,
+    shell: details.activeVersion.shell,
+    compatibility: clone(details.activeVersion.compatibility),
     updatedAt: details.definition.updatedAt,
   };
 }
@@ -1536,6 +1542,8 @@ export const previewApi = {
       parameterNames: details.activeVersion.parameters.map((parameter) => parameter.name),
       scanWarnings: clone(details.activeVersion.scanSummary.warnings),
       timeoutSeconds: details.activeVersion.timeoutSeconds,
+      shell: details.activeVersion.shell,
+      compatibility: clone(details.activeVersion.compatibility),
     };
     previewPersonalScriptRuns.set(preview.previewId, preview);
     return clone(preview);

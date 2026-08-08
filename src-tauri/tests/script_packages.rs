@@ -1,6 +1,8 @@
 use qingzhou_ssh_lib::{
     core::scripts::package::{export_script_package, import_script_package},
-    domain::script::{ScriptDefinition, ScriptDetails, ScriptVersion},
+    domain::script::{
+        ScriptCompatibility, ScriptDefinition, ScriptDetails, ScriptShell, ScriptVersion,
+    },
     error::AppError,
 };
 use serde_json::json;
@@ -46,6 +48,8 @@ fn details(body: &str) -> ScriptDetails {
             parameters: json!([]),
             scan_summary: json!({"warningCount": 0}),
             timeout_seconds: 120,
+            shell: ScriptShell::PowerShell,
+            compatibility: ScriptCompatibility::for_shell(ScriptShell::PowerShell),
             created_at: 2,
         },
     }
@@ -53,7 +57,7 @@ fn details(body: &str) -> ScriptDetails {
 
 #[test]
 fn import_rejects_unknown_version_forbidden_state_and_oversized_input() {
-    let unsupported = valid_package().replace("\"schemaVersion\":1", "\"schemaVersion\":2");
+    let unsupported = valid_package().replace("\"schemaVersion\":1", "\"schemaVersion\":3");
     assert!(matches!(
         import_script_package(unsupported.as_bytes()),
         Err(AppError::UnsupportedScriptPackage(_))
@@ -98,11 +102,32 @@ fn import_rejects_embedded_private_keys_and_credentials() {
 }
 
 #[test]
+fn version_two_import_rejects_shell_compatibility_mismatch() {
+    let mut value: serde_json::Value = serde_json::from_str(&valid_package()).unwrap();
+    value["schemaVersion"] = json!(2);
+    value["script"]["shell"] = json!("powershell");
+    value["script"]["compatibility"] = json!({
+        "osFamilies": ["linux", "bsd"],
+        "requiredCommands": ["sh"]
+    });
+
+    assert!(matches!(
+        import_script_package(value.to_string().as_bytes()),
+        Err(AppError::Validation(_))
+    ));
+}
+
+#[test]
 fn imported_script_is_a_fresh_disabled_definition() {
     let imported = import_script_package(valid_package().as_bytes()).unwrap();
     assert_eq!(imported.title, "服务巡检");
     assert_eq!(imported.version.body, "printf '%s\\n' ok");
     assert_eq!(imported.version.timeout_seconds, 300);
+    assert_eq!(imported.version.shell, ScriptShell::PosixSh);
+    assert_eq!(
+        imported.version.compatibility,
+        ScriptCompatibility::for_shell(ScriptShell::PosixSh)
+    );
     assert!(!imported.is_enabled);
     assert!(!imported.is_favorite);
 }
@@ -122,6 +147,9 @@ async fn export_is_atomic_confined_and_excludes_external_state() {
     assert!(absolute.starts_with(root.path()));
     let json = tokio::fs::read_to_string(absolute).await.unwrap();
     assert!(json.contains("package-body-canary"));
+    let package: serde_json::Value = serde_json::from_str(&json).unwrap();
+    assert_eq!(package["schemaVersion"], 2);
+    assert_eq!(package["script"]["shell"], "powershell");
     let forbidden = vec![
         "serverId".to_string(),
         "credentials".to_string(),

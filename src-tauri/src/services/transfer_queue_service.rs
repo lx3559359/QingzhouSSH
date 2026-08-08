@@ -10,7 +10,7 @@ use uuid::Uuid;
 
 use crate::{
     core::{
-        sftp::{self, DownloadRequest, TransferPhase, UploadRequest, VerificationPolicy},
+        sftp::{self, DownloadRequest, UploadRequest, VerificationPolicy},
         ssh::executor::EventSink,
     },
     domain::{
@@ -429,6 +429,7 @@ fn parse_verification(value: &str) -> AppResult<VerificationPolicy> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::core::sftp::TransferPhase;
 
     #[test]
     fn result_fields_tolerate_missing_values() {

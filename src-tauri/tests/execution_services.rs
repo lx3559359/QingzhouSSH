@@ -50,6 +50,7 @@ fn custom_commands_and_scripts_are_noninteractive_and_require_confirmation() {
         content: "uptime".into(),
         timeout_seconds: 30,
         dangerous_confirmed: true,
+        shell: qingzhou_ssh_lib::domain::script::ScriptShell::PosixSh,
     };
     assert_eq!(command.render().unwrap(), "uptime");
 
@@ -58,6 +59,7 @@ fn custom_commands_and_scripts_are_noninteractive_and_require_confirmation() {
         content: "set -eu\nprintf 'ok\\n'".into(),
         timeout_seconds: 30,
         dangerous_confirmed: true,
+        shell: qingzhou_ssh_lib::domain::script::ScriptShell::PosixSh,
     };
     let rendered = script.render().unwrap();
     assert!(rendered.starts_with("sh -s <<'__QZ_SCRIPT_"));
@@ -109,6 +111,7 @@ async fn connection_failure_is_persisted_without_leaking_credential_canary() {
                 content: "uptime".into(),
                 timeout_seconds: 30,
                 dangerous_confirmed: true,
+                shell: qingzhou_ssh_lib::domain::script::ScriptShell::PosixSh,
             },
             &mut events,
         )

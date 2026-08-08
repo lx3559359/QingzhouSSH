@@ -225,12 +225,14 @@ async fn tasks_scripts_logs_sftp_history_and_canaries_close_the_m2_loop() {
             content: "printf 'advanced-command-ok\\n'".into(),
             timeout_seconds: 30,
             dangerous_confirmed: true,
+            shell: qingzhou_ssh_lib::domain::script::ScriptShell::PosixSh,
         },
         CustomExecutionRequest {
             mode: CustomExecutionMode::Script,
             content: format!("printf 'advanced-script-ok\\n'\n# {SCRIPT_CANARY}"),
             timeout_seconds: 30,
             dangerous_confirmed: true,
+            shell: qingzhou_ssh_lib::domain::script::ScriptShell::PosixSh,
         },
     ] {
         let mut events = VecEventSink::default();

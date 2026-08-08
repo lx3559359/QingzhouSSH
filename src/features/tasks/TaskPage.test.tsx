@@ -279,6 +279,8 @@ const personalScript: PersonalScriptDetails = {
       warnings: [],
     },
     timeoutSeconds: 30,
+    shell: 'posix_sh',
+    compatibility: { osFamilies: ['linux', 'bsd'], requiredCommands: ['sh'] },
     createdAt: 1,
   },
 };
@@ -293,6 +295,8 @@ const personalScriptSummary: PersonalScriptSummary = {
   activeVersionId: personalScript.activeVersion.id,
   activeVersionNumber: 1,
   bodySha256: personalScript.activeVersion.bodySha256,
+  shell: 'posix_sh',
+  compatibility: { osFamilies: ['linux', 'bsd'], requiredCommands: ['sh'] },
   updatedAt: 1,
 };
 
@@ -372,6 +376,8 @@ describe('TaskPage', () => {
       parameterNames: [],
       scanWarnings: [],
       timeoutSeconds: 30,
+      shell: 'posix_sh',
+      compatibility: { osFamilies: ['linux', 'bsd'], requiredCommands: ['sh'] },
     });
     apiMocks.confirmPersonalScriptRun.mockResolvedValue({
       operationRunId: 'script-preview-1',

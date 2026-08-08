@@ -34,6 +34,10 @@ fn new_script(title: &str, category: &str, body: &str) -> NewPersonalScript {
             parameters: json!([]),
             scan_summary: json!({"warningCount":0}),
             timeout_seconds: 300,
+            shell: qingzhou_ssh_lib::domain::script::ScriptShell::PosixSh,
+            compatibility: qingzhou_ssh_lib::domain::script::ScriptCompatibility::for_shell(
+                qingzhou_ssh_lib::domain::script::ScriptShell::PosixSh,
+            ),
         },
     }
 }
@@ -91,6 +95,10 @@ async fn saving_changes_creates_immutable_version_and_soft_delete_preserves_hist
                 parameters: json!([]),
                 scan_summary: json!({"warningCount":0}),
                 timeout_seconds: 300,
+                shell: qingzhou_ssh_lib::domain::script::ScriptShell::PosixSh,
+                compatibility: qingzhou_ssh_lib::domain::script::ScriptCompatibility::for_shell(
+                    qingzhou_ssh_lib::domain::script::ScriptShell::PosixSh,
+                ),
             },
         )
         .await

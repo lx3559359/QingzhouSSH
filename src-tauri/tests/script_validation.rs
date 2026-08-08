@@ -10,6 +10,7 @@ use qingzhou_ssh_lib::core::{
     },
     tasks::{shell_quote, ParameterDefinition, ParameterKind, RiskLevel},
 };
+use qingzhou_ssh_lib::domain::script::ScriptShell;
 use serde_json::json;
 
 const _: () = assert!(!PERSONAL_SCRIPT_AUTOMATIC_ROLLBACK_AVAILABLE);
@@ -152,7 +153,7 @@ fn parameter_values_cannot_change_script_structure() {
         None,
     )];
     let values = validate_script_parameter_values(&definitions, &json!({"TEXT": value})).unwrap();
-    let command = render_script_launcher(body, &values).unwrap();
+    let command = render_script_launcher(ScriptShell::PosixSh, "sh", body, &values).unwrap();
 
     assert!(!command.contains("QZ_PARAM_TEXT=x'; touch"));
     assert!(command.contains(&format!("QZ_PARAM_TEXT={}", shell_quote(value))));
@@ -172,7 +173,7 @@ fn launcher_preserves_empty_unicode_and_large_script_content() {
     )];
     let values = validate_script_parameter_values(&definitions, &json!({"TEXT": ""})).unwrap();
     let body = format!("# 中文\n{}", "x".repeat(1024 * 1024 - 9));
-    let command = render_script_launcher(&body, &values).unwrap();
+    let command = render_script_launcher(ScriptShell::PosixSh, "sh", &body, &values).unwrap();
 
     assert!(command.starts_with("env QZ_PARAM_TEXT='' sh -s <<'QZ_SCRIPT_"));
     assert_eq!(extract_script_body(&command), body);

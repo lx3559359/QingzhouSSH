@@ -8,8 +8,8 @@ use crate::{
     domain::{
         events::ExecutionEvent,
         script::{
-            NewPersonalScript, NewScriptVersion, ScriptDetails, ScriptListFilter,
-            ScriptMetadataUpdate, ScriptSummary, ScriptVersion,
+            NewPersonalScript, NewScriptVersion, ScriptCompatibility, ScriptDetails,
+            ScriptListFilter, ScriptMetadataUpdate, ScriptShell, ScriptSummary, ScriptVersion,
         },
     },
     error::AppResult,
@@ -28,6 +28,8 @@ pub struct CreatePersonalScriptRequest {
     pub body: String,
     pub parameters: Vec<ParameterDefinition>,
     pub timeout_seconds: u64,
+    #[serde(default)]
+    pub shell: ScriptShell,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -36,6 +38,8 @@ pub struct SavePersonalScriptVersionRequest {
     pub body: String,
     pub parameters: Vec<ParameterDefinition>,
     pub timeout_seconds: u64,
+    #[serde(default)]
+    pub shell: ScriptShell,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -106,6 +110,8 @@ pub async fn create_personal_script(
                 parameters,
                 scan_summary: Value::Null,
                 timeout_seconds: request.timeout_seconds,
+                shell: request.shell,
+                compatibility: ScriptCompatibility::for_shell(request.shell),
             },
         })
         .await
@@ -129,6 +135,8 @@ pub async fn save_personal_script_version(
                 parameters,
                 scan_summary: Value::Null,
                 timeout_seconds: request.timeout_seconds,
+                shell: request.shell,
+                compatibility: ScriptCompatibility::for_shell(request.shell),
             },
         )
         .await

@@ -1,4 +1,5 @@
-import { FloppyDisk, Play, Plus, Star, Trash, UploadSimple } from '@phosphor-icons/react';
+import { FloppyDisk, Play, Plus, Star, Trash, UploadSimple, Warning } from '@phosphor-icons/react';
+import { useMemo } from 'react';
 
 import type {
   ParameterDefinition,
@@ -7,6 +8,7 @@ import type {
   PersonalScriptVersion,
 } from '../../../api/contracts';
 import type { ScriptEditorDraft } from './types';
+import { analyzeScript } from './scriptAnalysis';
 
 type ScriptParameterType = ParameterKind['type'];
 
@@ -71,6 +73,10 @@ export function ScriptEditor({
   onExport,
   onDelete,
 }: ScriptEditorProps) {
+  const advisoryWarnings = useMemo(
+    () => analyzeScript(draft.shell, draft.body),
+    [draft.body, draft.shell],
+  );
   function patchParameter(index: number, patch: Partial<ParameterDefinition>) {
     onChange({
       ...draft,
@@ -94,14 +100,17 @@ export function ScriptEditor({
           <label>脚本名称<input aria-label="脚本名称" value={draft.title} maxLength={80} onChange={(event) => onChange({ ...draft, title: event.target.value })} /></label>
           <label>分类<input aria-label="脚本分类" value={draft.category} maxLength={40} onChange={(event) => onChange({ ...draft, category: event.target.value })} /></label>
           <label className="script-tags-field">标签（用逗号分隔）<input aria-label="脚本标签" value={draft.tags.join(', ')} onChange={(event) => onChange({ ...draft, tags: event.target.value.split(/[,，]/).map((tag) => tag.trim()).filter(Boolean).slice(0, 20) })} /></label>
+          <label>运行 Shell<select aria-label="脚本 Shell" value={draft.shell} onChange={(event) => onChange({ ...draft, shell: event.target.value as ScriptEditorDraft['shell'] })}><option value="posix_sh">POSIX sh</option><option value="bash">Bash</option><option value="powershell">PowerShell</option></select></label>
           <label>超时时间（秒）<input aria-label="脚本超时时间" type="number" min={1} max={3600} value={draft.timeoutSeconds} onChange={(event) => onChange({ ...draft, timeoutSeconds: Number(event.target.value) })} /></label>
         </div>
 
         <label className="script-body-field">
-          <span>Shell 脚本正文</span>
-          <textarea aria-label="Shell 脚本正文" spellCheck={false} value={draft.body} onChange={(event) => onChange({ ...draft, body: event.target.value })} />
-          <small>{new Blob([draft.body]).size.toLocaleString()} / 1,048,576 字节；参数请使用 QZ_PARAM_参数名。</small>
+          <span>{draft.shell === 'powershell' ? 'PowerShell 脚本正文' : draft.shell === 'bash' ? 'Bash 脚本正文' : 'POSIX sh 脚本正文'}</span>
+          <textarea aria-label="脚本正文" spellCheck={false} value={draft.body} onChange={(event) => onChange({ ...draft, body: event.target.value })} />
+          <small>{new Blob([draft.body]).size.toLocaleString()} / 1,048,576 字节；参数通过进程环境变量 QZ_PARAM_参数名读取，不做源码替换。</small>
         </label>
+
+        {advisoryWarnings.length > 0 && <section className="script-advisory" aria-label="脚本静态提示"><header><Warning weight="fill" /><strong>静态风险提示（{advisoryWarnings.length}）</strong></header><ul>{advisoryWarnings.map((warning) => <li key={warning.code}>第 {warning.lineNumber} 行：{warning.message}</li>)}</ul><small>提示用于辅助审查，不会把个人脚本标记为安全。</small></section>}
 
         <section className="script-parameter-builder" aria-labelledby="script-parameters-title">
           <header><div><span className="eyebrow">强类型参数</span><h3 id="script-parameters-title">运行前让用户填写</h3></div><button className="secondary-button" type="button" onClick={() => onChange({ ...draft, parameters: [...draft.parameters, newParameter(draft.parameters.length)] })}><Plus />添加参数</button></header>
@@ -120,7 +129,7 @@ export function ScriptEditor({
         {versions.length > 0 && (
           <details className="script-version-history">
             <summary>历史版本（{versions.length}）</summary>
-            <ol>{versions.map((version) => <li key={version.id}><strong>v{version.versionNumber}</strong><span>{version.bodySha256.slice(0, 12)}…</span><time>{new Date(version.createdAt).toLocaleString()}</time></li>)}</ol>
+            <ol>{versions.map((version) => <li key={version.id}><strong>v{version.versionNumber} · {version.shell === 'posix_sh' ? 'POSIX sh' : version.shell === 'bash' ? 'Bash' : 'PowerShell'}</strong><span>{version.bodySha256.slice(0, 12)}…</span><time>{new Date(version.createdAt).toLocaleString()}</time></li>)}</ol>
           </details>
         )}
       </div>

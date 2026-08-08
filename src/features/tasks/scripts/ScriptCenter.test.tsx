@@ -46,6 +46,8 @@ function scriptDetails(enabled = false, body = 'echo ok'): PersonalScriptDetails
         warnings: [],
       },
       timeoutSeconds: 30,
+      shell: 'posix_sh',
+      compatibility: { osFamilies: ['linux', 'bsd'], requiredCommands: ['sh'] },
       createdAt: 1,
     },
   };
@@ -62,6 +64,8 @@ function summary(details: PersonalScriptDetails): PersonalScriptSummary {
     activeVersionId: details.activeVersion.id,
     activeVersionNumber: details.activeVersion.versionNumber,
     bodySha256: details.activeVersion.bodySha256,
+    shell: details.activeVersion.shell,
+    compatibility: details.activeVersion.compatibility,
     updatedAt: details.definition.updatedAt,
   };
 }
@@ -126,6 +130,8 @@ function fixtureApi(initial: PersonalScriptDetails | null = null): PersonalScrip
       parameterNames: [],
       scanWarnings: [],
       timeoutSeconds: 30,
+      shell: 'posix_sh',
+      compatibility: { osFamilies: ['linux', 'bsd'], requiredCommands: ['sh'] },
     })),
     confirmPersonalScriptRun: vi.fn(async () => ({
       operationRunId: 'preview-1',
@@ -175,7 +181,7 @@ describe('ScriptCenter', () => {
     const { unmount } = render(<ScriptCenter apiClient={api} servers={[server]} serverId={server.id} />);
 
     await user.click(screen.getByRole('button', { name: '新建脚本' }));
-    const body = screen.getByLabelText('Shell 脚本正文');
+    const body = screen.getByLabelText('脚本正文');
     await user.clear(body);
     await user.type(body, 'echo script-browser-canary');
     await user.type(screen.getByLabelText('脚本名称'), '浏览器泄漏检查');

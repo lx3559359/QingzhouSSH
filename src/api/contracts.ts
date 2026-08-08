@@ -321,6 +321,7 @@ export interface CustomExecutionRequest {
   content: string;
   timeoutSeconds: number;
   dangerousConfirmed: boolean;
+  shell: ScriptShell;
 }
 
 export interface ExecutionParameter {
@@ -377,6 +378,13 @@ export interface ScriptScanSummary {
   warnings: ScriptScanWarning[];
 }
 
+export type ScriptShell = 'posix_sh' | 'bash' | 'powershell';
+
+export interface ScriptCompatibility {
+  osFamilies: string[];
+  requiredCommands: string[];
+}
+
 export interface PersonalScriptDefinition {
   id: string;
   title: string;
@@ -399,6 +407,8 @@ export interface PersonalScriptVersion {
   parameters: ParameterDefinition[];
   scanSummary: ScriptScanSummary;
   timeoutSeconds: number;
+  shell: ScriptShell;
+  compatibility: ScriptCompatibility;
   createdAt: number;
 }
 
@@ -417,6 +427,8 @@ export interface PersonalScriptSummary {
   activeVersionId: string;
   activeVersionNumber: number;
   bodySha256: string;
+  shell: ScriptShell;
+  compatibility: ScriptCompatibility;
   updatedAt: number;
 }
 
@@ -435,12 +447,14 @@ export interface CreatePersonalScriptRequest {
   body: string;
   parameters: ParameterDefinition[];
   timeoutSeconds: number;
+  shell: ScriptShell;
 }
 
 export interface SavePersonalScriptVersionRequest {
   body: string;
   parameters: ParameterDefinition[];
   timeoutSeconds: number;
+  shell: ScriptShell;
 }
 
 export interface UpdatePersonalScriptMetadataRequest {
@@ -473,6 +487,8 @@ export interface PersonalScriptRunPreview {
   parameterNames: string[];
   scanWarnings: ScriptScanWarning[];
   timeoutSeconds: number;
+  shell: ScriptShell;
+  compatibility: ScriptCompatibility;
 }
 
 export interface ConfirmPersonalScriptRunRequest {

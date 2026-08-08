@@ -21,6 +21,7 @@ interface ScriptCenterProps {
   serverId: string;
   builtInTasks?: TaskAvailability[];
   onChooseBuiltIn?: () => void;
+  onDirtyChange?: (dirty: boolean) => void;
 }
 
 const emptyDraft = (): ScriptEditorDraft => ({
@@ -30,6 +31,7 @@ const emptyDraft = (): ScriptEditorDraft => ({
   body: '#!/bin/sh\nset -eu\n\n',
   parameters: [],
   timeoutSeconds: 300,
+  shell: 'posix_sh',
 });
 
 function draftFrom(details: PersonalScriptDetails): ScriptEditorDraft {
@@ -40,10 +42,11 @@ function draftFrom(details: PersonalScriptDetails): ScriptEditorDraft {
     body: details.activeVersion.body,
     parameters: details.activeVersion.parameters,
     timeoutSeconds: details.activeVersion.timeoutSeconds,
+    shell: details.activeVersion.shell,
   };
 }
 
-export function ScriptCenter({ apiClient, servers, serverId, builtInTasks = [], onChooseBuiltIn }: ScriptCenterProps) {
+export function ScriptCenter({ apiClient, servers, serverId, builtInTasks = [], onChooseBuiltIn, onDirtyChange }: ScriptCenterProps) {
   const [scope, setScope] = useState<'personal' | 'builtin'>('personal');
   const [scripts, setScripts] = useState<PersonalScriptSummary[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -86,6 +89,17 @@ export function ScriptCenter({ apiClient, servers, serverId, builtInTasks = [], 
     // The explicit search button avoids remote requests on every keystroke.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [favoritesOnly]);
+
+  useEffect(() => {
+    onDirtyChange?.(dirty);
+    if (!dirty) return undefined;
+    const protectUnsavedChanges = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = '';
+    };
+    window.addEventListener('beforeunload', protectUnsavedChanges);
+    return () => window.removeEventListener('beforeunload', protectUnsavedChanges);
+  }, [dirty, onDirtyChange]);
 
   async function selectScript(scriptId: string) {
     if (dirty && !window.confirm('当前修改尚未保存，确定离开吗？')) return;
@@ -131,6 +145,7 @@ export function ScriptCenter({ apiClient, servers, serverId, builtInTasks = [], 
           body: draft.body,
           parameters: draft.parameters,
           timeoutSeconds: draft.timeoutSeconds,
+          shell: draft.shell,
         });
         const refreshed = await apiClient.getPersonalScriptForEditor(details.definition.id);
         if (!refreshed) throw new Error('保存后无法重新读取脚本');

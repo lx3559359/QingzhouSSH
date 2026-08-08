@@ -51,6 +51,13 @@ export function TaskPage() {
   const [scriptRunDetails, setScriptRunDetails] = useState<PersonalScriptDetails | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<UserFacingError | null>(null);
+  const [scriptDirty, setScriptDirty] = useState(false);
+
+  function switchView(next: 'library' | 'scripts' | 'advanced') {
+    if (view === 'scripts' && next !== 'scripts' && scriptDirty
+      && !window.confirm('个人脚本还有未保存修改，确定离开吗？')) return;
+    setView(next);
+  }
 
   useEffect(() => {
     api.listServers()
@@ -320,9 +327,9 @@ export function TaskPage() {
       </header>
 
       <div className="task-view-switch" aria-label="任务模式">
-        <button type="button" className={view === 'library' ? 'is-active' : ''} onClick={() => setView('library')}>工具库</button>
-        <button type="button" className={view === 'scripts' ? 'is-active' : ''} onClick={() => setView('scripts')}>我的脚本</button>
-        <button type="button" className={view === 'advanced' ? 'is-active' : ''} onClick={() => setView('advanced')}>高级执行</button>
+        <button type="button" className={view === 'library' ? 'is-active' : ''} onClick={() => switchView('library')}>工具库</button>
+        <button type="button" className={view === 'scripts' ? 'is-active' : ''} onClick={() => switchView('scripts')}>我的脚本</button>
+        <button type="button" className={view === 'advanced' ? 'is-active' : ''} onClick={() => switchView('advanced')}>高级执行</button>
       </div>
 
       {error && (
@@ -334,9 +341,9 @@ export function TaskPage() {
       )}
 
       {view === 'scripts' ? (
-        <ScriptCenter apiClient={api} servers={servers} serverId={serverId} builtInTasks={tasks} onChooseBuiltIn={() => setView('library')} />
+        <ScriptCenter apiClient={api} servers={servers} serverId={serverId} builtInTasks={tasks} onChooseBuiltIn={() => switchView('library')} onDirtyChange={setScriptDirty} />
       ) : view === 'advanced' ? (
-        <AdvancedExecutionPanel servers={servers} serverId={serverId} />
+        <AdvancedExecutionPanel servers={servers} serverId={serverId} capabilities={capabilities} />
       ) : loading ? (
         <div className="silver-card loading-card" role="status"><SpinnerGap className="spin" />正在读取服务器能力和工具…</div>
       ) : servers.length === 0 ? (

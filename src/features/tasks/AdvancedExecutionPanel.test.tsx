@@ -6,7 +6,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const apiMocks = vi.hoisted(() => ({ startCustomExecution: vi.fn(), cancelExecution: vi.fn() }));
 vi.mock('../../api/tauri', () => ({ api: apiMocks }));
 
-import type { ExecutionDetails, ServerProfile } from '../../api/contracts';
+import type { ExecutionDetails, ServerProfile, SystemCapabilities } from '../../api/contracts';
 import { AdvancedExecutionPanel } from './AdvancedExecutionPanel';
 
 const servers: ServerProfile[] = [{ id: 'server-1', name: 'Anolis 运维机', host: '10.0.0.6', port: 22, username: 'ops', authKind: 'password', credentialId: 'credential-1' }];
@@ -42,7 +42,7 @@ describe('AdvancedExecutionPanel', () => {
     expect(within(dialog).queryByText(secretScript)).not.toBeInTheDocument();
     await user.click(within(dialog).getByRole('button', { name: '确认并运行' }));
 
-    await waitFor(() => expect(apiMocks.startCustomExecution).toHaveBeenCalledWith('server-1', { mode: 'script', content: secretScript, timeoutSeconds: 90, dangerousConfirmed: true }, expect.any(Function)));
+    await waitFor(() => expect(apiMocks.startCustomExecution).toHaveBeenCalledWith('server-1', { mode: 'script', content: secretScript, timeoutSeconds: 90, dangerousConfirmed: true, shell: 'posix_sh' }, expect.any(Function)));
     expect(await screen.findByText(/done/)).toBeVisible();
     expect(localSpy).not.toHaveBeenCalled();
     localSpy.mockRestore();
@@ -60,5 +60,19 @@ describe('AdvancedExecutionPanel', () => {
     await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: '确认并运行' }));
     await user.click(await screen.findByRole('button', { name: '取消执行' }));
     expect(apiMocks.cancelExecution).toHaveBeenCalledWith('advanced-running');
+  });
+
+  it('disables advanced execution when capability probing finds no non-interactive shell', () => {
+    const capabilities: SystemCapabilities = {
+      osId: 'unknown', osFamily: 'unknown', versionId: null, packageManager: null,
+      serviceManager: 'unknown', architecture: 'unknown', shell: 'unknown', commands: [],
+      services: [], containers: [], interfaces: [], dnsServers: [], currentTimezone: null,
+      currentTime: null, ntpEnabled: null, ntpSynchronized: null, timezones: [],
+    };
+    render(<AdvancedExecutionPanel servers={servers} serverId="server-1" capabilities={capabilities} />);
+
+    expect(screen.getByLabelText('执行 Shell')).toBeDisabled();
+    expect(screen.getByRole('button', { name: '检查并运行' })).toBeDisabled();
+    expect(screen.getByText(/没有可用的非交互 Shell/)).toBeVisible();
   });
 });

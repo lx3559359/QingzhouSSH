@@ -78,6 +78,7 @@ impl ExecutionNodeAdapter {
                             content: content.clone(),
                             timeout_seconds: *timeout_seconds,
                             dangerous_confirmed,
+                            shell: crate::domain::script::ScriptShell::PosixSh,
                         },
                         &mut capture,
                     )

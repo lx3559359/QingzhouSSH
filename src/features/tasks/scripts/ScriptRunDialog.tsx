@@ -84,6 +84,7 @@ export function ScriptRunDialog({ apiClient, script, serverId, serverName, onClo
         <dl className="script-run-facts">
           <div><dt>脚本</dt><dd>{script.definition.title} · v{script.activeVersion.versionNumber}</dd></div>
           <div><dt>目标服务器</dt><dd>{serverName}</dd></div>
+          <div><dt>Shell</dt><dd>{script.activeVersion.shell === 'posix_sh' ? 'POSIX sh' : script.activeVersion.shell === 'bash' ? 'Bash' : 'PowerShell'}</dd></div>
         </dl>
 
         {!preview && (
@@ -100,6 +101,7 @@ export function ScriptRunDialog({ apiClient, script, serverId, serverName, onClo
               <div><dt>正文摘要</dt><dd>{preview.lineCount} 行 · {preview.characterCount} 字符</dd></div>
               <div><dt>SHA-256</dt><dd><code>{preview.bodySha256.slice(0, 16)}…</code></dd></div>
               <div><dt>超时</dt><dd>{preview.timeoutSeconds} 秒</dd></div>
+              <div><dt>Shell</dt><dd>{preview.shell === 'posix_sh' ? 'POSIX sh' : preview.shell === 'bash' ? 'Bash' : 'PowerShell'}</dd></div>
               <div><dt>扫描提示</dt><dd>{preview.scanWarnings.length} 项</dd></div>
             </dl>
             {preview.scanWarnings.length > 0 && <ul>{preview.scanWarnings.map((warning) => <li key={warning.code}>第 {warning.lineNumber} 行：{warning.message}</li>)}</ul>}

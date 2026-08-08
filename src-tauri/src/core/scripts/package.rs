@@ -9,18 +9,20 @@ use uuid::Uuid;
 use crate::{
     core::{
         scripts::validation::{
-            scan_script_body, validate_script_metadata, validate_script_parameters,
+            scan_script_body_for, validate_script_metadata, validate_script_parameters,
         },
         tasks::ParameterDefinition,
     },
     domain::{
         execution::now_millis,
-        script::{NewPersonalScript, NewScriptVersion, ScriptDetails},
+        script::{
+            NewPersonalScript, NewScriptVersion, ScriptCompatibility, ScriptDetails, ScriptShell,
+        },
     },
     error::{AppError, AppResult},
 };
 
-const SCRIPT_PACKAGE_SCHEMA_VERSION: u32 = 1;
+const SCRIPT_PACKAGE_SCHEMA_VERSION: u32 = 2;
 const MAX_SCRIPT_PACKAGE_BYTES: usize = 2 * 1024 * 1024;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -47,6 +49,10 @@ struct ScriptPackageDefinition {
     tags: Vec<String>,
     body: String,
     parameters: Vec<ParameterDefinition>,
+    #[serde(default)]
+    shell: Option<ScriptShell>,
+    #[serde(default)]
+    compatibility: Option<ScriptCompatibility>,
 }
 
 pub fn import_script_package(bytes: &[u8]) -> AppResult<NewPersonalScript> {
@@ -62,9 +68,9 @@ pub fn import_script_package(bytes: &[u8]) -> AppResult<NewPersonalScript> {
         .get("schemaVersion")
         .and_then(Value::as_u64)
         .unwrap_or_default();
-    if schema_version != u64::from(SCRIPT_PACKAGE_SCHEMA_VERSION) {
+    if !matches!(schema_version, 1 | 2) {
         return Err(AppError::UnsupportedScriptPackage(format!(
-            "仅支持 schemaVersion 1，当前为 {schema_version}"
+            "仅支持 schemaVersion 1 或 2，当前为 {schema_version}"
         )));
     }
     let package: ScriptPackage = serde_json::from_value(raw)
@@ -76,11 +82,21 @@ pub fn import_script_package(bytes: &[u8]) -> AppResult<NewPersonalScript> {
     )?;
     validate_script_parameters(&package.script.parameters)?;
     reject_sensitive_body(&package.script.body)?;
-    let scan = scan_script_body(&package.script.body)?;
+    let shell = package.script.shell.unwrap_or_default();
+    let scan = scan_script_body_for(shell, &package.script.body)?;
     let parameters = serde_json::to_value(package.script.parameters)
         .map_err(|error| AppError::Serialization(error.to_string()))?;
     let scan_summary =
         serde_json::to_value(scan).map_err(|error| AppError::Serialization(error.to_string()))?;
+    let compatibility = package
+        .script
+        .compatibility
+        .unwrap_or_else(|| ScriptCompatibility::for_shell(shell));
+    if compatibility != ScriptCompatibility::for_shell(shell) {
+        return Err(AppError::Validation(
+            "脚本包兼容性声明必须与 Shell 一致".into(),
+        ));
+    }
     Ok(NewPersonalScript {
         title: package.script.title,
         category: package.script.category,
@@ -92,6 +108,8 @@ pub fn import_script_package(bytes: &[u8]) -> AppResult<NewPersonalScript> {
             parameters,
             scan_summary,
             timeout_seconds: 300,
+            shell,
+            compatibility,
         },
     })
 }
@@ -112,7 +130,7 @@ pub async fn export_script_package(
         serde_json::from_value(details.active_version.parameters.clone())
             .map_err(|_| AppError::Validation("脚本参数定义格式无效".into()))?;
     validate_script_parameters(&parameters)?;
-    scan_script_body(&details.active_version.body)?;
+    scan_script_body_for(details.active_version.shell, &details.active_version.body)?;
 
     let package = ScriptPackage {
         schema_version: SCRIPT_PACKAGE_SCHEMA_VERSION,
@@ -123,6 +141,8 @@ pub async fn export_script_package(
             tags: details.definition.tags.clone(),
             body: details.active_version.body.clone(),
             parameters,
+            shell: Some(details.active_version.shell),
+            compatibility: Some(details.active_version.compatibility.clone()),
         },
     };
     let bytes = serde_json::to_vec_pretty(&package)

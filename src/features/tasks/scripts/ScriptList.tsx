@@ -34,7 +34,7 @@ export function ScriptList({ scripts, selectedId, loading, onSelect, onCopy }: S
               <strong>{script.title}</strong>
               {script.isFavorite && <Star weight="fill" aria-label="已收藏" />}
             </span>
-            <span>{script.category} · v{script.activeVersionNumber}</span>
+            <span>{script.category} · v{script.activeVersionNumber} · {script.shell === 'posix_sh' ? 'POSIX sh' : script.shell === 'bash' ? 'Bash' : 'PowerShell'}</span>
             <span className={`script-state ${script.isEnabled ? 'is-enabled' : ''}`}>
               {script.isEnabled ? '已启用' : '未启用'}
             </span>

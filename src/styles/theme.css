@@ -3882,6 +3882,20 @@ select {
   margin-top: 22px;
 }
 
+.script-advisory {
+  display: grid;
+  gap: 8px;
+  padding: 13px 15px;
+  border: 1px solid #e2b36e;
+  border-radius: 11px;
+  background: #fff3dc;
+  color: #70491b;
+}
+
+.script-advisory > header { display: flex; align-items: center; gap: 8px; }
+.script-advisory ul { display: grid; gap: 5px; margin: 0; padding-left: 22px; font-size: 0.74rem; }
+.script-advisory small { color: #81633f; }
+
 .transfer-queue {
   display: grid;
   gap: 14px;

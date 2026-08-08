@@ -10,6 +10,7 @@ use crate::{
         ParameterDefinition, ParameterKind, PrivilegeRequirement, RiskLevel, TaskCategory,
         TaskDefinition, ValidatedParameters,
     },
+    domain::script::ScriptShell,
     error::{AppError, AppResult},
 };
 
@@ -107,6 +108,10 @@ pub fn validate_script_parameter_values(
 }
 
 pub fn scan_script_body(body: &str) -> AppResult<ScriptScanSummary> {
+    scan_script_body_for(ScriptShell::PosixSh, body)
+}
+
+pub fn scan_script_body_for(shell: ScriptShell, body: &str) -> AppResult<ScriptScanSummary> {
     validate_script_body(body)?;
     let mut warnings = Vec::new();
     for (index, line) in body.lines().enumerate() {
@@ -119,6 +124,47 @@ pub fn scan_script_body(body: &str) -> AppResult<ScriptScanSummary> {
             "检测到递归强制删除，请确认目标路径和影响范围",
             line_number,
         );
+        if shell == ScriptShell::PowerShell {
+            push_warning(
+                &mut warnings,
+                lower.contains("remove-item")
+                    && lower.contains("-recurse")
+                    && lower.contains("-force"),
+                "recursive_delete",
+                "检测到 PowerShell 递归强制删除，请确认目标路径和影响范围",
+                line_number,
+            );
+            push_warning(
+                &mut warnings,
+                lower.contains("format-volume") || lower.contains("clear-disk"),
+                "disk_write",
+                "检测到 PowerShell 磁盘格式化或清理操作",
+                line_number,
+            );
+            push_warning(
+                &mut warnings,
+                lower.contains("set-netipaddress")
+                    || lower.contains("new-netipaddress")
+                    || lower.contains("new-netroute"),
+                "network_change",
+                "检测到 Windows 网络配置操作，可能导致连接中断",
+                line_number,
+            );
+            push_warning(
+                &mut warnings,
+                lower.contains("new-netfirewallrule") || lower.contains("set-netfirewallprofile"),
+                "firewall_change",
+                "检测到 Windows 防火墙配置操作",
+                line_number,
+            );
+            push_warning(
+                &mut warnings,
+                lower.contains("invoke-expression") || lower.contains("iex "),
+                "dynamic_execution",
+                "检测到动态 PowerShell 代码执行，难以静态审查",
+                line_number,
+            );
+        }
         push_warning(
             &mut warnings,
             (lower.contains("dd ") && lower.contains("of=/dev/"))

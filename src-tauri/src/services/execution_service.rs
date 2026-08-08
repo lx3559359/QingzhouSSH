@@ -8,14 +8,16 @@ use uuid::Uuid;
 
 use crate::{
     core::{
+        scripts::environment::render_script_launcher,
         sftp::sha256_local_file,
         ssh::executor::{execute_streaming, CommandRequest, EventSink},
         system_probe::SystemCapabilities,
         tasks::{
             built_in_catalog, evaluate_task_availability, metadata_for, probe_privilege,
-            remediation_for, render_command, select_implementation, validate_parameters,
-            PrivilegeRequirement, RenderedTaskStep, RiskLevel, TaskAvailabilityState,
-            TaskDefinition, TaskRemediationSummary, ToolLibraryMetadata, ValidatedParameters,
+            remediation_for, render_command, select_implementation, shell_quote,
+            validate_parameters, PrivilegeRequirement, RenderedTaskStep, RiskLevel,
+            TaskAvailabilityState, TaskDefinition, TaskRemediationSummary, ToolLibraryMetadata,
+            ValidatedParameters,
         },
     },
     domain::{
@@ -24,6 +26,7 @@ use crate::{
             now_millis, ExecutionDetails, ExecutionFile, ExecutionParameter, ExecutionStatus,
             FinishExecution, NewExecution,
         },
+        script::ScriptShell,
     },
     error::{AppError, AppResult},
     repositories::execution_repository::ExecutionRepository,
@@ -82,10 +85,26 @@ pub struct CustomExecutionRequest {
     pub content: String,
     pub timeout_seconds: u64,
     pub dangerous_confirmed: bool,
+    #[serde(default)]
+    pub shell: ScriptShell,
 }
 
 impl CustomExecutionRequest {
     pub fn render(&self) -> AppResult<String> {
+        let executable = match self.shell {
+            ScriptShell::PosixSh => "sh",
+            ScriptShell::Bash => "bash",
+            ScriptShell::PowerShell => "powershell",
+        };
+        self.render_with_executable(executable)
+    }
+
+    pub fn render_for(&self, capabilities: &SystemCapabilities) -> AppResult<String> {
+        let executable = self.shell.executable(capabilities)?;
+        self.render_with_executable(executable)
+    }
+
+    fn render_with_executable(&self, executable: &str) -> AppResult<String> {
         if !self.dangerous_confirmed {
             return Err(AppError::Validation("高级命令或脚本必须二次确认".into()));
         }
@@ -100,17 +119,45 @@ impl CustomExecutionRequest {
                 "高级命令超时必须在 1 到 3600 秒之间".into(),
             ));
         }
+        if let Some(pattern) = obvious_interactive_pattern(&self.content) {
+            return Err(AppError::Compatibility(format!(
+                "检测到需要交互输入的模式“{pattern}”；高级执行不提供 PTY 或持续 stdin"
+            )));
+        }
         match self.mode {
-            CustomExecutionMode::Command => Ok(self.content.clone()),
-            CustomExecutionMode::Script => {
-                let delimiter = format!("__QZ_SCRIPT_{}__", Uuid::new_v4().simple());
-                Ok(format!(
-                    "sh -s <<'{delimiter}'\n{}\n{delimiter}",
-                    self.content
-                ))
+            CustomExecutionMode::Command if self.shell == ScriptShell::PosixSh => {
+                Ok(self.content.clone())
             }
+            CustomExecutionMode::Command if self.shell == ScriptShell::Bash => {
+                Ok(format!("bash -lc {}", shell_quote(&self.content)))
+            }
+            CustomExecutionMode::Command | CustomExecutionMode::Script => render_script_launcher(
+                self.shell,
+                executable,
+                &self.content,
+                &ValidatedParameters::default(),
+            ),
         }
     }
+}
+
+fn obvious_interactive_pattern(content: &str) -> Option<&'static str> {
+    let lower = content.to_ascii_lowercase();
+    let tokens = [
+        ("read-host", "Read-Host"),
+        ("read -p", "read -p"),
+        ("passwd", "passwd"),
+        ("tail -f", "tail -f"),
+        (" less ", "less"),
+        (" vim ", "vim"),
+        (" nano ", "nano"),
+    ];
+    if lower.contains("sudo ") && !lower.contains("sudo -n ") {
+        return Some("sudo（缺少 -n）");
+    }
+    tokens
+        .into_iter()
+        .find_map(|(pattern, label)| lower.contains(pattern).then_some(label))
 }
 
 #[derive(Clone, Default)]
@@ -320,7 +367,8 @@ impl ExecutionService {
         request: CustomExecutionRequest,
         events: &mut E,
     ) -> AppResult<ExecutionDetails> {
-        let command = request.render()?;
+        let connected = self.connector.connect(server_id).await?;
+        let command = request.render_for(&connected.capabilities)?;
         let mode = match request.mode {
             CustomExecutionMode::Command => "command",
             CustomExecutionMode::Script => "script",
@@ -336,6 +384,11 @@ impl ExecutionService {
                     ExecutionParameter {
                         name: "mode".into(),
                         display_value: mode.into(),
+                        sensitive: false,
+                    },
+                    ExecutionParameter {
+                        name: "shell".into(),
+                        display_value: request.shell.as_str().into(),
                         sensitive: false,
                     },
                     ExecutionParameter {
