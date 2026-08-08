@@ -119,7 +119,7 @@ $startInfo = @{
 $fixtureProcess = Start-Process @startInfo
 Set-Content -LiteralPath $pidFile -Value $fixtureProcess.Id -Encoding ascii
 
-$deadline = [DateTime]::UtcNow.AddSeconds(15)
+$deadline = [DateTime]::UtcNow.AddSeconds(30)
 $ready = $false
 while ([DateTime]::UtcNow -lt $deadline -and -not $fixtureProcess.HasExited) {
   $client = [System.Net.Sockets.TcpClient]::new()
