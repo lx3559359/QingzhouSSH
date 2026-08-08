@@ -105,6 +105,24 @@ impl CustomExecutionRequest {
     }
 
     fn render_with_executable(&self, executable: &str) -> AppResult<String> {
+        self.validate()?;
+        match self.mode {
+            CustomExecutionMode::Command if self.shell == ScriptShell::PosixSh => {
+                Ok(self.content.clone())
+            }
+            CustomExecutionMode::Command if self.shell == ScriptShell::Bash => {
+                Ok(format!("bash -lc {}", shell_quote(&self.content)))
+            }
+            CustomExecutionMode::Command | CustomExecutionMode::Script => render_script_launcher(
+                self.shell,
+                executable,
+                &self.content,
+                &ValidatedParameters::default(),
+            ),
+        }
+    }
+
+    fn validate(&self) -> AppResult<()> {
         if !self.dangerous_confirmed {
             return Err(AppError::Validation("高级命令或脚本必须二次确认".into()));
         }
@@ -124,20 +142,7 @@ impl CustomExecutionRequest {
                 "检测到需要交互输入的模式“{pattern}”；高级执行不提供 PTY 或持续 stdin"
             )));
         }
-        match self.mode {
-            CustomExecutionMode::Command if self.shell == ScriptShell::PosixSh => {
-                Ok(self.content.clone())
-            }
-            CustomExecutionMode::Command if self.shell == ScriptShell::Bash => {
-                Ok(format!("bash -lc {}", shell_quote(&self.content)))
-            }
-            CustomExecutionMode::Command | CustomExecutionMode::Script => render_script_launcher(
-                self.shell,
-                executable,
-                &self.content,
-                &ValidatedParameters::default(),
-            ),
-        }
+        Ok(())
     }
 }
 
@@ -367,8 +372,7 @@ impl ExecutionService {
         request: CustomExecutionRequest,
         events: &mut E,
     ) -> AppResult<ExecutionDetails> {
-        let connected = self.connector.connect(server_id).await?;
-        let command = request.render_for(&connected.capabilities)?;
+        request.validate()?;
         let mode = match request.mode {
             CustomExecutionMode::Command => "command",
             CustomExecutionMode::Script => "script",
@@ -404,11 +408,22 @@ impl ExecutionService {
                 ],
             })
             .await?;
-        self.run_command(
+        let connected = match self.connector.connect(server_id).await {
+            Ok(connected) => connected,
+            Err(error) => return self.fail_before_run(execution.id, error, events).await,
+        };
+        let command = match request.render_for(&connected.capabilities) {
+            Ok(command) => command,
+            Err(error) => return self.fail_before_run(execution.id, error, events).await,
+        };
+        self.run_connected_command(
             execution.id,
             command,
+            connected,
             Duration::from_secs(request.timeout_seconds),
+            DEFAULT_OUTPUT_LIMIT,
             events,
+            None,
         )
         .await
     }
@@ -597,17 +612,6 @@ impl ExecutionService {
             None,
         )
         .await
-    }
-
-    async fn run_command<E: EventSink>(
-        &self,
-        execution_id: Uuid,
-        command: String,
-        timeout: Duration,
-        events: &mut E,
-    ) -> AppResult<ExecutionDetails> {
-        self.run_command_with_limit(execution_id, command, timeout, DEFAULT_OUTPUT_LIMIT, events)
-            .await
     }
 
     async fn run_command_with_limit<E: EventSink>(

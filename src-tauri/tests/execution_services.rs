@@ -62,7 +62,7 @@ fn custom_commands_and_scripts_are_noninteractive_and_require_confirmation() {
         shell: qingzhou_ssh_lib::domain::script::ScriptShell::PosixSh,
     };
     let rendered = script.render().unwrap();
-    assert!(rendered.starts_with("sh -s <<'__QZ_SCRIPT_"));
+    assert!(rendered.starts_with("env sh -s <<'QZ_SCRIPT_"));
     assert!(rendered.contains("set -eu"));
     assert!(!rendered.contains("base64 -d"));
 
