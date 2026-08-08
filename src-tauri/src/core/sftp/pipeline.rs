@@ -20,8 +20,7 @@ pub fn effective_read_chunk(server_packet_len: Option<u64>, server_read_len: Opt
         .or(packet_data_len)
         .unwrap_or(DEFAULT_READ_CHUNK_BYTES)
         .min(packet_data_len.unwrap_or(MAX_READ_CHUNK_BYTES))
-        .min(MAX_READ_CHUNK_BYTES)
-        .max(1)
+        .clamp(1, MAX_READ_CHUNK_BYTES)
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]

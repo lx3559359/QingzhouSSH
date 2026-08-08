@@ -286,6 +286,7 @@ pub async fn upload<E: EventSink>(
     result
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn upload_to_partial<E: EventSink>(
     ssh: &AuthenticatedSshSession,
     capabilities: &SystemCapabilities,
@@ -478,6 +479,7 @@ struct LocalDownloadTarget<'a> {
     overwrite: bool,
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn download_to_partial<E: EventSink>(
     ssh: &AuthenticatedSshSession,
     sftp: &SftpSession,
