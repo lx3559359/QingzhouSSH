@@ -15,6 +15,7 @@ if ($package.version -notmatch '^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$') {
   throw "Version is not SemVer: $($package.version)"
 }
 if ($release.projectName -ne 'QingzhouSSH') { throw 'Unexpected public project name' }
+if ($release.releaseSchemaVersion -ne 2) { throw 'Multiplatform releases must use metadata schema 2' }
 if ($release.github.repository -ne 'lx3559359/QingzhouSSH') { throw 'Unexpected GitHub repository' }
 if ($release.modelscope.repository -ne 'QingzhouSSH') { throw 'Unexpected ModelScope repository' }
 if ($release.modelscope.repositoryType -ne 'model') { throw 'ModelScope release mirror must support public single-file downloads' }

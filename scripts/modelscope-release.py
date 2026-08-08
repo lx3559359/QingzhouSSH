@@ -74,7 +74,7 @@ def ensure_repository(api: Any, repo_id: str) -> None:
             visibility="public",
             license="Apache-2.0",
             chinese_name="轻舟 SSH 发布镜像",
-            description="QingzhouSSH Windows 安装包、便携包与在线更新清单",
+            description="QingzhouSSH Windows、macOS、Linux 安装包与在线更新清单",
         )
 
 

@@ -21,8 +21,46 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  release-preflight:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Validate tagged release credentials before native builds
+        if: ${{ startsWith(github.ref, 'refs/tags/v') }}
+        shell: pwsh
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          MODELSCOPE_API_TOKEN: ${{ secrets.MODELSCOPE_API_TOKEN }}
+          QINGZHOU_MODELSCOPE_NAMESPACE: ${{ vars.QINGZHOU_MODELSCOPE_NAMESPACE }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          foreach ($name in @(
+            'TAURI_SIGNING_PRIVATE_KEY',
+            'TAURI_SIGNING_PRIVATE_KEY_PASSWORD',
+            'APPLE_CERTIFICATE',
+            'APPLE_CERTIFICATE_PASSWORD',
+            'APPLE_SIGNING_IDENTITY',
+            'APPLE_ID',
+            'APPLE_PASSWORD',
+            'APPLE_TEAM_ID',
+            'MODELSCOPE_API_TOKEN',
+            'QINGZHOU_MODELSCOPE_NAMESPACE'
+          )) {
+            $value = [Environment]::GetEnvironmentVariable($name)
+            if ([string]::IsNullOrWhiteSpace($value)) { throw "$name is not configured for tagged releases" }
+            if ($value[0] -eq [char]0xFEFF) { throw "$name begins with a UTF-8 BOM" }
+            if ($value -ne $value.Trim()) { throw "$name contains leading or trailing whitespace" }
+          }
+
   platform-native-checks:
     name: Native ${{ matrix.platform }}
+    needs: release-preflight
     runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
@@ -48,7 +86,7 @@ jobs:
             rustTarget: aarch64-unknown-linux-gnu
     env:
       CARGO_HOME: ${{ github.workspace }}/.local/cargo-home
-      CARGO_TARGET_DIR: ${{ github.workspace }}/target/${{ matrix.rustTarget }}
+      CARGO_TARGET_DIR: ${{ github.workspace }}/target
       PNPM_STORE_DIR: ${{ github.workspace }}/.local/pnpm-store
       QINGZHOU_DATA_ROOT: ${{ github.workspace }}/.local/ci-data
       QINGZHOU_MODELSCOPE_NAMESPACE: ${{ vars.QINGZHOU_MODELSCOPE_NAMESPACE }}
@@ -87,9 +125,46 @@ jobs:
         run: cargo check --locked --manifest-path ./src-tauri/Cargo.toml --all-targets --target ${{ matrix.rustTarget }}
 
       - name: Build native desktop executable
+        if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
         run: pnpm tauri build --debug --no-bundle --target ${{ matrix.rustTarget }}
 
+      - name: Build signed native bundle
+        if: ${{ startsWith(github.ref, 'refs/tags/v') }}
+        shell: pwsh
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
+          pnpm tauri build --bundles ${{ matrix.bundle }} --target ${{ matrix.rustTarget }}
+          $targetRelease = Join-Path $env:CARGO_TARGET_DIR '${{ matrix.rustTarget }}/release'
+          $arguments = @{
+            Platform = '${{ matrix.platform }}'
+            BundleRoot = (Join-Path $targetRelease 'bundle')
+            OutputDirectory = (Join-Path $env:GITHUB_WORKSPACE 'artifacts/native/${{ matrix.platform }}')
+          }
+          if ('${{ matrix.platform }}' -like 'windows-*') {
+            $arguments.BinaryPath = Join-Path $targetRelease 'qingzhou-ssh.exe'
+          }
+          & ./scripts/collect-native-release.ps1 @arguments
+
+      - name: Upload signed native artifacts
+        if: ${{ startsWith(github.ref, 'refs/tags/v') }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: QingzhouSSH-native-${{ matrix.platform }}
+          path: artifacts/native/${{ matrix.platform }}
+          if-no-files-found: error
+
   verify-build-publish:
+    needs: platform-native-checks
     runs-on: windows-2025
     env:
       CARGO_HOME: ${{ github.workspace }}\.local\cargo-home
@@ -212,6 +287,8 @@ jobs:
           & .\scripts\tests\desktop-ux.tests.ps1
           & .\scripts\tests\package-config.tests.ps1
           & .\scripts\tests\release-config.tests.ps1
+          & .\scripts\tests\native-release.tests.ps1
+          & .\scripts\tests\multiplatform-release.tests.ps1
           & .\scripts\tests\release-artifacts.tests.ps1
           & .\scripts\tests\release-pipeline.tests.ps1
           & .\scripts\tests\release-smoke.tests.ps1
@@ -236,19 +313,14 @@ jobs:
           & .\scripts\dev-env.ps1 -Quiet
           pnpm tauri build --debug --no-bundle
 
-      - name: Build signed NSIS bundle once
+      - name: Download all signed native artifacts
         if: ${{ startsWith(github.ref, 'refs/tags/v') }}
-        shell: pwsh
-        env:
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $PSNativeCommandUseErrorActionPreference = $true
-          & .\scripts\dev-env.ps1 -Quiet
-          pnpm tauri build --bundles nsis
+        uses: actions/download-artifact@v8
+        with:
+          pattern: QingzhouSSH-native-*
+          path: artifacts/native-download
 
-      - name: Assemble signed release
+      - name: Assemble signed six-platform release
         if: ${{ startsWith(github.ref, 'refs/tags/v') }}
         shell: pwsh
         env:
@@ -260,14 +332,13 @@ jobs:
           $version = (Get-Content -Raw -Encoding utf8 .\package.json | ConvertFrom-Json).version
           if ($env:GITHUB_REF_NAME -ne "v$version") { throw "Tag must equal v$version" }
           if ([string]::IsNullOrWhiteSpace($env:QINGZHOU_MODELSCOPE_NAMESPACE)) { throw 'QINGZHOU_MODELSCOPE_NAMESPACE is not configured' }
-          $nsis = Join-Path $env:CARGO_TARGET_DIR 'release\bundle\nsis'
-          $installer = Get-ChildItem -LiteralPath $nsis -Filter '*-setup.exe' -File | Select-Object -First 1
-          $signature = Get-ChildItem -LiteralPath $nsis -Filter '*.exe.sig' -File | Select-Object -First 1
-          if ($null -in @($installer, $signature)) { throw 'Tauri NSIS updater artifacts are incomplete' }
-          $portable = & .\scripts\package-portable.ps1 -ExecutablePath (Join-Path $env:CARGO_TARGET_DIR 'release\qingzhou-ssh.exe') -Version $version
           $releaseDir = Join-Path $env:QINGZHOU_ARTIFACTS_DIR "release\v$version"
           $publishedAt = [DateTimeOffset]::Parse((git show -s --format=%cI HEAD)).UtcDateTime.ToString('yyyy-MM-ddTHH:mm:ssZ')
-          & .\scripts\build-release.ps1 -InstallerPath $installer.FullName -UpdaterSignaturePath $signature.FullName -PortableArchivePath $portable -OutputDirectory $releaseDir -ModelScopeNamespace $env:QINGZHOU_MODELSCOPE_NAMESPACE -PublishedAt $publishedAt
+          & .\scripts\build-multiplatform-release.ps1 `
+            -NativeArtifactDirectory (Join-Path $env:QINGZHOU_ARTIFACTS_DIR 'native-download') `
+            -OutputDirectory $releaseDir `
+            -ModelScopeNamespace $env:QINGZHOU_MODELSCOPE_NAMESPACE `
+            -PublishedAt $publishedAt
           & .\scripts\verify-release.ps1 -ReleaseDirectory $releaseDir
           "QINGZHOU_VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           "QINGZHOU_RELEASE_DIR=$releaseDir" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append

@@ -20,6 +20,7 @@ foreach ($requiredText in @(
   'pnpm/action-setup@v6',
   'actions/setup-node@v6',
   'actions/upload-artifact@v7',
+  'actions/download-artifact@v8',
   'windows-2025',
   'windows-11-arm',
   'macos-15-intel',
@@ -34,6 +35,9 @@ foreach ($requiredText in @(
   'aarch64-unknown-linux-gnu',
   'libwebkit2gtk-4.1-dev',
   'pnpm tauri build --debug --no-bundle --target',
+  'pnpm tauri build --bundles ${{ matrix.bundle }} --target',
+  'scripts/collect-native-release.ps1',
+  'scripts\build-multiplatform-release.ps1',
   'pnpm install --frozen-lockfile',
   'pnpm test',
   'cargo clippy --locked',
@@ -53,13 +57,10 @@ foreach ($requiredText in @(
 )) {
   if (-not $workflow.Contains($requiredText)) { throw "Release workflow is missing: $requiredText" }
 }
-if ([regex]::Matches($workflow, 'pnpm tauri build --bundles nsis').Count -ne 1) {
-  throw 'Release workflow must build the signed NSIS bundle exactly once'
-}
-$preflightStart = $workflow.IndexOf('name: Preflight release credentials', [StringComparison]::Ordinal)
-$signedBuildStart = $workflow.IndexOf('name: Build signed NSIS bundle once', [StringComparison]::Ordinal)
+$preflightStart = $workflow.IndexOf('name: Validate tagged release credentials before native builds', [StringComparison]::Ordinal)
+$signedBuildStart = $workflow.IndexOf('name: Build signed native bundle', [StringComparison]::Ordinal)
 if ($preflightStart -lt 0 -or $signedBuildStart -lt 0 -or $preflightStart -gt $signedBuildStart) {
-  throw 'Tagged releases must validate every credential before signed build or publication'
+  throw 'Tagged releases must validate every credential before six-platform signed builds'
 }
 $artifactUploadStart = $workflow.IndexOf('name: Upload workflow artifact', [StringComparison]::Ordinal)
 $releaseSmokeStart = $workflow.IndexOf('name: Install, update and portable smoke', [StringComparison]::Ordinal)
@@ -70,6 +71,12 @@ $preflightBlock = $workflow.Substring($preflightStart, $signedBuildStart - $pref
 foreach ($requiredCredential in @(
   'secrets.TAURI_SIGNING_PRIVATE_KEY',
   'secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD',
+  'secrets.APPLE_CERTIFICATE',
+  'secrets.APPLE_CERTIFICATE_PASSWORD',
+  'secrets.APPLE_SIGNING_IDENTITY',
+  'secrets.APPLE_ID',
+  'secrets.APPLE_PASSWORD',
+  'secrets.APPLE_TEAM_ID',
   'secrets.MODELSCOPE_API_TOKEN',
   'vars.QINGZHOU_MODELSCOPE_NAMESPACE'
 )) {
@@ -168,4 +175,4 @@ try {
   }
 }
 
-Write-Output 'PASS: release pipeline builds once, smokes, mirrors and compares both sources'
+Write-Output 'PASS: release pipeline builds six native targets, smokes, mirrors and compares both sources'

@@ -2,7 +2,7 @@
 
 ## 环境要求
 
-- Windows 10/11 x64 与 PowerShell 5.1 或更高版本。
+- Windows 10/11、macOS 13+ 或 Ubuntu 22.04+；发布脚本需要 PowerShell 7，Windows 本地开发仍兼容 PowerShell 5.1 契约测试。
 - Rust stable（`russh 0.62` 最低要求 Rust 1.85）。
 - Node.js 与 `pnpm 10.14.0`。
 - 运行真实 SSH 夹具时需要 Python 3.12+ 和 `ssh-keygen`。
@@ -52,6 +52,8 @@ Tauri 调试构建（不生成安装包）：
 . .\scripts\dev-env.ps1
 pnpm tauri build --debug --no-bundle
 ```
+
+正式标签发布由 GitHub Actions 在六个原生运行器构建，不允许在单一主机交叉伪造平台包。固定目标是 Windows x86_64/ARM64 NSIS、macOS x86_64/ARM64 DMG 和 Linux x86_64/ARM64 AppImage。每个矩阵任务通过 `collect-native-release.ps1` 生成平台描述，汇总任务使用 `build-multiplatform-release.ps1` 创建 schema 2 双源清单，并由 `verify-multiplatform-release.ps1` 逐平台执行签名、哈希、大小、SBOM 和文件集合校验。
 
 ## 真实 SSH 集成测试
 
@@ -111,7 +113,7 @@ try {
 
 - 单个 stdout/stderr 事件最多 32 KiB，单次任务或日志捕获最多 32 MiB，历史摘要最多 8 KiB。
 - 日志路径必须是远端绝对 `.log` 或 `.gz` 路径；关键词最多 512 字节，上下文 0–20 行，结果上限 1–10,000，界面每页 50 条。
-- SFTP 以 64 KiB 分块，下载只能写入数据根目录下的 `downloads`；上传/下载完成前使用 `.partial` 临时文件，成功后执行 SHA-256 校验。
+- SFTP 使用最大 2 MiB 的协商数据块和最多 8 个有界流水请求，下载缓冲上限 16 MiB；持久队列最多 3 个全局工作器、每台服务器最多 2 个活动任务。下载只能写入数据根目录下的 `downloads`；上传/下载完成前使用 `.partial` 临时文件，校验后原子完成。
 - `cancelled` 表示已经确认本地执行通道终止；若无法确认远端进程是否停止，或应用重启时发现遗留 `running` 记录，则状态为 `uncertain`，不会误报成功。
 - 服务启动、停止、重启以及高级命令/脚本都要求二次确认。高级模式仍是一次性非交互执行，不提供 SSH 终端。
 

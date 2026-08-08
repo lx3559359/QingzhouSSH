@@ -1,17 +1,20 @@
 # 支持矩阵
 
-## Windows 客户端
+## 桌面客户端
 
 | 项目 | 支持状态 | 说明 |
 | --- | --- | --- |
-| Windows 11 x86_64 | 支持 | 安装版、便携版和在线更新的主要目标 |
-| Windows 10 x86_64 | 支持 | 需要系统可用的 WebView2 Runtime |
-| Windows ARM64 | 暂不支持 | 当前只发布 `windows-x86_64` 更新包 |
-| macOS / Linux 客户端 | 暂不支持 | 当前 UI、DPAPI、注册表和安装器均为 Windows 实现 |
+| Windows 10/11 x86_64 | 支持 | NSIS 安装版、便携版和在线更新已具备完整冒烟链路；需要 WebView2 Runtime |
+| Windows 11 ARM64 | 发布候选 | 原生 NSIS、便携版和在线更新已进入六平台 CI；正式支持以首次标签构建及 ARM64 实机安装/凭据/更新冒烟通过为准 |
+| macOS 13+ x86_64 / Apple Silicon | 发布候选 | 原生 DMG、Keychain、数据目录和 `.app.tar.gz` 在线更新已实现；正式支持以首次标签构建及两架构实机冒烟通过为准 |
+| Ubuntu 22.04+ x86_64 / ARM64 | 发布候选 | 原生 AppImage、Secret Service、XDG 数据目录和在线更新已实现；正式支持以首次标签构建及两架构实机冒烟通过为准 |
+| 其他 Windows、macOS 或 Linux 版本 | 尽力兼容 | 未进入固定发布矩阵，不承诺安装器、系统密钥环或 WebView 运行时兼容性 |
 
-安装版为 NSIS 当前用户安装，不要求管理员权限。Windows 的系统级 WebView2 安装、企业安全策略、代理和 SmartScreen 不由本项目控制。
+六个固定发布键为 `windows-x86_64-nsis`、`windows-aarch64-nsis`、`macos-x86_64-dmg`、`macos-aarch64-dmg`、`linux-x86_64-appimage` 和 `linux-aarch64-appimage`。Windows 使用 NSIS 当前用户安装；macOS 使用 DMG；Linux 使用 AppImage。标签发布必须在对应原生运行器构建、签名、汇总并逐平台验签，任一目标失败都会阻断整次发布。
 
-## Auto detection（远端 Linux 自动识别）
+“发布候选”表示代码、构建矩阵和发布契约已就绪，不等于已在本轮声明所有真实硬件与桌面环境均完成验收。企业安全策略、代理、SmartScreen、Gatekeeper、桌面 Secret Service 和系统 WebView 运行时不由项目控制。
+
+## Auto detection（远端系统自动识别）
 
 工具读取 `/etc/os-release`，再探测 `apt`、`dnf`、`yum`、`systemctl`、`service` 和任务所需命令。系统名称只是分类输入，真正能否执行某项功能以实时能力探测为准。
 
@@ -23,15 +26,19 @@
 | Anolis | RHEL | 已有国产系统探测夹具测试 |
 | openEuler | openEuler | 独立系统族，已有探测夹具测试 |
 | 其他 Linux | unknown | 可建立连接并显示探测结果；缺少能力的快捷任务会禁用或拒绝，不猜测包管理器 |
+| FreeBSD、OpenBSD、NetBSD、DragonFly BSD | BSD | 通过 `uname`、`pkg`/`service` 和命令能力探测；系统概览、磁盘、进程和服务清单使用固定 POSIX/BSD 适配器 |
+| Windows Server（OpenSSH + PowerShell） | Windows | 使用带边界的 PowerShell JSON 探测；系统概览、磁盘、进程和服务清单使用固定编码命令适配器 |
+| 其他远端系统 | unknown | 仅保留 SSH/SFTP 基础能力；快捷任务必须有明确能力匹配，否则禁用 |
 
-远端架构会通过 `uname -m` 展示。SSH 命令本身不限定 x86_64，但发布验收主要覆盖 x86_64 Linux 夹具；在 aarch64/ARM 服务器上应先用低风险系统概览确认命令兼容性。
+远端 Linux/BSD 架构通过 `uname -m` 展示，Windows 架构由 PowerShell 探测。SSH/SFTP 本身不限定 x86_64；快捷任务始终以系统族、远端 Shell、服务管理器和实时命令能力共同决定是否可用。
 
 ## SSH、日志与文件
 
 - 支持密码认证，以及 PEM/OpenSSH 格式的带口令私钥；当前不代理 Pageant、Windows OpenSSH Agent 或硬件令牌。
 - 首次主机密钥必须人工批准；指纹变化强制阻断。
 - 日志检索支持普通 `.log` 和 `.gz`，远端需要相应的 `grep`/`gzip`/`awk` 等能力。
-- 文件传输使用 SFTP；远端账号权限、SELinux、目录 ACL 和磁盘配额仍由服务器控制。
+- 文件传输使用 SFTP；支持 POSIX 根目录与 Windows SFTP 盘符根目录。远端账号权限、SELinux、目录 ACL 和磁盘配额仍由服务器控制。
+- 已认证 SSH 连接按服务器复用，各任务仍使用独立通道；失效连接会被淘汰，主机指纹和认证边界不变。
 - 服务任务优先使用探测到的 `systemctl` 或 `service`；工具不会自动提权，也不假定用户拥有 sudo/root 权限。
 
 ## Operations Engine V2 当前支持范围

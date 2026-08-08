@@ -15,7 +15,11 @@ if (-not $AllowLocalMachineMutation -and $env:CI -ne 'true') { throw 'Installer 
 
 $metadata = Get-Content -Raw -Encoding utf8 (Join-Path $releaseRoot 'release-metadata.json') | ConvertFrom-Json
 function File-ForRole([string]$Role) {
-  $record = @($metadata.files | Where-Object role -eq $Role)
+  $record = if ($metadata.schemaVersion -eq 2) {
+    @($metadata.files | Where-Object { $_.role -eq $Role -and $_.platform -eq 'windows-x86_64-nsis' })
+  } else {
+    @($metadata.files | Where-Object role -eq $Role)
+  }
   if ($record.Count -ne 1) { throw "Release role is missing: $Role" }
   return Join-Path $releaseRoot ([string]$record[0].name)
 }

@@ -89,7 +89,7 @@ async fn stages_with_the_selected_platform_package_extension() {
         .unwrap();
     assert_eq!(
         staged.relative_path,
-        "staged/0.2.0/QingzhouSSH-0.2.0-macos-aarch64-dmg.dmg"
+        "staged/0.2.0/QingzhouSSH-0.2.0-macos-aarch64-dmg.app.tar.gz"
     );
 }
 
@@ -122,7 +122,7 @@ async fn stages_only_signature_and_hash_verified_bytes() {
         staged,
         StagedUpdate {
             version: "0.2.0".into(),
-            relative_path: "staged/0.2.0/QingzhouSSH-0.2.0-windows-x86_64.nsis".into(),
+            relative_path: "staged/0.2.0/QingzhouSSH-0.2.0-windows-x86_64.exe".into(),
             sha256: release_for(&bytes).sha256.as_str().into(),
             size: bytes.len() as u64,
         }
@@ -176,7 +176,7 @@ async fn deletes_partial_data_when_signature_or_hash_verification_fails() {
         .into_iter()
         .filter(|path| {
             path.extension()
-                .is_some_and(|ext| ext == "partial" || ext == "nsis")
+                .is_some_and(|ext| ext == "partial" || ext == "exe")
         })
         .collect();
     assert!(

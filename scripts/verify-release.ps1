@@ -27,6 +27,12 @@ function Read-Json([string]$RelativePath) {
 }
 
 $metadata = Read-Json 'release-metadata.json'
+if ($metadata.schemaVersion -eq 2) {
+  $arguments = @{ ReleaseDirectory = $resolvedRelease }
+  if (-not [string]::IsNullOrWhiteSpace($UpdaterPublicKey)) { $arguments.UpdaterPublicKey = $UpdaterPublicKey }
+  & (Join-Path $PSScriptRoot 'verify-multiplatform-release.ps1') @arguments
+  return
+}
 if ($metadata.schemaVersion -ne 1 -or $metadata.project -ne 'QingzhouSSH' -or $metadata.platform -ne 'windows-x86_64') {
   throw 'Release metadata contract is invalid'
 }
@@ -60,13 +66,10 @@ if ([string]::IsNullOrWhiteSpace($UpdaterPublicKey)) {
   $UpdaterPublicKey = [string]$tauriConfig.plugins.updater.pubkey
 }
 if ([string]::IsNullOrWhiteSpace($UpdaterPublicKey)) { throw 'Updater public key is not configured' }
-$signatureVerification = & cargo run --quiet `
-  --manifest-path (Join-Path $projectRoot 'src-tauri\Cargo.toml') `
-  --example verify_release_signature `
-  -- $UpdaterPublicKey $signaturePath $updaterPath 2>&1
-if ($LASTEXITCODE -ne 0) {
-  throw "Updater signature cryptographic verification failed: $($signatureVerification -join [Environment]::NewLine)"
-}
+& (Join-Path $PSScriptRoot 'verify-update-signature.ps1') `
+  -UpdaterPublicKey $UpdaterPublicKey `
+  -SignaturePath $signaturePath `
+  -ArtifactPath $updaterPath
 
 $github = Read-Json ([string]$metadata.githubManifest)
 $modelscope = Read-Json ([string]$metadata.modelscopeManifest)

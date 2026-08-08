@@ -5,6 +5,9 @@ param(
   [Parameter(Mandatory = $true)]
   [string]$Version,
 
+  [ValidateSet('x86_64', 'aarch64')]
+  [string]$Architecture = 'x86_64',
+
   [string]$OutputDirectory
 )
 
@@ -49,7 +52,7 @@ New-Item -ItemType Directory -Force -Path $resolvedOutput | Out-Null
 
 $stagingName = '.portable-staging-' + [Guid]::NewGuid().ToString('N')
 $stagingDirectory = Assert-UnderProject -Label 'Portable staging directory' -Path (Join-Path $resolvedOutput $stagingName) -ProjectRoot $projectRoot
-$archiveName = "QingzhouSSH-v$Version-windows-x86_64-portable.zip"
+$archiveName = "QingzhouSSH-v$Version-windows-$Architecture-portable.zip"
 $archivePath = Assert-UnderProject -Label 'Portable archive' -Path (Join-Path $resolvedOutput $archiveName) -ProjectRoot $projectRoot
 
 New-Item -ItemType Directory -Path $stagingDirectory | Out-Null

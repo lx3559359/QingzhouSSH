@@ -4,10 +4,10 @@
 
 ## 凭据保护
 
-- 密码、私钥内容和私钥口令序列化后使用 Windows DPAPI `User` scope 加密，密文保存在所选数据根目录的 `vault` 中。
+- Windows 将密码、私钥内容和私钥口令序列化后使用 DPAPI `User` scope 加密，密文保存在所选数据根目录的 `vault` 中。macOS 和 Linux 把同类凭据写入系统 Keychain/Secret Service，数据根目录不保存其明文或可移植副本。
 - SQLite 只保存凭据引用，不包含密码、私钥或口令字段。
 - 解密后的 `StoredCredential` 在 Rust 中实现 `ZeroizeOnDrop`；SSH 私钥由纯 Rust 传输层在内存中解析和签名，不创建明文私钥临时文件。
-- DPAPI 密文绑定当前 Windows 用户安全上下文。把数据目录复制到其他 Windows 用户或其他电脑后，不应期望凭据仍可解密；需要重新输入或导入。
+- Windows DPAPI 密文绑定当前用户安全上下文；macOS/Linux 凭据绑定系统密钥环条目。跨用户、跨电脑或只复制数据目录后，不应期望凭据仍可用；需要重新输入或导入。系统密钥环不可用时应用拒绝操作，不降级为明文存储。
 - 应用不把凭据、原始私钥、口令或完整凭据载荷写入日志和错误消息。
 
 ## SSH 主机身份
@@ -36,18 +36,18 @@
 - `operation_run` 记录完整运维状态，真实远程步骤继续复用受控 `execution`。应用异常退出后，遗留的运行中状态恢复为 `uncertain`，不会误报成功或盲目续跑。
 - 当前 Engine V2 基础阶段未启用 dangerous 远端修改。此类任务只允许只读预检和确认准备；必须在备份、执行后验证、失败恢复及恢复确认全部接入后才能开放。
 
-## 数据根目录与 C 盘约束
+## 数据根目录
 
 数据根目录解析顺序为：
 
 1. `QINGZHOU_DATA_ROOT` 环境变量；
-2. 程序目录存在 `portable.flag` 时的 `data`；
-3. 当前用户注册表中保存的路径；
+2. Windows 程序目录存在 `portable.flag` 时，读取同目录 `data-root.json` 或使用同目录 `data`；
+3. 平台数据目录指针：Windows 为当前用户注册表，macOS 为 `~/Library/Application Support/com.qingzhoussh.desktop/data-root.json`，Linux 为 `$XDG_CONFIG_HOME/qingzhou-ssh/data-root.json`（未设置时使用 `~/.config`）；
 4. 首次启动由用户明确选择。
 
-应用不回退到 `%APPDATA%` 或 `%LOCALAPPDATA%` 保存业务数据。首次选择前的 WebView 使用无痕模式；选择后 WebView2 持久数据固定到 `<数据根目录>\cache\webview2`。
+应用业务数据库、日志、下载、备份和更新文件只写入明确选择的数据根。平台配置位置只保存受限的绝对路径指针，不保存业务数据或凭据。首次选择前 WebView 使用临时/无痕配置；选择后持久缓存固定在数据根的 `cache` 子目录。
 
-`HKCU\Software\QingzhouSSH\DataRoot` 只保存数据根目录路径指针，不保存业务数据或凭据。当前版本没有图形化数据迁移/重新选择入口：要重新进入便携模式，必须在启动前把 `portable.flag` 放到可执行文件旁；移动目录前应备份，且跨用户/跨电脑移动后 DPAPI 凭据需要重建。
+设置页的数据迁移会在所有执行、传输、工作流和更新服务空闲后启动独立工作器，逐文件复制并校验 SHA-256，成功后原子切换平台指针。源目录不自动删除；失败继续使用原目录。符号链接/重解析点、目录逃逸、目标覆盖和磁盘空间不足会在切换前阻断。
 
 开发工作区通过 `scripts/dev-env.ps1` 和 `scripts/verify-d-drive.ps1` 把可控依赖、缓存、临时文件、测试数据和产物限制在 D 盘项目区域。系统级 WebView2、Windows 注册表、预装 Python/Rust/Node 可执行文件和 Docker Desktop 自身不由仓库控制；若启用 Docker，必须先单独确认其数据根目录。
 
@@ -55,15 +55,15 @@
 
 - 更新清单只允许固定的 `lx3559359/QingzhouSSH` GitHub Release 或同名 ModelScope 模型仓库。ModelScope Studio 不提供公开单文件下载 API，因此不进入客户端更新信任链。下载 URL 必须为无凭据、无自定义端口的 HTTPS，并保持在固定发布路径内。
 - GitHub 是主源。仅网络失败、404 和服务端错误允许尝试 ModelScope；无效清单、未知字段、非法 URL 或其他安全错误不回退。
-- 清单使用严格字段解析，版本必须为 SemVer，平台固定为 `windows-x86_64`，包大小、SHA-256、签名和构建 ID 均有限制。
+- 清单使用 schema 2 严格字段解析，版本必须为 SemVer，并且只接受六个固定平台键。Windows 更新载荷是 NSIS `.exe`，macOS 是 `.app.tar.gz`，Linux 是 `.AppImage`；每个平台条目都必须有独立签名、SHA-256、大小和构建 ID。客户端只选择与自身 OS/架构完全一致的键。
 - 下载先进入 `<数据根目录>\updates` 的临时路径，完成后验证大小与 SHA-256，再由 Tauri updater 使用编译时公钥验证签名。状态和文件路径只以受控相对路径持久化，前端不会获得下载 URL、签名或本地绝对路径。
 - 检查、下载和安装是分离动作。安装必须再次确认应用将退出；没有静默自动安装。
-- CI 只构建一次签名包，再把同一文件集发布到 GitHub 与 ModelScope，并回读比较版本、构建 ID、签名、SHA-256、大小和字节内容。
-- Tauri 更新签名证明更新包来自项目发布密钥，SHA-256 证明字节与清单一致；两者不等同于 Windows Authenticode。未配置商业代码签名证书时，SmartScreen 仍可能显示未知发布者。
+- 标签 CI 在六个对应原生运行器分别构建和签名，再汇总为一个不可混用的平台文件集。发布前逐平台执行真实 minisign 验签、哈希/大小/SBOM/未声明文件检查；发布到 GitHub 与 ModelScope 后回读比较所有文件字节以及六个平台的构建 ID、签名、SHA-256 和大小。
+- Tauri 更新签名证明更新包来自项目发布密钥，SHA-256 证明字节与清单一致；它不自动等同于 Windows Authenticode、Apple notarization 或 Linux 发行版仓库签名。各操作系统仍可能按本机安全策略显示额外警告。
 
 ## 已知范围限制
 
 - 当前没有遥测和自动崩溃上传。
-- 当前发布链具备 Tauri updater 签名，但没有承诺 Windows Authenticode 证书；两条信任链不能混称。
-- 脚本文本按产品定义保存在用户选择的数据根目录，因此数据目录本身应使用合适的 Windows 文件权限并纳入用户备份策略；DPAPI 只保护服务器凭据，不加密全部业务数据库。
+- 当前发布链具备 Tauri updater 签名并要求 macOS 标签构建提供 Apple 签名凭据，但没有承诺 Windows Authenticode 或 Apple notarization 已完成；这些信任链不能混称。
+- 脚本文本按产品定义保存在用户选择的数据根目录，因此该目录应使用合适的系统文件权限并纳入备份策略。平台安全存储只保护服务器凭据，不加密全部业务数据库。
 - 发现疑似凭据泄漏、主机指纹绕过、路径逃逸或更新签名绕过时，应停止发布并按 `SECURITY.md` 私下报告，不要提交真实密钥或服务器地址。

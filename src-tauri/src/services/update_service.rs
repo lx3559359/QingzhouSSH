@@ -441,15 +441,15 @@ impl UpdateService {
 }
 
 fn staged_relative_path(release: &UpdateRelease) -> Result<String, UpdateServiceError> {
-    let extension = match release.platform.as_str() {
-        "windows-x86_64" | "windows-x86_64-nsis" | "windows-aarch64-nsis" => "nsis",
-        "macos-x86_64-dmg" | "macos-aarch64-dmg" => "dmg",
+    let suffix = match release.platform.as_str() {
+        "windows-x86_64" | "windows-x86_64-nsis" | "windows-aarch64-nsis" => "exe",
+        "macos-x86_64-dmg" | "macos-aarch64-dmg" => "app.tar.gz",
         "linux-x86_64-appimage" | "linux-aarch64-appimage" => "AppImage",
         _ => return Err(UpdateServiceError::Integrity),
     };
     Ok(format!(
         "staged/{}/QingzhouSSH-{}-{}.{}",
-        release.version, release.version, release.platform, extension
+        release.version, release.version, release.platform, suffix
     ))
 }
 
@@ -513,6 +513,7 @@ impl TauriSignedUpdateAdapter {
         let updater = self
             .app
             .updater_builder()
+            .target(expected.platform.clone())
             .endpoints(vec![endpoint])
             .map_err(map_updater_error)?
             .timeout(Duration::from_secs(20))

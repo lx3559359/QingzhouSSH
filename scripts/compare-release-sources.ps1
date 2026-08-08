@@ -60,12 +60,21 @@ if ((Get-LowerHash $modelscopeManifestLocal) -ne (Get-LowerHash $modelscopeManif
 
 $githubManifest = Read-Manifest $githubManifestRemote
 $modelscopeManifest = Read-Manifest $modelscopeManifestRemote
-$githubPlatform = $githubManifest.platforms.'windows-x86_64'
-$modelscopePlatform = $modelscopeManifest.platforms.'windows-x86_64'
 if ($githubManifest.version -ne $modelscopeManifest.version -or $githubManifest.version -ne $metadata.version) { throw 'Dual-source versions differ' }
-if ($githubPlatform.build_id -ne $modelscopePlatform.build_id -or $githubPlatform.build_id -ne $metadata.buildId) { throw 'Dual-source build identifiers differ' }
-foreach ($property in @('signature', 'sha256', 'size')) {
-  if ($githubPlatform.$property -ne $modelscopePlatform.$property) { throw "Dual-source updater property differs: $property" }
+$platformRecords = if ($metadata.schemaVersion -eq 2) {
+  @($metadata.platforms)
+} else {
+  @([pscustomobject]@{ platform = 'windows-x86_64'; buildId = $metadata.buildId })
+}
+foreach ($record in $platformRecords) {
+  $platform = [string]$record.platform
+  $githubPlatform = $githubManifest.platforms.$platform
+  $modelscopePlatform = $modelscopeManifest.platforms.$platform
+  if ($null -eq $githubPlatform -or $null -eq $modelscopePlatform) { throw "Dual-source manifest is missing: $platform" }
+  if ($githubPlatform.build_id -ne $modelscopePlatform.build_id -or $githubPlatform.build_id -ne $record.buildId) { throw "Dual-source build identifiers differ: $platform" }
+  foreach ($property in @('signature', 'sha256', 'size')) {
+    if ($githubPlatform.$property -ne $modelscopePlatform.$property) { throw "Dual-source updater property differs for ${platform}: $property" }
+  }
 }
 
 $expectedRemoteFiles = @($commonFiles + 'latest.json') | Sort-Object -Unique
