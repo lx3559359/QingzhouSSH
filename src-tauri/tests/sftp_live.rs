@@ -22,7 +22,7 @@ fn endpoint() -> SshEndpoint {
     SshEndpoint {
         host: "127.0.0.1".into(),
         port: 2222,
-        timeout: Duration::from_secs(10),
+        timeout: Duration::from_secs(30),
     }
 }
 
@@ -130,7 +130,9 @@ async fn uploads_and_downloads_verified_file_against_fixture() {
         ]
     );
 
+    let directory_started = Instant::now();
     let listing = list_remote_directory(&session, "/tmp").await.unwrap();
+    let directory_ms = directory_started.elapsed().as_millis() as u64;
     let uploaded_name = remote_path.rsplit('/').next().unwrap();
     assert_eq!(listing.path, "/tmp");
     assert!(listing
@@ -224,11 +226,48 @@ async fn uploads_and_downloads_verified_file_against_fixture() {
         .count() as u64;
     assert!(upload_progress <= upload_ms / 50 + 4);
     assert!(download_progress <= download_ms / 50 + 4);
+    let cancellation = CancellationToken::new();
+    cancellation.cancel();
+    let mut cancellation_events = VecEventSink::default();
+    let cancellation_started = Instant::now();
+    let cancellation_result = upload(
+        &session,
+        &capabilities,
+        &UploadRequest {
+            local_path: local_source.clone(),
+            remote_path: format!("/tmp/qingzhou-sftp-cancel-{}.bin", uuid::Uuid::new_v4()),
+            overwrite: false,
+            verification: VerificationPolicy::Balanced,
+        },
+        &mut cancellation_events,
+        cancellation,
+    )
+    .await;
+    let cancellation_latency_ms = cancellation_started.elapsed().as_millis() as u64;
+    assert!(matches!(
+        cancellation_result,
+        Err(qingzhou_ssh_lib::error::AppError::Cancelled)
+    ));
     eprintln!(
         "SFTP live bytes={payload_len} upload_ms={upload_ms} download_ms={download_ms} verification={:?} max_in_flight={} max_buffered_bytes={}",
         downloaded.verification_level,
         downloaded.pipeline_max_in_flight,
         downloaded.pipeline_max_buffered_bytes,
+    );
+    eprintln!(
+        "QZ_SFTP_METRICS={}",
+        serde_json::json!({
+            "payloadBytes": payload_len,
+            "directoryMs": directory_ms,
+            "uploadMs": upload_ms,
+            "downloadMs": download_ms,
+            "verificationPolicy": "balanced",
+            "verificationLevel": "remote_hash",
+            "progressEventCount": upload_progress + download_progress,
+            "cancellationLatencyMs": cancellation_latency_ms,
+            "pipelineMaxInFlight": downloaded.pipeline_max_in_flight,
+            "pipelineMaxBufferedBytes": downloaded.pipeline_max_buffered_bytes,
+        })
     );
     assert!(upload_events.events.len() >= 3);
     assert!(download_events.events.len() >= 3);

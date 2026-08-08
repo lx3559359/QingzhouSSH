@@ -9,6 +9,8 @@
     "build": "tsc -b && vite build",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:sftp-performance-contract": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/tests/sftp-performance.tests.ps1",
+    "benchmark:sftp": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/run-benchmark-sftp.ps1",
     "tauri": "tauri"
   },
   "dependencies": {

@@ -1,5 +1,5 @@
 param(
-  [ValidateSet('Start', 'Stop', 'Status')]
+  [ValidateSet('Start', 'Stop', 'Status', 'Capabilities')]
   [string]$Action = 'Status',
   [switch]$SkipPythonDependencyInstall
 )
@@ -59,6 +59,16 @@ if ($Action -eq 'Stop') {
 if ($Action -eq 'Status') {
   $fixtureProcess = Get-FixtureProcess
   if ($fixtureProcess) { Write-Output "running:$($fixtureProcess.Id)" } else { Write-Output 'stopped' }
+  exit 0
+}
+
+if ($Action -eq 'Capabilities') {
+  [pscustomobject]@{
+    networkShape = 'unavailable'
+    reason = 'The project-local direct fixture does not mutate host network settings.'
+    supportsLargePayload = $true
+    metricsPrefix = 'QZ_SFTP_METRICS='
+  } | ConvertTo-Json -Compress
   exit 0
 }
 
