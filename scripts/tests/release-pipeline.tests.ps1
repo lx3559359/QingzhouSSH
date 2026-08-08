@@ -5,8 +5,13 @@ $workflowPath = Join-Path $projectRoot '.github\workflows\release.yml'
 $smokePath = Join-Path $projectRoot 'scripts\smoke-release.ps1'
 $modelscopePath = Join-Path $projectRoot 'scripts\modelscope-release.py'
 $comparePath = Join-Path $projectRoot 'scripts\compare-release-sources.ps1'
+$verifyPath = Join-Path $projectRoot 'scripts\verify-release.ps1'
 foreach ($required in @($workflowPath, $smokePath, $modelscopePath, $comparePath)) {
   if (-not (Test-Path -LiteralPath $required -PathType Leaf)) { throw "Missing release pipeline file: $required" }
+}
+$verifyScript = Get-Content -Raw -Encoding utf8 $verifyPath
+if ($verifyScript -notmatch 'Get-Command\s+cargo' -or $verifyScript -notmatch 'dev-env\.ps1') {
+  throw 'Release verification must preserve a configured Cargo toolchain and bootstrap only when Cargo is unavailable'
 }
 
 $workflow = Get-Content -Raw -Encoding utf8 $workflowPath
@@ -16,6 +21,19 @@ foreach ($requiredText in @(
   'actions/setup-node@v6',
   'actions/upload-artifact@v7',
   'windows-2025',
+  'windows-11-arm',
+  'macos-15-intel',
+  'macos-15',
+  'ubuntu-22.04',
+  'ubuntu-22.04-arm',
+  'x86_64-pc-windows-msvc',
+  'aarch64-pc-windows-msvc',
+  'x86_64-apple-darwin',
+  'aarch64-apple-darwin',
+  'x86_64-unknown-linux-gnu',
+  'aarch64-unknown-linux-gnu',
+  'libwebkit2gtk-4.1-dev',
+  'pnpm tauri build --debug --no-bundle --target',
   'pnpm install --frozen-lockfile',
   'pnpm test',
   'cargo clippy --locked',

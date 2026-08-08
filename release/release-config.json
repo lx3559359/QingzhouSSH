@@ -2,6 +2,38 @@
   "projectName": "QingzhouSSH",
   "platform": "windows-x86_64",
   "installer": "nsis",
+  "platforms": {
+    "windows-x86_64-nsis": {
+      "runner": "windows-2025",
+      "rustTarget": "x86_64-pc-windows-msvc",
+      "bundle": "nsis"
+    },
+    "windows-aarch64-nsis": {
+      "runner": "windows-11-arm",
+      "rustTarget": "aarch64-pc-windows-msvc",
+      "bundle": "nsis"
+    },
+    "macos-x86_64-dmg": {
+      "runner": "macos-15-intel",
+      "rustTarget": "x86_64-apple-darwin",
+      "bundle": "dmg"
+    },
+    "macos-aarch64-dmg": {
+      "runner": "macos-15",
+      "rustTarget": "aarch64-apple-darwin",
+      "bundle": "dmg"
+    },
+    "linux-x86_64-appimage": {
+      "runner": "ubuntu-22.04",
+      "rustTarget": "x86_64-unknown-linux-gnu",
+      "bundle": "appimage"
+    },
+    "linux-aarch64-appimage": {
+      "runner": "ubuntu-22.04-arm",
+      "rustTarget": "aarch64-unknown-linux-gnu",
+      "bundle": "appimage"
+    }
+  },
   "github": {
     "repository": "lx3559359/QingzhouSSH",
     "manifestAsset": "latest.json"

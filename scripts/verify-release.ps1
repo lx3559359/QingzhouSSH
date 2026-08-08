@@ -6,7 +6,9 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $projectRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
-& (Join-Path $PSScriptRoot 'dev-env.ps1') -Quiet | Out-Null
+if (-not (Get-Command cargo -ErrorAction SilentlyContinue)) {
+  & (Join-Path $PSScriptRoot 'dev-env.ps1') -Quiet | Out-Null
+}
 $resolvedRelease = [IO.Path]::GetFullPath($ReleaseDirectory)
 $projectPrefix = $projectRoot.TrimEnd([IO.Path]::DirectorySeparatorChar) + [IO.Path]::DirectorySeparatorChar
 if (-not $resolvedRelease.StartsWith($projectPrefix, [StringComparison]::OrdinalIgnoreCase)) {

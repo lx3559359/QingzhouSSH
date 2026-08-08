@@ -21,6 +21,74 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  platform-native-checks:
+    name: Native ${{ matrix.platform }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: windows-x86_64-nsis
+            runner: windows-2025
+            rustTarget: x86_64-pc-windows-msvc
+          - platform: windows-aarch64-nsis
+            runner: windows-11-arm
+            rustTarget: aarch64-pc-windows-msvc
+          - platform: macos-x86_64-dmg
+            runner: macos-15-intel
+            rustTarget: x86_64-apple-darwin
+          - platform: macos-aarch64-dmg
+            runner: macos-15
+            rustTarget: aarch64-apple-darwin
+          - platform: linux-x86_64-appimage
+            runner: ubuntu-22.04
+            rustTarget: x86_64-unknown-linux-gnu
+          - platform: linux-aarch64-appimage
+            runner: ubuntu-22.04-arm
+            rustTarget: aarch64-unknown-linux-gnu
+    env:
+      CARGO_HOME: ${{ github.workspace }}/.local/cargo-home
+      CARGO_TARGET_DIR: ${{ github.workspace }}/target/${{ matrix.rustTarget }}
+      PNPM_STORE_DIR: ${{ github.workspace }}/.local/pnpm-store
+      QINGZHOU_DATA_ROOT: ${{ github.workspace }}/.local/ci-data
+      QINGZHOU_MODELSCOPE_NAMESPACE: ${{ vars.QINGZHOU_MODELSCOPE_NAMESPACE }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Install Linux desktop dependencies
+        if: ${{ runner.os == 'Linux' }}
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf xdg-utils
+
+      - name: Install pnpm 10
+        uses: pnpm/action-setup@v6
+
+      - name: Install Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: pnpm
+
+      - name: Install native Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rustTarget }}
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Frontend tests
+        if: ${{ matrix.platform == 'windows-x86_64-nsis' }}
+        run: pnpm test
+
+      - name: Check native Rust target
+        run: cargo check --locked --manifest-path ./src-tauri/Cargo.toml --all-targets --target ${{ matrix.rustTarget }}
+
+      - name: Build native desktop executable
+        run: pnpm tauri build --debug --no-bundle --target ${{ matrix.rustTarget }}
+
   verify-build-publish:
     runs-on: windows-2025
     env:
