@@ -3,6 +3,7 @@ use serde_json::Value;
 use uuid::Uuid;
 
 use crate::{
+    core::sftp::TransferPhase,
     domain::execution::{now_millis, ExecutionFile, ExecutionStatus},
     error::{AppError, AppResult},
 };
@@ -36,9 +37,13 @@ pub enum ExecutionEventPayload {
         total_bytes: u64,
     },
     Progress {
+        phase: TransferPhase,
         transferred: u64,
         total: Option<u64>,
         percent: Option<f64>,
+        bytes_per_second: Option<f64>,
+        average_bytes_per_second: Option<f64>,
+        eta_seconds: Option<u64>,
     },
     FileProduced {
         file: ExecutionFile,

@@ -52,8 +52,9 @@ describe('FileTransferPage', () => {
     apiMocks.cancelExecution.mockResolvedValue(undefined);
     apiMocks.uploadFile.mockImplementation(async (_id, _request, onEvent) => {
       onEvent({ type: 'started', executionId: 'transfer-1', startedAt: 1000, sequence: 1, emittedAt: 1000 });
-      onEvent({ type: 'progress', transferred: 1024, total: 2048, percent: 50, sequence: 2, emittedAt: 2000 });
-      onEvent({ type: 'finished', status: 'succeeded', exitCode: null, durationMs: 1000, result: { bytes: 2048, sha256: 'a'.repeat(64), location: '/srv/upload.bin' }, sequence: 3, emittedAt: 2000 });
+      onEvent({ type: 'progress', phase: 'transferring', transferred: 1024, total: 2048, percent: 50, bytesPerSecond: 2048, averageBytesPerSecond: 1024, etaSeconds: 1, sequence: 2, emittedAt: 2000 });
+      onEvent({ type: 'progress', phase: 'finalizing', transferred: 2048, total: 2048, percent: 100, bytesPerSecond: 2048, averageBytesPerSecond: 1024, etaSeconds: 0, sequence: 3, emittedAt: 2001 });
+      onEvent({ type: 'finished', status: 'succeeded', exitCode: null, durationMs: 1000, result: { bytes: 2048, sha256: 'a'.repeat(64), location: '/srv/upload.bin' }, sequence: 4, emittedAt: 2002 });
       return result('transfer.upload');
     });
     apiMocks.downloadFile.mockResolvedValue(result('transfer.download'));
@@ -171,7 +172,11 @@ describe('FileTransferPage', () => {
       },
       expect.any(Function),
     );
-    expect(await screen.findByText('1 KB / 2 KB')).toBeVisible();
+    expect(await screen.findByText('2 KB / 2 KB')).toBeVisible();
+    expect(screen.getByText('实时状态 · 收尾中')).toBeVisible();
+    expect(screen.getByText('2 KB/s')).toBeVisible();
+    expect(screen.getByText('1 KB/s')).toBeVisible();
+    expect(screen.getByText('已完成')).toBeVisible();
     expect(screen.getByText('SHA-256 已校验')).toBeVisible();
   });
 

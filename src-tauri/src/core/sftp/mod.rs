@@ -1,4 +1,5 @@
 mod browser;
+mod progress;
 mod transfer;
 
 pub use browser::{
@@ -10,6 +11,7 @@ pub(crate) use transfer::{
     RemoteFileMetadata,
 };
 
+pub use progress::{ProgressSnapshot, TransferPhase, TransferProgressTracker};
 pub use transfer::{
     download, download_destination, hash_remote_file, local_partial_path, parse_sha256_output,
     remote_hash_command, remote_partial_path, select_verification, sha256_local_file, upload,

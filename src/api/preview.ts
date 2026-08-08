@@ -316,6 +316,60 @@ function emitPreview(onEvent: (event: ExecutionEvent) => void, details: Executio
   });
 }
 
+function emitTransferPreview(
+  onEvent: (event: ExecutionEvent) => void,
+  details: ExecutionDetails,
+  location: string,
+) {
+  const startedAt = details.record.startedAt ?? Date.now();
+  const progress = (
+    sequence: number,
+    elapsedMs: number,
+    phase: 'connecting' | 'transferring' | 'verifying' | 'finalizing',
+    transferred: number,
+    bytesPerSecond: number | null,
+    etaSeconds: number | null,
+  ): ExecutionEvent => ({
+    type: 'progress',
+    sequence,
+    emittedAt: startedAt + elapsedMs,
+    phase,
+    transferred,
+    total: phase === 'connecting' ? null : 1024,
+    percent: phase === 'connecting' ? null : transferred / 10.24,
+    bytesPerSecond,
+    averageBytesPerSecond: bytesPerSecond == null ? null : 2048,
+    etaSeconds,
+  });
+  onEvent({
+    type: 'started',
+    sequence: 1,
+    emittedAt: startedAt,
+    executionId: details.record.id,
+    startedAt,
+  });
+  onEvent(progress(2, 20, 'connecting', 0, null, null));
+  onEvent(progress(3, 120, 'transferring', 512, 4096, 1));
+  onEvent(progress(4, 240, 'transferring', 1024, 4096, 0));
+  onEvent(progress(5, 260, 'verifying', 1024, 4096, 0));
+  onEvent(progress(6, 280, 'finalizing', 1024, 4096, 0));
+  onEvent({
+    type: 'finished',
+    sequence: 7,
+    emittedAt: startedAt + 360,
+    status: 'succeeded',
+    exitCode: 0,
+    durationMs: 360,
+    result: {
+      bytes: 1024,
+      sha256: 'a'.repeat(64),
+      location,
+      verificationLevel: 'remote_hash',
+      remoteHashCompared: true,
+    },
+  });
+}
+
 let previewOperationCounter = 0;
 let previewOperations = new Map<string, OperationRunDetails>();
 let previewOperationBatches = new Map<string, OperationBatchDetails>();
@@ -1749,11 +1803,11 @@ export const previewApi = {
     `downloads/${suggestedName}`,
   uploadFile: async (
     serverId: string,
-    _request: UploadRequest,
+    request: UploadRequest,
     onEvent: (event: ExecutionEvent) => void,
   ) => {
     const details = createPreviewExecution(serverId, 'transfer.upload');
-    emitPreview(onEvent, details);
+    emitTransferPreview(onEvent, details, request.remotePath);
     return details;
   },
   downloadFile: async (
@@ -1769,7 +1823,7 @@ export const previewApi = {
       sizeBytes: 1024,
       sha256: 'a'.repeat(64),
     });
-    emitPreview(onEvent, details);
+    emitTransferPreview(onEvent, details, `downloads/${request.suggestedName}`);
     return details;
   },
   listExecutions: async (filter: ExecutionFilter) =>

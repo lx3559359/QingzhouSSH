@@ -715,6 +715,8 @@ export type OperationEvent = ExecutionEvent;
 
 type ExecutionEventBase = { sequence: number; emittedAt: number };
 
+export type TransferPhase = 'connecting' | 'transferring' | 'verifying' | 'finalizing';
+
 export type ExecutionEvent = ExecutionEventBase &
   (
     | { type: 'started'; executionId: string; startedAt: number }
@@ -722,9 +724,13 @@ export type ExecutionEvent = ExecutionEventBase &
     | { type: 'stderr'; text: string; totalBytes: number }
     | {
         type: 'progress';
+        phase: TransferPhase;
         transferred: number;
         total: number | null;
         percent: number | null;
+        bytesPerSecond: number | null;
+        averageBytesPerSecond: number | null;
+        etaSeconds: number | null;
       }
     | { type: 'fileProduced'; file: ExecutionFile }
     | {

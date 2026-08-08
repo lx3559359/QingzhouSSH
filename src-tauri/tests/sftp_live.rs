@@ -4,7 +4,7 @@ use qingzhou_ssh_lib::{
     core::{
         sftp::{
             download, list_remote_directory, upload, BrowserEntryKind, DownloadRequest,
-            UploadRequest, VerificationPolicy,
+            TransferPhase, UploadRequest, VerificationPolicy,
         },
         ssh::{
             executor::VecEventSink,
@@ -14,7 +14,7 @@ use qingzhou_ssh_lib::{
         },
         tasks::shell_quote,
     },
-    domain::server::StoredCredential,
+    domain::{events::ExecutionEventPayload, server::StoredCredential},
 };
 use tokio_util::sync::CancellationToken;
 
@@ -36,6 +36,19 @@ fn fixture_counter(name: &str) -> u64 {
     .trim()
     .parse()
     .unwrap()
+}
+
+fn progress_phases(events: &VecEventSink) -> Vec<TransferPhase> {
+    let mut phases = events
+        .events
+        .iter()
+        .filter_map(|event| match &event.payload {
+            ExecutionEventPayload::Progress { phase, .. } => Some(*phase),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    phases.dedup();
+    phases
 }
 
 #[tokio::test]
@@ -89,6 +102,14 @@ async fn uploads_and_downloads_verified_file_against_fixture() {
     assert!(uploaded.remote_hash_compared);
     assert_eq!(fixture_counter("hash-command-count"), hashes_before + 1);
     assert_eq!(fixture_counter("sftp-read-bytes"), reads_before);
+    assert_eq!(
+        progress_phases(&upload_events),
+        vec![
+            TransferPhase::Transferring,
+            TransferPhase::Verifying,
+            TransferPhase::Finalizing,
+        ]
+    );
 
     let listing = list_remote_directory(&session, "/tmp").await.unwrap();
     let uploaded_name = remote_path.rsplit('/').next().unwrap();
@@ -124,6 +145,15 @@ async fn uploads_and_downloads_verified_file_against_fixture() {
     assert_eq!(
         fixture_counter("sftp-read-bytes") - reads_before,
         payload.len() as u64
+    );
+    assert_eq!(
+        progress_phases(&download_events),
+        vec![
+            TransferPhase::Verifying,
+            TransferPhase::Transferring,
+            TransferPhase::Verifying,
+            TransferPhase::Finalizing,
+        ]
     );
     assert_eq!(
         tokio::fs::read(test_root.join("downloads/downloaded.bin"))

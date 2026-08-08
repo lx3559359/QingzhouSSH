@@ -5,7 +5,7 @@ use uuid::Uuid;
 
 use crate::{
     core::{
-        sftp::{self, DownloadRequest, TransferOutcome, UploadRequest},
+        sftp::{self, DownloadRequest, TransferOutcome, TransferPhase, UploadRequest},
         ssh::executor::EventSink,
     },
     domain::{
@@ -78,6 +78,7 @@ impl TransferService {
             execution_id,
             started_at,
         })?;
+        sequenced.emit(connecting_progress())?;
         let connected = match self.connector.connect(server_id).await {
             Ok(connected) => connected,
             Err(error) => {
@@ -138,6 +139,7 @@ impl TransferService {
             execution_id,
             started_at,
         })?;
+        sequenced.emit(connecting_progress())?;
         let connected = match self.connector.connect(server_id).await {
             Ok(connected) => connected,
             Err(error) => {
@@ -297,6 +299,18 @@ fn parameter(name: &str, value: &str) -> ExecutionParameter {
         name: name.into(),
         display_value: value.into(),
         sensitive: false,
+    }
+}
+
+fn connecting_progress() -> ExecutionEventPayload {
+    ExecutionEventPayload::Progress {
+        phase: TransferPhase::Connecting,
+        transferred: 0,
+        total: None,
+        percent: None,
+        bytes_per_second: None,
+        average_bytes_per_second: None,
+        eta_seconds: None,
     }
 }
 

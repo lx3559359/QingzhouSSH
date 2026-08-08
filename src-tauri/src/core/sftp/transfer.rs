@@ -10,6 +10,8 @@ use tokio::{
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
+use super::progress::{ProgressSnapshot, TransferPhase, TransferProgressTracker};
+
 use crate::{
     core::{
         ssh::{
@@ -20,7 +22,10 @@ use crate::{
         tasks::{prepare_task_restore_destination, shell_quote},
         workflows::resolve_restore_point_path,
     },
-    domain::events::{EventSequence, ExecutionEventPayload},
+    domain::{
+        events::{EventSequence, ExecutionEventPayload},
+        execution::now_millis,
+    },
     error::{AppError, AppResult},
 };
 
@@ -264,6 +269,10 @@ async fn upload_to_partial<E: EventSink>(
     let mut block = vec![0_u8; TRANSFER_BLOCK_BYTES];
     let mut transferred = 0_u64;
     let mut sequence = EventSequence::default();
+    let mut progress = TransferProgressTracker::new(Some(total), now_millis());
+    if let Some(snapshot) = progress.sample(0, now_millis()) {
+        emit_progress(events, &mut sequence, snapshot)?;
+    }
     loop {
         let read = tokio::select! {
             _ = cancel.cancelled() => return Err(AppError::Cancelled),
@@ -278,10 +287,17 @@ async fn upload_to_partial<E: EventSink>(
         }
         hasher.update(&block[..read]);
         transferred = transferred.saturating_add(read as u64);
-        emit_progress(events, &mut sequence, transferred, Some(total))?;
+        if let Some(snapshot) = progress.sample(transferred, now_millis()) {
+            emit_progress(events, &mut sequence, snapshot)?;
+        }
     }
     remote.flush().await?;
     remote.shutdown().await?;
+    emit_progress(
+        events,
+        &mut sequence,
+        progress.change_phase(TransferPhase::Verifying, now_millis()),
+    )?;
     let local_hash = hex_digest(hasher);
     let remote_size = sftp.metadata(partial_path).await.map_err(sftp_error)?.size;
     if verification == VerificationStrategy::TransportAndSize && remote_size.is_none() {
@@ -309,6 +325,11 @@ async fn upload_to_partial<E: EventSink>(
             )));
         }
     }
+    emit_progress(
+        events,
+        &mut sequence,
+        progress.change_phase(TransferPhase::Finalizing, now_millis()),
+    )?;
     if request.overwrite && sftp_try_exists(sftp, &request.remote_path).await? {
         sftp.remove_file(request.remote_path.clone())
             .await
@@ -350,6 +371,20 @@ pub async fn download<E: EventSink>(
     let sftp = open_sftp(ssh).await?;
     let verification =
         select_verification(request.verification, capabilities.has_command("sha256sum"));
+    let total = sftp
+        .metadata(&request.remote_path)
+        .await
+        .map_err(sftp_error)?
+        .size;
+    let mut progress = TransferProgressTracker::new(total, now_millis());
+    let mut sequence = EventSequence::default();
+    if verification != VerificationStrategy::TransportAndSize {
+        emit_progress(
+            events,
+            &mut sequence,
+            progress.change_phase(TransferPhase::Verifying, now_millis()),
+        )?;
+    }
     let expected_hash = match verification {
         VerificationStrategy::RemoteHash => Some(
             hash_remote_with_command(ssh, capabilities, &request.remote_path, cancel.clone())
@@ -360,6 +395,11 @@ pub async fn download<E: EventSink>(
         }
         VerificationStrategy::TransportAndSize => None,
     };
+    emit_progress(
+        events,
+        &mut sequence,
+        progress.change_phase(TransferPhase::Transferring, now_millis()),
+    )?;
     let target = LocalDownloadTarget {
         data_root,
         destination: &destination,
@@ -372,6 +412,9 @@ pub async fn download<E: EventSink>(
         target,
         expected_hash,
         verification,
+        total,
+        &mut progress,
+        &mut sequence,
         events,
         cancel,
     )
@@ -396,16 +439,17 @@ async fn download_to_partial<E: EventSink>(
     target: LocalDownloadTarget<'_>,
     expected_hash: Option<String>,
     verification: VerificationStrategy,
+    total: Option<u64>,
+    progress: &mut TransferProgressTracker,
+    sequence: &mut EventSequence,
     events: &mut E,
     cancel: CancellationToken,
 ) -> AppResult<TransferOutcome> {
-    let total = sftp.metadata(remote_path).await.map_err(sftp_error)?.size;
     let mut remote = sftp.open(remote_path).await.map_err(sftp_error)?;
     let mut local = File::create(target.partial).await?;
     let mut hasher = Sha256::new();
     let mut block = vec![0_u8; TRANSFER_BLOCK_BYTES];
     let mut transferred = 0_u64;
-    let mut sequence = EventSequence::default();
     loop {
         let read = tokio::select! {
             _ = cancel.cancelled() => return Err(AppError::Cancelled),
@@ -420,10 +464,17 @@ async fn download_to_partial<E: EventSink>(
         }
         hasher.update(&block[..read]);
         transferred = transferred.saturating_add(read as u64);
-        emit_progress(events, &mut sequence, transferred, total)?;
+        if let Some(snapshot) = progress.sample(transferred, now_millis()) {
+            emit_progress(events, sequence, snapshot)?;
+        }
     }
     local.flush().await?;
     local.sync_all().await?;
+    emit_progress(
+        events,
+        sequence,
+        progress.change_phase(TransferPhase::Verifying, now_millis()),
+    )?;
     let actual_hash = hex_digest(hasher);
     if verification == VerificationStrategy::TransportAndSize && total.is_none() {
         return Err(AppError::Integrity("远端未返回下载文件大小".into()));
@@ -441,6 +492,11 @@ async fn download_to_partial<E: EventSink>(
             )));
         }
     }
+    emit_progress(
+        events,
+        sequence,
+        progress.change_phase(TransferPhase::Finalizing, now_millis()),
+    )?;
     if target.overwrite && target.destination.exists() {
         tokio::fs::remove_file(target.destination).await?;
     }
@@ -558,13 +614,28 @@ async fn backup_remote_file_to(
         partial: &partial,
         overwrite: true,
     };
+    let mut progress = TransferProgressTracker::new(metadata.size, now_millis());
+    let mut sequence = EventSequence::default();
+    emit_progress(
+        &mut events,
+        &mut sequence,
+        progress.change_phase(TransferPhase::Verifying, now_millis()),
+    )?;
     let expected_hash = hash_remote_with_sftp(&sftp, remote_path, cancel.clone()).await?;
+    emit_progress(
+        &mut events,
+        &mut sequence,
+        progress.change_phase(TransferPhase::Transferring, now_millis()),
+    )?;
     let result = download_to_partial(
         &sftp,
         remote_path,
         target,
         Some(expected_hash),
         VerificationStrategy::SftpReread,
+        metadata.size,
+        &mut progress,
+        &mut sequence,
         &mut events,
         cancel,
     )
@@ -696,16 +767,16 @@ async fn sftp_try_exists(sftp: &SftpSession, path: &str) -> AppResult<bool> {
 fn emit_progress<E: EventSink>(
     events: &mut E,
     sequence: &mut EventSequence,
-    transferred: u64,
-    total: Option<u64>,
+    snapshot: ProgressSnapshot,
 ) -> AppResult<()> {
-    let percent = total
-        .filter(|total| *total > 0)
-        .map(|total| ((transferred as f64 / total as f64) * 100.0).clamp(0.0, 100.0));
     events.send(sequence.next(ExecutionEventPayload::Progress {
-        transferred,
-        total,
-        percent,
+        phase: snapshot.phase,
+        transferred: snapshot.transferred,
+        total: snapshot.total,
+        percent: snapshot.percent,
+        bytes_per_second: snapshot.bytes_per_second,
+        average_bytes_per_second: snapshot.average_bytes_per_second,
+        eta_seconds: snapshot.eta_seconds,
     }))
 }
 

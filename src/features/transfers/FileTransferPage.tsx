@@ -18,6 +18,7 @@ import type {
   ExecutionDetails,
   ExecutionEvent,
   ServerProfile,
+  TransferPhase,
 } from '../../api/contracts';
 import { chooseDirectory } from '../../api/dialogs';
 import { api, asAppError } from '../../api/tauri';
@@ -30,6 +31,21 @@ function formatBytes(bytes: number) {
   if (bytes >= 1024 * 1024) return `${Number((bytes / (1024 * 1024)).toFixed(1))} MB`;
   if (bytes >= 1024) return `${Number((bytes / 1024).toFixed(1))} KB`;
   return `${bytes} B`;
+}
+
+const transferPhaseLabels: Record<TransferPhase, string> = {
+  connecting: '连接中',
+  transferring: '传输中',
+  verifying: '校验中',
+  finalizing: '收尾中',
+};
+
+function formatEta(seconds: number | null) {
+  if (seconds == null) return '—';
+  if (seconds <= 0) return '已完成';
+  if (seconds < 60) return `约 ${seconds} 秒`;
+  const minutes = Math.ceil(seconds / 60);
+  return `约 ${minutes} 分钟`;
 }
 
 function transferMessage(details: ExecutionDetails) {
@@ -164,14 +180,16 @@ export function FileTransferPage({ onSearchRemoteFile }: FileTransferPageProps =
   const [transferred, setTransferred] = useState(0);
   const [total, setTotal] = useState<number | null>(null);
   const [percent, setPercent] = useState<number | null>(null);
-  const [speed, setSpeed] = useState(0);
+  const [phase, setPhase] = useState<TransferPhase | null>(null);
+  const [speed, setSpeed] = useState<number | null>(null);
+  const [averageSpeed, setAverageSpeed] = useState<number | null>(null);
+  const [etaSeconds, setEtaSeconds] = useState<number | null>(null);
   const [sha256, setSha256] = useState<string | null>(null);
   const [location, setLocation] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
   const [source, setSource] = useState('');
   const [target, setTarget] = useState('');
   const [browserContext, setBrowserContext] = useState<BrowserContext | null>(null);
-  const startedAt = useRef<number | null>(null);
   const localRequestGeneration = useRef(0);
   const remoteRequestGeneration = useRef(0);
 
@@ -253,25 +271,29 @@ export function FileTransferPage({ onSearchRemoteFile }: FileTransferPageProps =
     setTransferred(0);
     setTotal(null);
     setPercent(null);
-    setSpeed(0);
+    setPhase(null);
+    setSpeed(null);
+    setAverageSpeed(null);
+    setEtaSeconds(null);
     setSha256(null);
     setLocation(null);
     setStatus(null);
     setExecutionId(null);
-    startedAt.current = null;
   };
 
   const onEvent = (event: ExecutionEvent) => {
     if (event.type === 'started') {
       setExecutionId(event.executionId);
-      startedAt.current = event.emittedAt;
+      setPhase('connecting');
     }
     if (event.type === 'progress') {
+      setPhase(event.phase);
       setTransferred(event.transferred);
       setTotal(event.total);
       setPercent(event.percent);
-      const elapsedSeconds = startedAt.current == null ? 0 : (event.emittedAt - startedAt.current) / 1000;
-      if (elapsedSeconds > 0) setSpeed(event.transferred / elapsedSeconds);
+      if (event.bytesPerSecond != null) setSpeed(event.bytesPerSecond);
+      if (event.averageBytesPerSecond != null) setAverageSpeed(event.averageBytesPerSecond);
+      if (event.etaSeconds != null) setEtaSeconds(event.etaSeconds);
     }
     if (event.type === 'fileProduced') setLocation(event.file.relativePath);
     if (event.type === 'finished' && event.result && typeof event.result === 'object') {
@@ -464,10 +486,10 @@ export function FileTransferPage({ onSearchRemoteFile }: FileTransferPageProps =
         role="region"
         aria-label="传输状态"
       >
-        <header><div><span className="eyebrow">实时状态</span><h2>{status ?? '等待选择文件'}</h2></div>{sha256 ? <CheckCircle weight="fill" /> : running ? <SpinnerGap className="spin" weight="bold" /> : null}</header>
+        <header><div><span className="eyebrow">实时状态{phase ? ` · ${transferPhaseLabels[phase]}` : ''}</span><h2>{status ?? '等待选择文件'}</h2></div>{sha256 ? <CheckCircle weight="fill" /> : running ? <SpinnerGap className="spin" weight="bold" /> : null}</header>
         <dl className="transfer-paths"><div><dt>来源</dt><dd>{source || '—'}</dd></div><div><dt>目标</dt><dd>{target || '—'}</dd></div></dl>
         <div className="transfer-progress"><div><span style={{ width: `${percent ?? 0}%` }} /></div><strong>{percent == null ? '—' : `${Number(percent.toFixed(1))}%`}</strong></div>
-        <div className="transfer-metrics"><span><small>已传输</small><strong>{formatBytes(transferred)}{total == null ? '' : ` / ${formatBytes(total)}`}</strong></span><span><small>平均速度</small><strong>{speed > 0 ? `${formatBytes(speed)}/s` : '—'}</strong></span><span><small>完整性</small><strong>{sha256 ? 'SHA-256 已校验' : '等待校验'}</strong></span></div>
+        <div className="transfer-metrics"><span><small>已传输</small><strong>{formatBytes(transferred)}{total == null ? '' : ` / ${formatBytes(total)}`}</strong></span><span><small>当前速度</small><strong>{speed != null && speed > 0 ? `${formatBytes(speed)}/s` : '—'}</strong></span><span><small>平均速度</small><strong>{averageSpeed != null && averageSpeed > 0 ? `${formatBytes(averageSpeed)}/s` : '—'}</strong></span><span><small>预计剩余</small><strong>{formatEta(etaSeconds)}</strong></span><span><small>完整性</small><strong>{sha256 ? 'SHA-256 已校验' : '等待校验'}</strong></span></div>
         {sha256 && <code className="transfer-hash">{sha256}</code>}
         {location && <p className="inline-message inline-message--success">{location}</p>}
         {running && executionId && <button className="danger-button" type="button" onClick={() => void cancel()}><StopCircle weight="bold" />取消传输</button>}

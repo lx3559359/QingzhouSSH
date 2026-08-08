@@ -6,6 +6,7 @@ import {
   resetWorkflowPreviewForTests,
 } from './preview';
 import { createReferenceWorkflowDraft } from '../features/workflows/fixtures';
+import type { ExecutionEvent } from './contracts';
 
 describe('preview data root', () => {
   it('uses the project-local development data root', async () => {
@@ -66,6 +67,37 @@ describe('log search preview API', () => {
 
     const page = await previewApi.readLogResultPage(details.record.id, null, 50);
     expect(page.items).toEqual([]);
+  });
+});
+
+describe('transfer preview API', () => {
+  it('emits deterministic phases and backend-calculated speed metrics', async () => {
+    const events: ExecutionEvent[] = [];
+
+    await previewApi.uploadFile(
+      'preview-openeuler',
+      {
+        localPath: 'D:\\payload.bin',
+        remotePath: '/tmp/payload.bin',
+        overwrite: false,
+        verification: 'balanced',
+      },
+      (event) => events.push(event),
+    );
+
+    const progress = events.filter((event) => event.type === 'progress');
+    expect(progress.map((event) => event.phase)).toEqual([
+      'connecting',
+      'transferring',
+      'transferring',
+      'verifying',
+      'finalizing',
+    ]);
+    expect(progress[1]).toEqual(expect.objectContaining({
+      bytesPerSecond: 4096,
+      averageBytesPerSecond: 2048,
+      etaSeconds: 1,
+    }));
   });
 });
 
