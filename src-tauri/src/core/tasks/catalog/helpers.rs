@@ -3,9 +3,11 @@ use crate::core::tasks::model::{
     OutputKind, ParameterDefinition, ParameterKind, PrivilegeRequirement, ResultParserKind,
     RiskLevel, RollbackPlan, TaskCategory, TaskDefinition, TaskImplementation, TaskStep,
 };
+use base64::{engine::general_purpose::STANDARD, Engine as _};
 use serde_json::{json, Value};
 
 const SUPPORTED_FAMILIES: [&str; 3] = ["debian", "rhel", "openeuler"];
+const LINUX_READ_ONLY_FAMILIES: [&str; 4] = ["debian", "rhel", "openeuler", "linux"];
 
 pub(super) fn read_only_task(
     id: &str,
@@ -52,7 +54,10 @@ pub(super) fn read_only_implementation(
     TaskImplementation {
         id: id.into(),
         compatibility: CompatibilityPredicate {
-            os_families: Vec::new(),
+            os_families: LINUX_READ_ONLY_FAMILIES
+                .iter()
+                .map(|value| (*value).into())
+                .collect(),
             service_managers: Vec::new(),
             required_commands: required_commands
                 .iter()
@@ -67,6 +72,88 @@ pub(super) fn read_only_implementation(
         rollback_plan: None,
         result_parser,
     }
+}
+
+pub(super) fn bsd_read_only_implementation(
+    id: &str,
+    service_managers: &[&str],
+    required_commands: &[&str],
+    timeout_seconds: u64,
+    command: &str,
+    parser: ResultParserKind,
+) -> TaskImplementation {
+    let mut implementation = read_only_implementation(
+        id,
+        required_commands,
+        vec![bounded_step(
+            "collect",
+            "采集 BSD 诊断信息",
+            timeout_seconds,
+            command,
+        )],
+        parser,
+    );
+    implementation.compatibility.os_families = vec!["bsd".into()];
+    implementation.compatibility.service_managers = service_managers
+        .iter()
+        .map(|value| (*value).into())
+        .collect();
+    implementation
+}
+
+pub(super) fn windows_read_only_implementation(
+    id: &str,
+    executable: &str,
+    required_commands: &[&str],
+    timeout_seconds: u64,
+    script: &str,
+    parser: ResultParserKind,
+) -> TaskImplementation {
+    let executable_capability = if executable == "pwsh" {
+        "pwsh"
+    } else {
+        "powershell"
+    };
+    let mut required = vec![executable_capability.to_string()];
+    required.extend(required_commands.iter().map(|value| (*value).to_string()));
+    required.sort();
+    required.dedup();
+    TaskImplementation {
+        id: id.into(),
+        compatibility: CompatibilityPredicate {
+            os_families: vec!["windows".into()],
+            service_managers: Vec::new(),
+            required_commands: required,
+        },
+        preflight_steps: Vec::new(),
+        preview_steps: vec![bounded_step(
+            "collect",
+            "采集 Windows 诊断信息",
+            timeout_seconds,
+            &powershell_encoded_command(executable, script),
+        )],
+        backup_plan: None,
+        execution_steps: vec![bounded_step(
+            "collect",
+            "采集 Windows 诊断信息",
+            timeout_seconds,
+            &powershell_encoded_command(executable, script),
+        )],
+        verify_steps: Vec::new(),
+        rollback_plan: None,
+        result_parser: parser,
+    }
+}
+
+fn powershell_encoded_command(executable: &str, script: &str) -> String {
+    let mut utf16le = Vec::with_capacity(script.len() * 2);
+    for unit in script.encode_utf16() {
+        utf16le.extend_from_slice(&unit.to_le_bytes());
+    }
+    format!(
+        "{executable} -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand {}",
+        STANDARD.encode(utf16le),
+    )
 }
 
 #[allow(clippy::too_many_arguments)]

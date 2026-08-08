@@ -4,10 +4,14 @@ use crate::core::tasks::model::{
 };
 
 use super::helpers::{
-    backup_item, bounded_step, dangerous_implementation, dangerous_task, enum_parameter, parameter,
-    read_only_implementation, read_only_task, service_parameter,
+    backup_item, bounded_step, bsd_read_only_implementation, dangerous_implementation,
+    dangerous_task, enum_parameter, parameter, read_only_implementation, read_only_task,
+    service_parameter, windows_read_only_implementation,
 };
 use serde_json::json;
+
+const WINDOWS_SERVICE_INVENTORY_SCRIPT: &str = r#"$services=@(Get-CimInstance Win32_Service | Sort-Object Name | Select-Object -First 500 Name,DisplayName,State,StartMode,ProcessId,ExitCode)
+[ordered]@{schemaVersion=1;services=$services} | ConvertTo-Json -Compress -Depth 4"#;
 
 pub(super) fn tasks() -> Vec<TaskDefinition> {
     vec![
@@ -32,6 +36,38 @@ pub(super) fn tasks() -> Vec<TaskDefinition> {
                     &["service", "head"],
                     45,
                     "service --status-all 2>&1 | head -n 500",
+                    ResultParserKind::Table,
+                ),
+                bsd_read_only_implementation(
+                    "bsd-service",
+                    &["service"],
+                    &["service", "head"],
+                    45,
+                    r#"printf '== configured ==\n'; service -l 2>/dev/null | head -n 500; printf '== enabled_or_running ==\n'; service -e 2>/dev/null | head -n 500"#,
+                    ResultParserKind::Table,
+                ),
+                bsd_read_only_implementation(
+                    "bsd-rcctl",
+                    &["rcctl"],
+                    &["rcctl", "head"],
+                    45,
+                    "rcctl ls all 2>/dev/null | head -n 500",
+                    ResultParserKind::Table,
+                ),
+                windows_read_only_implementation(
+                    "windows-powershell-services",
+                    "powershell.exe",
+                    &["get-ciminstance"],
+                    45,
+                    WINDOWS_SERVICE_INVENTORY_SCRIPT,
+                    ResultParserKind::Table,
+                ),
+                windows_read_only_implementation(
+                    "windows-pwsh-services",
+                    "pwsh",
+                    &["get-ciminstance"],
+                    45,
+                    WINDOWS_SERVICE_INVENTORY_SCRIPT,
                     ResultParserKind::Table,
                 ),
             ],

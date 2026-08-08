@@ -86,10 +86,9 @@ fn matches_capabilities(
     capabilities: &SystemCapabilities,
 ) -> bool {
     (predicate.os_families.is_empty()
-        || predicate
-            .os_families
-            .iter()
-            .any(|family| family == &capabilities.os_family))
+        || predicate.os_families.iter().any(|family| {
+            family == &capabilities.os_family || family == capabilities.platform_family.as_str()
+        }))
         && (predicate.service_managers.is_empty()
             || predicate
                 .service_managers
@@ -99,4 +98,83 @@ fn matches_capabilities(
             .required_commands
             .iter()
             .all(|command| capabilities.has_command(command))
+}
+
+#[cfg(test)]
+mod platform_adapter_tests {
+    use super::*;
+    use crate::core::system_probe::{RemoteOsFamily, RemotePathStyle, RemoteShell};
+
+    fn task(id: &str) -> TaskDefinition {
+        built_in_catalog()
+            .into_iter()
+            .find(|definition| definition.id == id)
+            .unwrap()
+    }
+
+    #[test]
+    fn selects_fixed_windows_powershell_adapters_for_safe_tasks() {
+        let capabilities = SystemCapabilities {
+            platform_family: RemoteOsFamily::Windows,
+            remote_shell: RemoteShell::PowerShell,
+            path_style: RemotePathStyle::WindowsSftp,
+            os_id: "windows".into(),
+            os_family: "windows".into(),
+            service_manager: "windows_service_control_manager".into(),
+            commands: vec![
+                "powershell".into(),
+                "get-ciminstance".into(),
+                "get-process".into(),
+            ],
+            ..Default::default()
+        };
+
+        for id in ["system.overview", "system.disk_usage", "service.inventory"] {
+            let definition = task(id);
+            let implementation = select_implementation(&definition, &capabilities).unwrap();
+            assert!(implementation.id.starts_with("windows-powershell"));
+            assert!(implementation.execution_steps[0]
+                .command_template
+                .starts_with("powershell.exe -NoLogo -NoProfile -NonInteractive"));
+            assert!(implementation.execution_steps[0]
+                .command_template
+                .contains("-EncodedCommand"));
+        }
+    }
+
+    #[test]
+    fn selects_bsd_adapters_instead_of_linux_command_variants() {
+        let capabilities = SystemCapabilities {
+            platform_family: RemoteOsFamily::Bsd,
+            remote_shell: RemoteShell::PosixSh,
+            path_style: RemotePathStyle::Posix,
+            os_id: "freebsd".into(),
+            os_family: "bsd".into(),
+            service_manager: "service".into(),
+            commands: vec![
+                "sh".into(),
+                "uname".into(),
+                "uptime".into(),
+                "df".into(),
+                "head".into(),
+                "ps".into(),
+                "sysctl".into(),
+                "service".into(),
+            ],
+            ..Default::default()
+        };
+
+        assert_eq!(
+            select_implementation(&task("system.overview"), &capabilities)
+                .unwrap()
+                .id,
+            "bsd"
+        );
+        assert_eq!(
+            select_implementation(&task("service.inventory"), &capabilities)
+                .unwrap()
+                .id,
+            "bsd-service"
+        );
+    }
 }

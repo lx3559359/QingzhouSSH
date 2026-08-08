@@ -4,9 +4,21 @@ use crate::core::tasks::model::{
 };
 
 use super::helpers::{
-    backup_item, bounded_step, dangerous_implementation, dangerous_task, host_parameter,
-    integer_parameter, parameter, read_only_implementation, read_only_task, string_parameter,
+    backup_item, bounded_step, bsd_read_only_implementation, dangerous_implementation,
+    dangerous_task, host_parameter, integer_parameter, parameter, read_only_implementation,
+    read_only_task, string_parameter, windows_read_only_implementation,
 };
+
+const WINDOWS_OVERVIEW_SCRIPT: &str = r#"$os=Get-CimInstance Win32_OperatingSystem | Select-Object Version,BuildNumber,LastBootUpTime,TotalVisibleMemorySize,FreePhysicalMemory
+$computer=Get-CimInstance Win32_ComputerSystem | Select-Object Name,Domain,Manufacturer,Model,NumberOfLogicalProcessors,TotalPhysicalMemory
+$processes=@(Get-Process | Sort-Object CPU -Descending | Select-Object -First 20 Id,ProcessName,CPU,WorkingSet64,StartTime)
+[ordered]@{schemaVersion=1;computer=$computer;operatingSystem=$os;processes=$processes} | ConvertTo-Json -Compress -Depth 5"#;
+
+const WINDOWS_DISK_SCRIPT: &str = r#"$volumes=@(Get-CimInstance Win32_LogicalDisk | Sort-Object DeviceID | Select-Object DeviceID,DriveType,FileSystem,VolumeName,Size,FreeSpace)
+[ordered]@{schemaVersion=1;volumes=$volumes} | ConvertTo-Json -Compress -Depth 4"#;
+
+const WINDOWS_TIME_SCRIPT: &str = r#"$service=Get-Service -Name W32Time -ErrorAction SilentlyContinue | Select-Object Name,Status,StartType
+[ordered]@{schemaVersion=1;currentTime=(Get-Date -Format o);timeZone=[TimeZoneInfo]::Local.Id;w32Time=$service} | ConvertTo-Json -Compress -Depth 4"#;
 
 pub(super) fn tasks() -> Vec<TaskDefinition> {
     vec![
@@ -294,6 +306,88 @@ fn diagnostic(
         )],
         parser,
     );
+    let mut implementations = vec![implementation];
+    match id {
+        "system.overview" => {
+            implementations.push(bsd_read_only_implementation(
+                "bsd",
+                &[],
+                &["uname", "uptime", "df", "ps", "sysctl"],
+                timeout_seconds,
+                r#"printf '== system ==\n'; uname -a; printf '== uptime ==\n'; uptime; printf '== cpu_memory ==\n'; sysctl hw.ncpu hw.model hw.physmem hw.realmem 2>/dev/null || true; printf '== disk_kib ==\n'; df -Pk; printf '== processes ==\n'; ps ax -o pid,user,%cpu,%mem,etime,command | head -n 31"#,
+                parser,
+            ));
+            implementations.push(windows_read_only_implementation(
+                "windows-powershell-overview",
+                "powershell.exe",
+                &["get-ciminstance", "get-process"],
+                timeout_seconds,
+                WINDOWS_OVERVIEW_SCRIPT,
+                parser,
+            ));
+            implementations.push(windows_read_only_implementation(
+                "windows-pwsh-overview",
+                "pwsh",
+                &["get-ciminstance", "get-process"],
+                timeout_seconds,
+                WINDOWS_OVERVIEW_SCRIPT,
+                parser,
+            ));
+        }
+        "system.disk_usage" => {
+            implementations.push(bsd_read_only_implementation(
+                "bsd",
+                &[],
+                &["df"],
+                timeout_seconds,
+                "df -Pk",
+                parser,
+            ));
+            implementations.push(windows_read_only_implementation(
+                "windows-powershell-disk",
+                "powershell.exe",
+                &["get-ciminstance"],
+                timeout_seconds,
+                WINDOWS_DISK_SCRIPT,
+                parser,
+            ));
+            implementations.push(windows_read_only_implementation(
+                "windows-pwsh-disk",
+                "pwsh",
+                &["get-ciminstance"],
+                timeout_seconds,
+                WINDOWS_DISK_SCRIPT,
+                parser,
+            ));
+        }
+        "system.time" => {
+            implementations.push(bsd_read_only_implementation(
+                "bsd",
+                &[],
+                &["date"],
+                timeout_seconds,
+                r#"printf '== date ==\n'; date; printf '== timezone ==\n'; if test -r /etc/localtime; then ls -l /etc/localtime 2>/dev/null || true; fi; if command -v ntpq >/dev/null 2>&1; then ntpq -pn; fi"#,
+                parser,
+            ));
+            implementations.push(windows_read_only_implementation(
+                "windows-powershell-time",
+                "powershell.exe",
+                &["get-date", "get-service"],
+                timeout_seconds,
+                WINDOWS_TIME_SCRIPT,
+                parser,
+            ));
+            implementations.push(windows_read_only_implementation(
+                "windows-pwsh-time",
+                "pwsh",
+                &["get-date", "get-service"],
+                timeout_seconds,
+                WINDOWS_TIME_SCRIPT,
+                parser,
+            ));
+        }
+        _ => {}
+    }
     let mut task = read_only_task(
         id,
         TaskCategory::System,
@@ -301,7 +395,7 @@ fn diagnostic(
         description,
         estimated_seconds,
         parameters,
-        vec![implementation],
+        implementations,
     );
     task.output_kind = output_kind;
     task

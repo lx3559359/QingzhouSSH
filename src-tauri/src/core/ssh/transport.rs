@@ -20,8 +20,8 @@ use crate::{
     core::{
         ssh::fingerprint::sha256_fingerprint,
         system_probe::{
-            parse_powershell_probe, parse_probe, powershell_probe_command, SystemCapabilities,
-            PROBE_COMMAND,
+            parse_powershell_probe, parse_probe, powershell_probe_command, pwsh_probe_command,
+            SystemCapabilities, PROBE_COMMAND,
         },
     },
     domain::server::StoredCredential,
@@ -386,14 +386,16 @@ pub async fn probe_authenticated(
         return parse_probe(&output.stdout);
     }
 
-    let windows_output = execute_authenticated(session, &powershell_probe_command()).await?;
-    if windows_output.exit_status != 0 {
-        return Err(AppError::ssh_command(
-            windows_output.exit_status,
-            windows_output.stderr,
-        ));
+    let mut last_failure = None;
+    for command in [powershell_probe_command(), pwsh_probe_command()] {
+        let windows_output = execute_authenticated(session, &command).await?;
+        if windows_output.exit_status == 0 {
+            return parse_powershell_probe(&windows_output.stdout);
+        }
+        last_failure = Some((windows_output.exit_status, windows_output.stderr));
     }
-    parse_powershell_probe(&windows_output.stdout)
+    let (status, stderr) = last_failure.expect("fixed Windows probe command list is non-empty");
+    Err(AppError::ssh_command(status, stderr))
 }
 
 pub async fn probe_system(

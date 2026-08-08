@@ -114,10 +114,9 @@ fn evaluate_implementation<'a>(
     let predicate = &implementation.compatibility;
     let mut blocking_capabilities = Vec::new();
     if !predicate.os_families.is_empty()
-        && !predicate
-            .os_families
-            .iter()
-            .any(|family| family == &capabilities.os_family)
+        && !predicate.os_families.iter().any(|family| {
+            family == &capabilities.os_family || family == capabilities.platform_family.as_str()
+        })
     {
         blocking_capabilities.push(format!(
             "系统类型 {} 不在该实现支持范围内",

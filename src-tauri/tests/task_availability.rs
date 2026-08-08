@@ -1,5 +1,5 @@
 use qingzhou_ssh_lib::core::{
-    system_probe::{SystemCapabilities, PROBE_COMMAND},
+    system_probe::{RemoteOsFamily, SystemCapabilities, PROBE_COMMAND},
     tasks::{
         built_in_catalog, evaluate_task_availability, remediation_for, TaskAvailabilityState,
         TaskDefinition,
@@ -91,6 +91,7 @@ fn allows_generic_read_only_tools_on_unknown_distributions_when_commands_exist()
     let mut capabilities = capabilities_for(&definition);
     capabilities.os_id = "custom-linux".into();
     capabilities.os_family = "unknown".into();
+    capabilities.platform_family = RemoteOsFamily::Linux;
 
     let evaluation = evaluate_task_availability(&definition, &capabilities);
 

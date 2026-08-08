@@ -27,7 +27,7 @@ printf 'NTP_SYNCHRONIZED='; if command -v timedatectl >/dev/null 2>&1; then time
 printf 'TIMEZONES='; if command -v timedatectl >/dev/null 2>&1; then timedatectl list-timezones 2>/dev/null | awk 'NR <= 600 { printf "%s,", $1 }'; fi; printf '\n'"#;
 
 const POWERSHELL_PROBE_SCRIPT: &str = r#"$ErrorActionPreference='Stop'
-$commandNames=@('powershell','pwsh','Get-FileHash','Get-Service','Get-Process','Get-CimInstance','Get-NetAdapter','Get-NetIPAddress')
+$commandNames=@('powershell','pwsh','Get-Date','Get-FileHash','Get-Service','Get-Process','Get-CimInstance','Get-NetAdapter','Get-NetIPAddress')
 $commands=@($commandNames | Where-Object { Get-Command $_ -ErrorAction SilentlyContinue } | ForEach-Object { $_.ToLowerInvariant() })
 $services=@(Get-Service -ErrorAction SilentlyContinue | Select-Object -First 500 -ExpandProperty Name)
 $payload=[ordered]@{schemaVersion=1;osId='windows';version=[Environment]::OSVersion.Version.ToString();architecture=$env:PROCESSOR_ARCHITECTURE;shell='powershell';commands=$commands;services=$services}
@@ -36,12 +36,20 @@ Write-Output ($payload | ConvertTo-Json -Compress -Depth 3)
 Write-Output '__QZ_WINDOWS_JSON_END__'"#;
 
 pub fn powershell_probe_command() -> String {
+    encoded_powershell_probe_command("powershell.exe")
+}
+
+pub fn pwsh_probe_command() -> String {
+    encoded_powershell_probe_command("pwsh")
+}
+
+fn encoded_powershell_probe_command(executable: &str) -> String {
     let mut utf16le = Vec::with_capacity(POWERSHELL_PROBE_SCRIPT.len() * 2);
     for unit in POWERSHELL_PROBE_SCRIPT.encode_utf16() {
         utf16le.extend_from_slice(&unit.to_le_bytes());
     }
     format!(
-        "powershell.exe -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand {}",
+        "{executable} -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand {}",
         STANDARD.encode(utf16le)
     )
 }
@@ -641,5 +649,6 @@ __QZ_WINDOWS_JSON_END__
         assert!(command.starts_with("powershell.exe -NoLogo -NoProfile -NonInteractive"));
         assert!(command.contains("-EncodedCommand"));
         assert!(!command.contains("__QZ_WINDOWS_JSON_BEGIN__"));
+        assert!(pwsh_probe_command().starts_with("pwsh -NoLogo -NoProfile -NonInteractive"));
     }
 }
