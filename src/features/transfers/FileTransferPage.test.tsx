@@ -1,5 +1,5 @@
 import '@testing-library/jest-dom/vitest';
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -87,6 +87,54 @@ describe('FileTransferPage', () => {
     finishRefresh(remoteRoot);
     await waitFor(() => expect(within(remotePane).queryByRole('status')).not.toBeInTheDocument());
     expect(apiMocks.listRemoteDirectory).toHaveBeenCalledTimes(2);
+  });
+
+  it('keeps the latest path visible when an older refresh finishes late', async () => {
+    const user = userEvent.setup();
+    const slow = {
+      path: '/slow',
+      parent: '/',
+      entries: [{ name: 'fast', path: '/fast', kind: 'directory' as const, size: null, modifiedAt: null }],
+    };
+    const fast = {
+      path: '/fast',
+      parent: '/',
+      entries: [{ name: 'winner.txt', path: '/fast/winner.txt', kind: 'file' as const, size: 1, modifiedAt: null }],
+    };
+    const rootWithSlow = {
+      ...remoteRoot,
+      entries: [{ name: 'slow', path: '/slow', kind: 'directory' as const, size: null, modifiedAt: null }],
+    };
+    let finishSlowRefresh!: (value: typeof slow) => void;
+    apiMocks.listRemoteDirectory.mockImplementation(async (_serverId, path) => {
+      if (path === '/') return rootWithSlow;
+      if (path === '/fast') return fast;
+      return slow;
+    });
+    render(<FileTransferPage />);
+    const remotePane = await screen.findByRole('region', { name: '远程文件浏览器' });
+
+    await user.click(await within(remotePane).findByRole('button', { name: '打开远程目录 slow' }));
+    expect(await within(remotePane).findByRole('button', { name: '打开远程目录 fast' })).toBeVisible();
+    apiMocks.listRemoteDirectory.mockImplementation(async (_serverId, path) => {
+      if (path === '/slow') {
+        return new Promise<typeof slow>((resolve) => { finishSlowRefresh = resolve; });
+      }
+      if (path === '/fast') return fast;
+      return rootWithSlow;
+    });
+    await user.click(within(remotePane).getByRole('button', { name: '刷新' }));
+    await user.click(within(remotePane).getByRole('button', { name: '打开远程目录 fast' }));
+
+    expect(await within(remotePane).findByRole('button', { name: '选择远程文件 winner.txt' })).toBeVisible();
+    await act(async () => {
+      finishSlowRefresh(slow);
+      await Promise.resolve();
+    });
+    await waitFor(() => {
+      expect(within(remotePane).getByText('/fast')).toBeVisible();
+      expect(within(remotePane).getByRole('button', { name: '选择远程文件 winner.txt' })).toBeVisible();
+    });
   });
 
   it('does not reserve a status panel until a transfer has details to show', async () => {

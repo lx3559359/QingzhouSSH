@@ -172,50 +172,61 @@ export function FileTransferPage({ onSearchRemoteFile }: FileTransferPageProps =
   const [target, setTarget] = useState('');
   const [browserContext, setBrowserContext] = useState<BrowserContext | null>(null);
   const startedAt = useRef<number | null>(null);
+  const localRequestGeneration = useRef(0);
+  const remoteRequestGeneration = useRef(0);
 
   const loadLocal = async (path: string | null, force = false) => {
+    const generation = ++localRequestGeneration.current;
     const cached = directorySessionCache.peekLocal(path);
+    const fresh = force ? null : directorySessionCache.freshLocal(path);
     const preserved = cached ?? (localListing?.path === path ? localListing : null);
     if (preserved) setLocalListing(preserved);
     setLocalLoading(!preserved);
-    setLocalRefreshing(Boolean(force && preserved));
+    setLocalRefreshing(Boolean(preserved && !fresh));
     setLocalError('');
     try {
       const loader = () => api.listLocalDirectory(path);
-      const listing = force
-        ? await directorySessionCache.refreshLocal(path, loader)
-        : await directorySessionCache.loadLocal(path, loader);
+      const listing = fresh ?? await directorySessionCache.refreshLocal(path, loader);
+      if (generation !== localRequestGeneration.current) return;
       setLocalListing(listing);
       setSelectedLocal(null);
     } catch (cause) {
+      if (generation !== localRequestGeneration.current) return;
       setLocalError(`无法读取本地目录：${asAppError(cause).message}${preserved ? '。当前显示上次读取结果' : ''}`);
     } finally {
-      setLocalLoading(false);
-      setLocalRefreshing(false);
+      if (generation === localRequestGeneration.current) {
+        setLocalLoading(false);
+        setLocalRefreshing(false);
+      }
     }
   };
 
   const loadRemote = async (path: string, force = false) => {
     if (!serverId) return;
+    const generation = ++remoteRequestGeneration.current;
+    const requestedServerId = serverId;
     const cached = directorySessionCache.peekRemote(serverId, path);
+    const fresh = force ? null : directorySessionCache.freshRemote(serverId, path);
     const preserved = cached ?? (remoteListing?.path === path ? remoteListing : null);
     if (preserved) setRemoteListing(preserved);
     setRemoteLoading(!preserved);
-    setRemoteRefreshing(Boolean(force && preserved));
+    setRemoteRefreshing(Boolean(preserved && !fresh));
     setRemoteError('');
     try {
-      const loader = () => api.listRemoteDirectory(serverId, path);
-      const listing = force
-        ? await directorySessionCache.refreshRemote(serverId, path, loader)
-        : await directorySessionCache.loadRemote(serverId, path, loader);
+      const loader = () => api.listRemoteDirectory(requestedServerId, path);
+      const listing = fresh ?? await directorySessionCache.refreshRemote(requestedServerId, path, loader);
+      if (generation !== remoteRequestGeneration.current) return;
       setRemoteListing(listing);
-      directorySessionCache.rememberRemotePath(serverId, listing.path);
+      directorySessionCache.rememberRemotePath(requestedServerId, listing.path);
       setSelectedRemote(null);
     } catch (cause) {
+      if (generation !== remoteRequestGeneration.current) return;
       setRemoteError(`无法读取远程目录，请检查连接和权限。技术详情：${asAppError(cause).message}${preserved ? '。当前显示上次读取结果' : ''}`);
     } finally {
-      setRemoteLoading(false);
-      setRemoteRefreshing(false);
+      if (generation === remoteRequestGeneration.current) {
+        setRemoteLoading(false);
+        setRemoteRefreshing(false);
+      }
     }
   };
 
@@ -229,7 +240,13 @@ export function FileTransferPage({ onSearchRemoteFile }: FileTransferPageProps =
 
   useEffect(() => {
     if (serverId) void loadRemote(directorySessionCache.lastRemotePath(serverId));
-    else setRemoteListing(null);
+    else {
+      remoteRequestGeneration.current += 1;
+      setRemoteListing(null);
+      setRemoteLoading(false);
+      setRemoteRefreshing(false);
+      setRemoteError('');
+    }
   }, [serverId]);
 
   const resetProgress = () => {

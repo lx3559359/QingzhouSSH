@@ -12,6 +12,47 @@ function listing(path: string): DirectoryListing {
 }
 
 describe('DirectorySessionCache', () => {
+  it('uses only fresh entries for cached loads', async () => {
+    let now = 1_000;
+    const clock = vi.fn(() => now);
+    const cache = new DirectorySessionCache(128, clock, 5_000);
+    const loader = vi
+      .fn<() => Promise<DirectoryListing>>()
+      .mockResolvedValueOnce(listing('/fresh'))
+      .mockResolvedValueOnce(listing('/refreshed'));
+
+    await expect(cache.loadRemote('server-1', '/', loader)).resolves.toEqual(listing('/fresh'));
+    now = 5_999;
+    expect(cache.freshRemote('server-1', '/')).toEqual(listing('/fresh'));
+    await cache.loadRemote('server-1', '/', loader);
+    expect(loader).toHaveBeenCalledTimes(1);
+
+    now = 6_000;
+    expect(cache.freshRemote('server-1', '/')).toBeNull();
+    expect(cache.peekRemote('server-1', '/')).toEqual(listing('/fresh'));
+    await expect(cache.loadRemote('server-1', '/', loader)).resolves.toEqual(listing('/refreshed'));
+    expect(loader).toHaveBeenCalledTimes(2);
+  });
+
+  it('shows stale data while deduplicating its background refresh', async () => {
+    let now = 1_000;
+    const cache = new DirectorySessionCache(128, () => now, 5_000);
+    await cache.loadRemote('server-1', '/', async () => listing('/old'));
+    now = 6_000;
+    let resolve!: (value: DirectoryListing) => void;
+    const loader = vi.fn(() => new Promise<DirectoryListing>((done) => { resolve = done; }));
+
+    expect(cache.peekRemote('server-1', '/')).toEqual(listing('/old'));
+    const first = cache.refreshRemote('server-1', '/', loader);
+    const second = cache.refreshRemote('server-1', '/', loader);
+    expect(first).toBe(second);
+    expect(loader).toHaveBeenCalledTimes(1);
+
+    resolve(listing('/new'));
+    await expect(first).resolves.toEqual(listing('/new'));
+    expect(cache.peekRemote('server-1', '/')).toEqual(listing('/new'));
+  });
+
   it('reuses one in-flight request and then serves the cached remote listing', async () => {
     const cache = new DirectorySessionCache(128);
     let resolve!: (value: DirectoryListing) => void;
@@ -88,5 +129,23 @@ describe('DirectorySessionCache', () => {
     cache.clear();
     expect(cache.peekRemote('server-2', '/srv')).toBeNull();
     expect(cache.peekLocal('D:\\project')).toBeNull();
+  });
+
+  it('does not resurrect a server listing when an obsolete request finishes after clear', async () => {
+    const cache = new DirectorySessionCache(128);
+    let resolve!: (value: DirectoryListing) => void;
+    const pending = cache.loadRemote(
+      'server-1',
+      '/slow',
+      () => new Promise<DirectoryListing>((done) => { resolve = done; }),
+    );
+    cache.rememberRemotePath('server-1', '/slow');
+
+    cache.clearServer('server-1');
+    resolve(listing('/slow'));
+    await pending;
+
+    expect(cache.peekRemote('server-1', '/slow')).toBeNull();
+    expect(cache.lastRemotePath('server-1')).toBe('/');
   });
 });

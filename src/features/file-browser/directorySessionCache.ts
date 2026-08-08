@@ -2,17 +2,29 @@ import type { DirectoryListing } from '../../api/contracts';
 
 type DirectoryLoader = () => Promise<DirectoryListing>;
 
+interface CachedDirectory {
+  listing: DirectoryListing;
+  fetchedAt: number;
+}
+
 const REMOTE_PREFIX = 'remote\u0000';
 const LOCAL_PREFIX = 'local\u0000';
 
 export class DirectorySessionCache {
-  private readonly listings = new Map<string, DirectoryListing>();
+  private readonly listings = new Map<string, CachedDirectory>();
   private readonly inFlight = new Map<string, Promise<DirectoryListing>>();
   private readonly remotePaths = new Map<string, string>();
 
-  constructor(private readonly maximumEntries = 128) {
+  constructor(
+    private readonly maximumEntries = 128,
+    private readonly clock: () => number = Date.now,
+    private readonly freshnessMs = 5_000,
+  ) {
     if (!Number.isInteger(maximumEntries) || maximumEntries < 1) {
       throw new Error('目录缓存容量必须大于 0');
+    }
+    if (!Number.isFinite(freshnessMs) || freshnessMs <= 0) {
+      throw new Error('目录缓存有效期必须大于 0');
     }
   }
 
@@ -22,6 +34,14 @@ export class DirectorySessionCache {
 
   peekLocal(path: string | null) {
     return this.peek(this.localKey(path));
+  }
+
+  freshRemote(serverId: string, path: string) {
+    return this.fresh(this.remoteKey(serverId, path));
+  }
+
+  freshLocal(path: string | null) {
+    return this.fresh(this.localKey(path));
   }
 
   loadRemote(serverId: string, path: string, loader: DirectoryLoader) {
@@ -41,11 +61,15 @@ export class DirectorySessionCache {
   }
 
   invalidateRemote(serverId: string, path: string) {
-    this.listings.delete(this.remoteKey(serverId, path));
+    const key = this.remoteKey(serverId, path);
+    this.listings.delete(key);
+    this.inFlight.delete(key);
   }
 
   invalidateLocal(path: string | null) {
-    this.listings.delete(this.localKey(path));
+    const key = this.localKey(path);
+    this.listings.delete(key);
+    this.inFlight.delete(key);
   }
 
   rememberRemotePath(serverId: string, path: string) {
@@ -82,28 +106,39 @@ export class DirectorySessionCache {
   }
 
   private peek(key: string) {
-    const listing = this.listings.get(key) ?? null;
-    if (listing) {
+    const cached = this.listings.get(key) ?? null;
+    if (cached) {
       this.listings.delete(key);
-      this.listings.set(key, listing);
+      this.listings.set(key, cached);
     }
-    return listing;
+    return cached?.listing ?? null;
+  }
+
+  private fresh(key: string) {
+    const cached = this.listings.get(key) ?? null;
+    if (!cached) return null;
+    this.listings.delete(key);
+    this.listings.set(key, cached);
+    const age = this.clock() - cached.fetchedAt;
+    return age >= 0 && age < this.freshnessMs ? cached.listing : null;
   }
 
   private load(key: string, loader: DirectoryLoader, force: boolean) {
     if (!force) {
-      const cached = this.peek(key);
+      const cached = this.fresh(key);
       if (cached) return Promise.resolve(cached);
     }
 
     const pending = this.inFlight.get(key);
     if (pending) return pending;
 
-    const request = loader()
+    const request: Promise<DirectoryListing> = loader()
       .then((listing) => {
-        this.listings.delete(key);
-        this.listings.set(key, listing);
-        this.evictOverflow();
+        if (this.inFlight.get(key) === request) {
+          this.listings.delete(key);
+          this.listings.set(key, { listing, fetchedAt: this.clock() });
+          this.evictOverflow();
+        }
         return listing;
       })
       .finally(() => {
