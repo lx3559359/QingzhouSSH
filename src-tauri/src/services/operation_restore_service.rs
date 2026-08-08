@@ -99,7 +99,6 @@ impl OperationRestoreService {
         let privilege_mode = match probe_privilege(&connected.session).await {
             Ok(mode) => mode,
             Err(error) => {
-                connected.session.disconnect().await;
                 self.repository.mark_creation_failed(creating.id).await?;
                 return Err(error);
             }
@@ -117,7 +116,6 @@ impl OperationRestoreService {
                 cancel,
             )
             .await;
-        connected.session.disconnect().await;
         if let Err(error) = result {
             let _ = self.repository.mark_creation_failed(creating.id).await;
             return Err(error);
@@ -244,7 +242,6 @@ impl OperationRestoreService {
         let privilege_mode = match probe_privilege(&connected.session).await {
             Ok(mode) => mode,
             Err(error) => {
-                connected.session.disconnect().await;
                 self.repository
                     .finish_rollback(
                         restore_point_id,
@@ -303,7 +300,6 @@ impl OperationRestoreService {
                 }
             }
         }
-        connected.session.disconnect().await;
         let status = if failures.is_empty() {
             OperationRestorePointStatus::RolledBack
         } else if succeeded == 0 {

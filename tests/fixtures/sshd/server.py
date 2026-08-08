@@ -71,6 +71,10 @@ REMOTE_ROOT: Path | None = None
 
 
 class FixtureServer(asyncssh.SSHServer):
+    def connection_made(self, conn: asyncssh.SSHServerConnection) -> None:
+        current = int(read_optional_state("connection-count", "0") or "0")
+        write_state("connection-count", str(current + 1))
+
     def password_auth_supported(self) -> bool:
         return True
 
@@ -373,6 +377,7 @@ def prepare_remote_root(remote_root: Path) -> None:
     write_state("hostname", "qingzhou-fixture", remote_root)
     write_state("timezone", "UTC", remote_root)
     write_state("ntp", "true", remote_root)
+    write_state("connection-count", "0", remote_root)
     for service in ["qingzhou-fixture.service", "qingzhou-verify-fail.service"]:
         write_state(service_state_key(service), "active", remote_root)
         write_state(service_policy_key(service), "enabled", remote_root)

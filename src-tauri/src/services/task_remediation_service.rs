@@ -173,7 +173,6 @@ impl TaskRemediationService {
             self.registry.issue(binding, now_millis()).await
         }
         .await;
-        connected.session.disconnect().await;
         result
     }
 
@@ -202,7 +201,6 @@ impl TaskRemediationService {
             )
         }
         .await;
-        connected.session.disconnect().await;
         let current = current_result?;
         ensure_same_binding(&expected, &current)?;
 

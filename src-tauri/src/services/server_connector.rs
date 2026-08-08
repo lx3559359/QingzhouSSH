@@ -88,10 +88,6 @@ impl ConnectionPool {
             .await
             .insert(server_id.into(), connection);
     }
-
-    async fn invalidate(&self, server_id: &str) {
-        self.entries.lock().await.remove(server_id);
-    }
 }
 
 fn may_reuse(session_open: bool, identity_matches: bool, idle_for: Duration) -> bool {
@@ -226,8 +222,22 @@ impl ServerConnector {
         host.parse::<IpAddr>()
             .map_err(|_| AppError::Validation("已验证的新 IP 地址无效".into()))?;
         self.servers.update_host(server_id, host).await?;
-        self.pool.invalidate(server_id).await;
+        self.invalidate(server_id).await;
         Ok(())
+    }
+
+    pub async fn invalidate(&self, server_id: &str) {
+        let cached = self.pool.entries.lock().await.remove(server_id);
+        if let Some(cached) = cached {
+            cached.connected.session.disconnect().await;
+        }
+    }
+
+    pub async fn shutdown(&self) {
+        let entries = std::mem::take(&mut *self.pool.entries.lock().await);
+        for (_, cached) in entries {
+            cached.connected.session.disconnect().await;
+        }
     }
 
     pub async fn require_server(&self, server_id: &str) -> AppResult<ServerProfile> {

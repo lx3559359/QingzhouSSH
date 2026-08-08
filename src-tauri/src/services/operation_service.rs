@@ -194,7 +194,6 @@ impl OperationService {
                 Ok(mode) => Some(mode),
                 Err(error) => {
                     self.mark_preflight_failed(run.id).await;
-                    connected.session.disconnect().await;
                     return Err(error);
                 }
             }
@@ -206,7 +205,6 @@ impl OperationService {
                 Ok(plan) => plan,
                 Err(error) => {
                     self.mark_preflight_failed(run.id).await;
-                    connected.session.disconnect().await;
                     return Err(error);
                 }
             };
@@ -221,7 +219,6 @@ impl OperationService {
                 Ok(summary) => summary,
                 Err(error) => {
                     self.mark_preflight_failed(run.id).await;
-                    connected.session.disconnect().await;
                     return Err(error);
                 }
             }
@@ -243,7 +240,6 @@ impl OperationService {
                 },
             )
             .await;
-        connected.session.disconnect().await;
         result
     }
 
@@ -301,14 +297,12 @@ impl OperationService {
             match probe_privilege(&connected.session).await {
                 Ok(mode) => Some(mode),
                 Err(error) => {
-                    connected.session.disconnect().await;
                     return Err(error);
                 }
             }
         } else {
             None
         };
-        connected.session.disconnect().await;
         self.start_with_capabilities_and_cancel(
             server_id,
             request,
@@ -1032,7 +1026,6 @@ impl OperationService {
             Ok(connected) => {
                 let capabilities = connected.capabilities.clone();
                 let privilege_mode = probe_privilege(&connected.session).await?;
-                connected.session.disconnect().await;
                 (capabilities, privilege_mode, true)
             }
             Err(_) => {

@@ -78,7 +78,6 @@ impl RestorePointService {
             cancel,
         )
         .await;
-        connected.session.disconnect().await;
 
         match outcome {
             Ok(Some(outcome)) => {
@@ -183,7 +182,6 @@ impl RestorePointService {
                 }
             }
         }
-        connected.session.disconnect().await;
         self.workflows
             .finish_rollback_run(
                 run_id,

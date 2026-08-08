@@ -636,7 +636,6 @@ impl WorkflowService {
                 }
                 Ok(())
             });
-            connected.session.disconnect().await;
             compatibility?;
         }
         Ok(definition)

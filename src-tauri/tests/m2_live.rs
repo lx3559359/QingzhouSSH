@@ -74,6 +74,65 @@ async fn trusted_server(services: &AppServices, credential: CredentialInput, nam
     server.id
 }
 
+fn fixture_connection_count() -> u64 {
+    std::fs::read_to_string(
+        project_root()
+            .join(".local/ssh-fixture/remote-root/run/qingzhou-fixture")
+            .join("connection-count.state"),
+    )
+    .unwrap()
+    .trim()
+    .parse()
+    .unwrap()
+}
+
+#[tokio::test]
+#[ignore = "requires scripts/ssh-fixture.ps1 -Action Start"]
+async fn directory_browsing_and_task_execution_share_one_transport() {
+    let data_root = project_root()
+        .join(".local/test-data")
+        .join(format!("m2-session-reuse-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir_all(&data_root).unwrap();
+    let _cleanup = Cleanup(data_root.clone());
+    let services = AppServices::open_with_protector(&data_root, Arc::new(XorProtector))
+        .await
+        .unwrap();
+    let server_id = trusted_server(
+        &services,
+        CredentialInput::Password {
+            password: PASSWORD_CANARY.into(),
+        },
+        "fixture-session-reuse",
+    )
+    .await;
+    let before = fixture_connection_count();
+
+    services
+        .list_remote_directory(&server_id, "/")
+        .await
+        .unwrap();
+    services
+        .list_remote_directory(&server_id, "/tmp")
+        .await
+        .unwrap();
+    let mut events = VecEventSink::default();
+    let details = services
+        .start_task_execution(
+            &server_id,
+            TaskExecutionRequest {
+                task_id: "system.disk_usage".into(),
+                parameters: json!({}),
+                dangerous_confirmed: false,
+            },
+            &mut events,
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(details.record.status, ExecutionStatus::Succeeded);
+    assert_eq!(fixture_connection_count() - before, 1);
+}
+
 #[tokio::test]
 #[ignore = "requires scripts/ssh-fixture.ps1 -Action Start"]
 async fn tasks_scripts_logs_sftp_history_and_canaries_close_the_m2_loop() {

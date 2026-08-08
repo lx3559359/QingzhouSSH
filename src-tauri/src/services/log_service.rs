@@ -94,7 +94,6 @@ impl LogService {
         let command = match build_search_command(&request, &connected.capabilities) {
             Ok(command) => command,
             Err(error) => {
-                connected.session.disconnect().await;
                 self.registry.remove(execution_id).await;
                 self.finish_error(execution_id, started_at, error, &mut sequenced)
                     .await?;
@@ -128,7 +127,6 @@ impl LogService {
             capture.flush()?;
             outcome
         };
-        connected.session.disconnect().await;
         self.registry.remove(execution_id).await;
         let result = match outcome {
             Ok(outcome) if outcome.exit_status == 0 => {

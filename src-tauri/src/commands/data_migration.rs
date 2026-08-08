@@ -106,6 +106,7 @@ pub async fn start_data_root_migration(
     {
         return Err(AppError::Validation("数据目录迁移已经开始".into()));
     }
+    services.shutdown_connections().await;
     let result = services
         .data_migration_service()
         .start(

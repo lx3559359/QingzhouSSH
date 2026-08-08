@@ -88,7 +88,6 @@ impl TransferService {
             }
         };
         let result = sftp::upload(&connected.session, &request, &mut sequenced, cancel).await;
-        connected.session.disconnect().await;
         self.registry.remove(execution_id).await;
         match result {
             Ok(outcome) => {
@@ -148,7 +147,6 @@ impl TransferService {
             cancel,
         )
         .await;
-        connected.session.disconnect().await;
         self.registry.remove(execution_id).await;
         match result {
             Ok(outcome) => {

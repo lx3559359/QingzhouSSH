@@ -81,6 +81,7 @@ pub struct AppServices {
     data_migration: DataMigrationService,
     servers: ServerRepository,
     vault: Vault,
+    connector: ServerConnector,
     executions: ExecutionService,
     task_remediation: TaskRemediationService,
     operations: OperationService,
@@ -182,13 +183,13 @@ impl AppServices {
             ExecutionNodeAdapter::new(executions.clone()),
             IoNodeAdapter::new(logs.clone(), transfers.clone()),
             restore_points.clone(),
-            connector,
+            connector.clone(),
             WorkflowRunRegistry::default(),
         );
         let workflow_diagnostics = WorkflowDiagnosticsService::new(
             root.to_path_buf(),
             workflow_repository.clone(),
-            ServerConnector::new(servers.clone(), vault.clone()),
+            connector.clone(),
         );
         let data_migration = DataMigrationService::new(root.to_path_buf());
         Ok(Self {
@@ -198,6 +199,7 @@ impl AppServices {
             data_migration,
             servers,
             vault,
+            connector,
             executions,
             task_remediation,
             operations,
@@ -249,6 +251,10 @@ impl AppServices {
             ));
         }
         Ok(())
+    }
+
+    pub async fn shutdown_connections(&self) {
+        self.connector.shutdown().await;
     }
 
     pub fn execution_service(&self) -> ExecutionService {
@@ -472,11 +478,8 @@ impl AppServices {
         server_id: &str,
         path: &str,
     ) -> AppResult<DirectoryListing> {
-        let connector = ServerConnector::new(self.servers.clone(), self.vault.clone());
-        let connected = connector.connect(server_id).await?;
-        let listing = sftp::list_remote_directory(&connected.session, path).await;
-        connected.session.disconnect().await;
-        listing
+        let connected = self.connector.connect(server_id).await?;
+        sftp::list_remote_directory(&connected.session, path).await
     }
 
     pub async fn upload_file<E: EventSink>(

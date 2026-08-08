@@ -63,7 +63,7 @@ impl RemoteRecoveryService {
             .connector
             .connect_at_verified_ip(server_id, target_host)
             .await?;
-        execute_connected(connected, command, privilege_mode).await
+        execute_connected(connected, command, privilege_mode, true).await
     }
 
     pub async fn inspect_ip_change_current(
@@ -73,7 +73,7 @@ impl RemoteRecoveryService {
         privilege_mode: PrivilegeMode,
     ) -> AppResult<CommandOutput> {
         let connected = self.connector.connect(server_id).await?;
-        execute_connected(connected, command, privilege_mode).await
+        execute_connected(connected, command, privilege_mode, false).await
     }
 
     pub async fn inspect_ip_change(
@@ -92,7 +92,6 @@ impl RemoteRecoveryService {
         let privilege_mode = match crate::core::tasks::probe_privilege(&connected.session).await {
             Ok(mode) => mode,
             Err(error) => {
-                connected.session.disconnect().await;
                 return Err(error);
             }
         };
@@ -100,6 +99,7 @@ impl RemoteRecoveryService {
             connected,
             &build_remote_recovery_cleanup_command(run_id),
             privilege_mode,
+            false,
         )
         .await?;
         Ok(())
@@ -116,11 +116,14 @@ async fn execute_connected(
     connected: crate::services::server_connector::ConnectedServer,
     command: &str,
     privilege_mode: PrivilegeMode,
+    disconnect_after: bool,
 ) -> AppResult<CommandOutput> {
     let command = elevate_fixed_command(command, privilege_mode)?;
     let output = execute_authenticated(&connected.session, &command).await;
     let redactor = connected.redactor.clone();
-    connected.session.disconnect().await;
+    if disconnect_after {
+        connected.session.disconnect().await;
+    }
     let output = output?;
     if output.exit_status != 0 {
         return Err(AppError::ssh_command(

@@ -223,7 +223,6 @@ impl ExecutionService {
         } else {
             true
         };
-        connected.session.disconnect().await;
         let tasks = definitions
             .into_iter()
             .map(|definition| {
@@ -526,14 +525,12 @@ impl ExecutionService {
         let implementation = match select_implementation(&definition, &connected.capabilities) {
             Ok(implementation) => implementation,
             Err(error) => {
-                connected.session.disconnect().await;
                 return self.fail_before_run(execution_id, error, events).await;
             }
         };
         let command = match render_command(implementation, &parameters) {
             Ok(command) => command,
             Err(error) => {
-                connected.session.disconnect().await;
                 return self.fail_before_run(execution_id, error, events).await;
             }
         };
@@ -653,7 +650,6 @@ impl ExecutionService {
             cancel,
         )
         .await;
-        connected.session.disconnect().await;
         self.registry.remove(execution_id).await;
 
         let result = match outcome {
