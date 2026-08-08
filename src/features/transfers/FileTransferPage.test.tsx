@@ -163,7 +163,12 @@ describe('FileTransferPage', () => {
 
     expect(apiMocks.uploadFile).toHaveBeenCalledWith(
       'server-1',
-      { localPath: 'D:\\project\\upload.bin', remotePath: '/srv/upload.bin', overwrite: false },
+      {
+        localPath: 'D:\\project\\upload.bin',
+        remotePath: '/srv/upload.bin',
+        overwrite: false,
+        verification: 'balanced',
+      },
       expect.any(Function),
     );
     expect(await screen.findByText('1 KB / 2 KB')).toBeVisible();
@@ -181,7 +186,12 @@ describe('FileTransferPage', () => {
 
     expect(apiMocks.downloadFile).toHaveBeenCalledWith(
       'server-1',
-      { remotePath: '/srv/report.log', suggestedName: 'report.log', overwrite: false },
+      {
+        remotePath: '/srv/report.log',
+        suggestedName: 'report.log',
+        overwrite: false,
+        verification: 'balanced',
+      },
       expect.any(Function),
     );
     await waitFor(() => expect(screen.getByText('downloads/report.log')).toBeVisible());
@@ -237,7 +247,12 @@ describe('FileTransferPage', () => {
 
     expect(apiMocks.downloadFile).toHaveBeenCalledWith(
       'server-1',
-      { remotePath: '/srv/report.log', suggestedName: 'report.log', overwrite: false },
+      {
+        remotePath: '/srv/report.log',
+        suggestedName: 'report.log',
+        overwrite: false,
+        verification: 'balanced',
+      },
       expect.any(Function),
     );
   });

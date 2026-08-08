@@ -373,7 +373,12 @@ describe('LogSearchPage', () => {
     await user.click(within(menu).getByRole('menuitem', { name: '下载文件' }));
     expect(apiMocks.downloadFile).toHaveBeenCalledWith(
       'server-1',
-      { remotePath: '/home/app/requirements.txt', suggestedName: 'requirements.txt', overwrite: false },
+      {
+        remotePath: '/home/app/requirements.txt',
+        suggestedName: 'requirements.txt',
+        overwrite: false,
+        verification: 'balanced',
+      },
       expect.any(Function),
     );
 

@@ -561,10 +561,12 @@ impl OperationRestoreService {
         let mut events = VecEventSink::default();
         upload(
             &connected.session,
+            &connected.capabilities,
             &UploadRequest {
                 local_path,
                 remote_path: staging.clone(),
                 overwrite: false,
+                verification: crate::core::sftp::VerificationPolicy::Strict,
             },
             &mut events,
             cancel,

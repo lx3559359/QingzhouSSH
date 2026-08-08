@@ -791,16 +791,20 @@ export interface LogResultPage {
   nextCursor: string | null;
 }
 
+export type VerificationPolicy = 'balanced' | 'strict' | 'transport_only';
+
 export interface UploadRequest {
   localPath: string;
   remotePath: string;
   overwrite: boolean;
+  verification: VerificationPolicy;
 }
 
 export interface DownloadRequest {
   remotePath: string;
   suggestedName: string;
   overwrite: boolean;
+  verification: VerificationPolicy;
 }
 
 export interface ExecutionFilter {

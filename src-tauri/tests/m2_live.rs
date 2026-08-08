@@ -298,6 +298,7 @@ async fn tasks_scripts_logs_sftp_history_and_canaries_close_the_m2_loop() {
                 local_path: upload_source,
                 remote_path: remote_path.clone(),
                 overwrite: false,
+                verification: qingzhou_ssh_lib::core::sftp::VerificationPolicy::Balanced,
             },
             &mut upload_events,
         )
@@ -313,6 +314,7 @@ async fn tasks_scripts_logs_sftp_history_and_canaries_close_the_m2_loop() {
                 remote_path,
                 suggested_name: "m2-roundtrip.txt".into(),
                 overwrite: false,
+                verification: qingzhou_ssh_lib::core::sftp::VerificationPolicy::Balanced,
             },
             &mut download_events,
         )

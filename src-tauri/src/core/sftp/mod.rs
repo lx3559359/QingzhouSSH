@@ -11,7 +11,8 @@ pub(crate) use transfer::{
 };
 
 pub use transfer::{
-    download, download_destination, hash_remote_file, local_partial_path, remote_partial_path,
-    sha256_local_file, upload, validate_remote_path, DownloadRequest, TransferOutcome,
-    UploadRequest, TRANSFER_BLOCK_BYTES,
+    download, download_destination, hash_remote_file, local_partial_path, parse_sha256_output,
+    remote_hash_command, remote_partial_path, select_verification, sha256_local_file, upload,
+    validate_remote_path, DownloadRequest, TransferOutcome, UploadRequest, VerificationLevel,
+    VerificationPolicy, VerificationStrategy, TRANSFER_BLOCK_BYTES,
 };

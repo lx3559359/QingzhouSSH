@@ -258,7 +258,12 @@ export function LogSearchPage({ searchIntent, onSearchIntentConsumed }: LogSearc
     try {
       const result = await api.downloadFile(
         serverId,
-        { remotePath: item.path, suggestedName: item.name, overwrite: false },
+        {
+          remotePath: item.path,
+          suggestedName: item.name,
+          overwrite: false,
+          verification: 'balanced',
+        },
         () => undefined,
       );
       if (result.record.status !== 'succeeded') {

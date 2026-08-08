@@ -4,9 +4,11 @@ import argparse
 import asyncio
 import base64
 import gzip
+import hashlib
 import logging
 import os
 import re
+import shlex
 from pathlib import Path
 
 import asyncssh
@@ -82,11 +84,35 @@ class FixtureServer(asyncssh.SSHServer):
         return username in {"testuser", "root-sim", "sudo-user", "no-priv"} and password == "testpass"
 
 
+class FixtureSFTPServer(asyncssh.SFTPServer):
+    def read(self, file_obj: object, offset: int, size: int) -> bytes:
+        data = super().read(file_obj, offset, size)
+        increment_state("sftp-read-bytes", len(data))
+        return data
+
+
 def command_result(command: str, username: str = "testuser") -> tuple[str, str, int]:
     if any(marker in command for marker in FAILURE_MARKERS):
         return "", "workflow fixture injected failure\n", 73
     if "__QZ_OS_BEGIN__" in command:
         return PROBE_OUTPUT, "", 0
+    if command.startswith("sha256sum -- "):
+        arguments = shlex.split(command)
+        if len(arguments) != 3 or arguments[:2] != ["sha256sum", "--"]:
+            return "", "fixture rejected malformed sha256sum command\n", 64
+        if REMOTE_ROOT is None:
+            return "", "fixture root is unavailable\n", 70
+        remote_path = arguments[2]
+        candidate = (REMOTE_ROOT / remote_path.lstrip("/")).resolve()
+        try:
+            candidate.relative_to(REMOTE_ROOT.resolve())
+        except ValueError:
+            return "", "fixture rejected sha256sum path escape\n", 64
+        if not candidate.is_file():
+            return "", "fixture sha256sum target is missing\n", 1
+        increment_state("hash-command-count", 1)
+        digest = hashlib.sha256(candidate.read_bytes()).hexdigest()
+        return f"{digest}  {remote_path}\n", "", 0
     if command.strip() == "id -u":
         return ("0\n", "", 0) if username in {"testuser", "root-sim"} else ("1000\n", "", 0)
     if command.strip() == "sudo -n true":
@@ -378,6 +404,8 @@ def prepare_remote_root(remote_root: Path) -> None:
     write_state("timezone", "UTC", remote_root)
     write_state("ntp", "true", remote_root)
     write_state("connection-count", "0", remote_root)
+    write_state("hash-command-count", "0", remote_root)
+    write_state("sftp-read-bytes", "0", remote_root)
     for service in ["qingzhou-fixture.service", "qingzhou-verify-fail.service"]:
         write_state(service_state_key(service), "active", remote_root)
         write_state(service_policy_key(service), "enabled", remote_root)
@@ -405,7 +433,7 @@ async def serve(host_key: Path, authorized_keys: Path, remote_root: Path) -> Non
         server_host_keys=[str(host_key)],
         authorized_client_keys=str(authorized_keys),
         process_factory=handle_process,
-        sftp_factory=lambda channel: asyncssh.SFTPServer(
+        sftp_factory=lambda channel: FixtureSFTPServer(
             channel, chroot=os.fsencode(remote_root)
         ),
         kex_algs=["diffie-hellman-group14-sha256"],
@@ -464,6 +492,11 @@ def write_state(name: str, value: str, remote_root: Path | None = None) -> None:
     state_root = root / "run" / "qingzhou-fixture"
     state_root.mkdir(parents=True, exist_ok=True)
     (state_root / f"{name}.state").write_text(f"{value}\n", encoding="utf-8")
+
+
+def increment_state(name: str, amount: int) -> None:
+    current = int(read_optional_state(name, "0") or "0")
+    write_state(name, str(current + amount))
 
 
 def parse_args() -> argparse.Namespace:

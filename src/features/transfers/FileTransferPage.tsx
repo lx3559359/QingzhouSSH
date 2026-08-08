@@ -311,7 +311,12 @@ export function FileTransferPage({ onSearchRemoteFile }: FileTransferPageProps =
     setTarget(destination);
     setRunning(true);
     try {
-      applyResult(await api.uploadFile(serverId, { localPath: entry.path, remotePath: destination, overwrite }, onEvent));
+      applyResult(await api.uploadFile(serverId, {
+        localPath: entry.path,
+        remotePath: destination,
+        overwrite,
+        verification: 'balanced',
+      }, onEvent));
       await loadRemote(remoteListing.path, true);
     } catch (cause) {
       setStatus(`SFTP 上传失败：${asAppError(cause).message}`);
@@ -328,7 +333,12 @@ export function FileTransferPage({ onSearchRemoteFile }: FileTransferPageProps =
     setTarget(`项目数据目录/downloads/${entry.name}`);
     setRunning(true);
     try {
-      applyResult(await api.downloadFile(serverId, { remotePath: entry.path, suggestedName: entry.name, overwrite }, onEvent));
+      applyResult(await api.downloadFile(serverId, {
+        remotePath: entry.path,
+        suggestedName: entry.name,
+        overwrite,
+        verification: 'balanced',
+      }, onEvent));
       if (localListing) await loadLocal(localListing.path, true);
     } catch (cause) {
       setStatus(`SFTP 下载失败：${asAppError(cause).message}`);

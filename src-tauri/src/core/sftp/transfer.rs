@@ -14,9 +14,10 @@ use crate::{
     core::{
         ssh::{
             executor::{EventSink, VecEventSink},
-            transport::AuthenticatedSshSession,
+            transport::{execute_authenticated, AuthenticatedSshSession},
         },
-        tasks::prepare_task_restore_destination,
+        system_probe::SystemCapabilities,
+        tasks::{prepare_task_restore_destination, shell_quote},
         workflows::resolve_restore_point_path,
     },
     domain::events::{EventSequence, ExecutionEventPayload},
@@ -25,6 +26,41 @@ use crate::{
 
 pub const TRANSFER_BLOCK_BYTES: usize = 64 * 1024;
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum VerificationPolicy {
+    #[default]
+    Balanced,
+    Strict,
+    TransportOnly,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum VerificationLevel {
+    RemoteHash,
+    TransportAndSize,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum VerificationStrategy {
+    RemoteHash,
+    SftpReread,
+    TransportAndSize,
+}
+
+pub fn select_verification(
+    policy: VerificationPolicy,
+    remote_hash_available: bool,
+) -> VerificationStrategy {
+    match (policy, remote_hash_available) {
+        (VerificationPolicy::TransportOnly, _) => VerificationStrategy::TransportAndSize,
+        (_, true) => VerificationStrategy::RemoteHash,
+        (VerificationPolicy::Balanced, false) => VerificationStrategy::TransportAndSize,
+        (VerificationPolicy::Strict, false) => VerificationStrategy::SftpReread,
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UploadRequest {
@@ -32,6 +68,8 @@ pub struct UploadRequest {
     pub remote_path: String,
     #[serde(default)]
     pub overwrite: bool,
+    #[serde(default)]
+    pub verification: VerificationPolicy,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -41,6 +79,8 @@ pub struct DownloadRequest {
     pub suggested_name: String,
     #[serde(default)]
     pub overwrite: bool,
+    #[serde(default)]
+    pub verification: VerificationPolicy,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -49,6 +89,8 @@ pub struct TransferOutcome {
     pub bytes: u64,
     pub sha256: String,
     pub location: String,
+    pub verification_level: VerificationLevel,
+    pub remote_hash_compared: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -77,6 +119,39 @@ pub fn validate_remote_path(path: &str) -> AppResult<()> {
         return Err(AppError::Validation("远程路径不能包含上级目录".into()));
     }
     Ok(())
+}
+
+pub fn remote_hash_command(
+    capabilities: &SystemCapabilities,
+    remote_path: &str,
+) -> AppResult<Option<String>> {
+    validate_remote_path(remote_path)?;
+    Ok(capabilities
+        .has_command("sha256sum")
+        .then(|| format!("sha256sum -- {}", shell_quote(remote_path))))
+}
+
+pub fn parse_sha256_output(output: &str) -> AppResult<String> {
+    let line = output.strip_suffix('\n').unwrap_or(output);
+    let line = line.strip_suffix('\r').unwrap_or(line);
+    if line.contains('\r') || line.contains('\n') {
+        return Err(AppError::Integrity(
+            "远端 SHA-256 输出包含多行或歧义内容".into(),
+        ));
+    }
+    let digest_end = line
+        .find(char::is_whitespace)
+        .ok_or_else(|| AppError::Integrity("远端 SHA-256 输出缺少文件路径".into()))?;
+    let digest = &line[..digest_end];
+    let path = line[digest_end..].trim_start();
+    if digest.len() != 64
+        || !digest.bytes().all(|byte| byte.is_ascii_hexdigit())
+        || path.is_empty()
+        || path.contains('\0')
+    {
+        return Err(AppError::Integrity("远端 SHA-256 输出格式无效".into()));
+    }
+    Ok(digest.to_ascii_lowercase())
 }
 
 pub fn remote_partial_path(remote_path: &str) -> AppResult<String> {
@@ -131,11 +206,14 @@ pub async fn sha256_local_file(path: &Path) -> AppResult<String> {
 
 pub async fn upload<E: EventSink>(
     ssh: &AuthenticatedSshSession,
+    capabilities: &SystemCapabilities,
     request: &UploadRequest,
     events: &mut E,
     cancel: CancellationToken,
 ) -> AppResult<TransferOutcome> {
     validate_upload_request(request).await?;
+    let verification =
+        select_verification(request.verification, capabilities.has_command("sha256sum"));
     let total = tokio::fs::metadata(&request.local_path).await?.len();
     let partial_path = remote_partial_path(&request.remote_path)?;
     let sftp = open_sftp(ssh).await?;
@@ -144,7 +222,18 @@ pub async fn upload<E: EventSink>(
         return Err(AppError::Validation("远程目标文件已存在".into()));
     }
 
-    let result = upload_to_partial(&sftp, request, &partial_path, total, events, cancel).await;
+    let result = upload_to_partial(
+        ssh,
+        capabilities,
+        &sftp,
+        request,
+        &partial_path,
+        total,
+        verification,
+        events,
+        cancel,
+    )
+    .await;
     if result.is_err() {
         let _ = sftp.remove_file(partial_path.clone()).await;
     }
@@ -153,10 +242,13 @@ pub async fn upload<E: EventSink>(
 }
 
 async fn upload_to_partial<E: EventSink>(
+    ssh: &AuthenticatedSshSession,
+    capabilities: &SystemCapabilities,
     sftp: &SftpSession,
     request: &UploadRequest,
     partial_path: &str,
     total: u64,
+    verification: VerificationStrategy,
     events: &mut E,
     cancel: CancellationToken,
 ) -> AppResult<TransferOutcome> {
@@ -191,11 +283,31 @@ async fn upload_to_partial<E: EventSink>(
     remote.flush().await?;
     remote.shutdown().await?;
     let local_hash = hex_digest(hasher);
-    let remote_hash = hash_remote_with_sftp(sftp, partial_path, cancel.clone()).await?;
-    if local_hash != remote_hash {
+    let remote_size = sftp.metadata(partial_path).await.map_err(sftp_error)?.size;
+    if verification == VerificationStrategy::TransportAndSize && remote_size.is_none() {
+        return Err(AppError::Integrity("远端未返回上传文件大小".into()));
+    }
+    if remote_size.is_some_and(|remote_size| remote_size != transferred) {
         return Err(AppError::Integrity(format!(
-            "上传文件 SHA-256 不一致：本地 {local_hash}，远端 {remote_hash}"
+            "上传文件大小不一致：本地 {transferred} 字节，远端 {} 字节",
+            remote_size.unwrap_or_default()
         )));
+    }
+    let remote_hash = match verification {
+        VerificationStrategy::RemoteHash => {
+            Some(hash_remote_with_command(ssh, capabilities, partial_path, cancel.clone()).await?)
+        }
+        VerificationStrategy::SftpReread => {
+            Some(hash_remote_with_sftp(sftp, partial_path, cancel.clone()).await?)
+        }
+        VerificationStrategy::TransportAndSize => None,
+    };
+    if let Some(remote_hash) = &remote_hash {
+        if local_hash != *remote_hash {
+            return Err(AppError::Integrity(format!(
+                "上传文件 SHA-256 不一致：本地 {local_hash}，远端 {remote_hash}"
+            )));
+        }
     }
     if request.overwrite && sftp_try_exists(sftp, &request.remote_path).await? {
         sftp.remove_file(request.remote_path.clone())
@@ -209,11 +321,14 @@ async fn upload_to_partial<E: EventSink>(
         bytes: transferred,
         sha256: local_hash,
         location: request.remote_path.clone(),
+        verification_level: verification_level(verification),
+        remote_hash_compared: remote_hash.is_some(),
     })
 }
 
 pub async fn download<E: EventSink>(
     ssh: &AuthenticatedSshSession,
+    capabilities: &SystemCapabilities,
     data_root: &Path,
     request: &DownloadRequest,
     events: &mut E,
@@ -233,13 +348,34 @@ pub async fn download<E: EventSink>(
     }
 
     let sftp = open_sftp(ssh).await?;
+    let verification =
+        select_verification(request.verification, capabilities.has_command("sha256sum"));
+    let expected_hash = match verification {
+        VerificationStrategy::RemoteHash => Some(
+            hash_remote_with_command(ssh, capabilities, &request.remote_path, cancel.clone())
+                .await?,
+        ),
+        VerificationStrategy::SftpReread => {
+            Some(hash_remote_with_sftp(&sftp, &request.remote_path, cancel.clone()).await?)
+        }
+        VerificationStrategy::TransportAndSize => None,
+    };
     let target = LocalDownloadTarget {
         data_root,
         destination: &destination,
         partial: &partial,
         overwrite: request.overwrite,
     };
-    let result = download_to_partial(&sftp, &request.remote_path, target, events, cancel).await;
+    let result = download_to_partial(
+        &sftp,
+        &request.remote_path,
+        target,
+        expected_hash,
+        verification,
+        events,
+        cancel,
+    )
+    .await;
     if result.is_err() && partial.exists() {
         let _ = tokio::fs::remove_file(&partial).await;
     }
@@ -258,10 +394,11 @@ async fn download_to_partial<E: EventSink>(
     sftp: &SftpSession,
     remote_path: &str,
     target: LocalDownloadTarget<'_>,
+    expected_hash: Option<String>,
+    verification: VerificationStrategy,
     events: &mut E,
     cancel: CancellationToken,
 ) -> AppResult<TransferOutcome> {
-    let expected_hash = hash_remote_with_sftp(sftp, remote_path, cancel.clone()).await?;
     let total = sftp.metadata(remote_path).await.map_err(sftp_error)?.size;
     let mut remote = sftp.open(remote_path).await.map_err(sftp_error)?;
     let mut local = File::create(target.partial).await?;
@@ -288,10 +425,21 @@ async fn download_to_partial<E: EventSink>(
     local.flush().await?;
     local.sync_all().await?;
     let actual_hash = hex_digest(hasher);
-    if expected_hash != actual_hash {
+    if verification == VerificationStrategy::TransportAndSize && total.is_none() {
+        return Err(AppError::Integrity("远端未返回下载文件大小".into()));
+    }
+    if total.is_some_and(|total| total != transferred) {
         return Err(AppError::Integrity(format!(
-            "下载文件 SHA-256 不一致：远端 {expected_hash}，本地 {actual_hash}"
+            "下载文件大小不一致：远端 {} 字节，本地 {transferred} 字节",
+            total.unwrap_or_default()
         )));
+    }
+    if let Some(expected_hash) = &expected_hash {
+        if *expected_hash != actual_hash {
+            return Err(AppError::Integrity(format!(
+                "下载文件 SHA-256 不一致：远端 {expected_hash}，本地 {actual_hash}"
+            )));
+        }
     }
     if target.overwrite && target.destination.exists() {
         tokio::fs::remove_file(target.destination).await?;
@@ -305,6 +453,8 @@ async fn download_to_partial<E: EventSink>(
         bytes: transferred,
         sha256: actual_hash,
         location: relative.to_string_lossy().replace('\\', "/"),
+        verification_level: verification_level(verification),
+        remote_hash_compared: expected_hash.is_some(),
     })
 }
 
@@ -408,7 +558,17 @@ async fn backup_remote_file_to(
         partial: &partial,
         overwrite: true,
     };
-    let result = download_to_partial(&sftp, remote_path, target, &mut events, cancel).await;
+    let expected_hash = hash_remote_with_sftp(&sftp, remote_path, cancel.clone()).await?;
+    let result = download_to_partial(
+        &sftp,
+        remote_path,
+        target,
+        Some(expected_hash),
+        VerificationStrategy::SftpReread,
+        &mut events,
+        cancel,
+    )
+    .await;
     if result.is_err() && partial.exists() {
         let _ = tokio::fs::remove_file(&partial).await;
     }
@@ -477,6 +637,33 @@ async fn hash_remote_with_sftp(
         hasher.update(&block[..read]);
     }
     Ok(hex_digest(hasher))
+}
+
+async fn hash_remote_with_command(
+    ssh: &AuthenticatedSshSession,
+    capabilities: &SystemCapabilities,
+    remote_path: &str,
+    cancel: CancellationToken,
+) -> AppResult<String> {
+    let command = remote_hash_command(capabilities, remote_path)?
+        .ok_or_else(|| AppError::Compatibility("远端缺少固定的 SHA-256 校验命令".into()))?;
+    let output = tokio::select! {
+        _ = cancel.cancelled() => return Err(AppError::Cancelled),
+        output = execute_authenticated(ssh, &command) => output?,
+    };
+    if output.exit_status != 0 {
+        return Err(AppError::ssh_command(output.exit_status, output.stderr));
+    }
+    parse_sha256_output(&output.stdout)
+}
+
+fn verification_level(strategy: VerificationStrategy) -> VerificationLevel {
+    match strategy {
+        VerificationStrategy::RemoteHash | VerificationStrategy::SftpReread => {
+            VerificationLevel::RemoteHash
+        }
+        VerificationStrategy::TransportAndSize => VerificationLevel::TransportAndSize,
+    }
 }
 
 async fn open_sftp(ssh: &AuthenticatedSshSession) -> AppResult<SftpSession> {

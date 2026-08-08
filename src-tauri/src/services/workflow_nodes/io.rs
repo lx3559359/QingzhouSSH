@@ -78,6 +78,7 @@ impl IoNodeAdapter {
                             local_path: PathBuf::from(local_path),
                             remote_path: remote_path.clone(),
                             overwrite: *overwrite,
+                            verification: crate::core::sftp::VerificationPolicy::Balanced,
                         },
                         &mut capture,
                     )
@@ -95,6 +96,7 @@ impl IoNodeAdapter {
                             remote_path: remote_path.clone(),
                             suggested_name: suggested_name.clone(),
                             overwrite: *overwrite,
+                            verification: crate::core::sftp::VerificationPolicy::Balanced,
                         },
                         &mut capture,
                     )

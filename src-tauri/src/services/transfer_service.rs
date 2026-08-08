@@ -87,7 +87,15 @@ impl TransferService {
                 return self.details(execution_id).await;
             }
         };
-        let result = sftp::upload(&connected.session, &request, &mut sequenced, cancel).await;
+        let result = sftp::upload(
+            &connected.session,
+            &connected.capabilities,
+            &request,
+            &mut sequenced,
+            cancel,
+        )
+        .await
+        .map_err(|error| redact_transfer_error(error, &connected.redactor));
         self.registry.remove(execution_id).await;
         match result {
             Ok(outcome) => {
@@ -141,12 +149,14 @@ impl TransferService {
         };
         let result = sftp::download(
             &connected.session,
+            &connected.capabilities,
             &self.data_root,
             &request,
             &mut sequenced,
             cancel,
         )
-        .await;
+        .await
+        .map_err(|error| redact_transfer_error(error, &connected.redactor));
         self.registry.remove(execution_id).await;
         match result {
             Ok(outcome) => {
@@ -230,6 +240,8 @@ impl TransferService {
                 "bytes": outcome.bytes,
                 "sha256": outcome.sha256,
                 "location": outcome.location,
+                "verificationLevel": outcome.verification_level,
+                "remoteHashCompared": outcome.remote_hash_compared,
                 "file": file,
             })),
         })
@@ -285,5 +297,16 @@ fn parameter(name: &str, value: &str) -> ExecutionParameter {
         name: name.into(),
         display_value: value.into(),
         sensitive: false,
+    }
+}
+
+fn redact_transfer_error(error: AppError, redactor: &crate::core::redaction::Redactor) -> AppError {
+    match error {
+        AppError::SshCommand {
+            exit_status,
+            stderr,
+        } => AppError::ssh_command(exit_status, redactor.redact(&stderr)),
+        AppError::Transfer(message) => AppError::Transfer(redactor.redact(&message)),
+        other => other,
     }
 }

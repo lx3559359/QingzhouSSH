@@ -106,12 +106,22 @@ describe('Tauri API wrapper', () => {
     await api.downloadLogResult('execution-1', 'result.txt');
     await api.uploadFile(
       'server-1',
-      { localPath: 'D:\payload.zip', remotePath: '/tmp/payload.zip', overwrite: false },
+      {
+        localPath: 'D:\payload.zip',
+        remotePath: '/tmp/payload.zip',
+        overwrite: false,
+        verification: 'balanced',
+      },
       onEvent,
     );
     await api.downloadFile(
       'server-1',
-      { remotePath: '/tmp/result.zip', suggestedName: 'result.zip', overwrite: false },
+      {
+        remotePath: '/tmp/result.zip',
+        suggestedName: 'result.zip',
+        overwrite: false,
+        verification: 'balanced',
+      },
       onEvent,
     );
     await api.listExecutions({ status: 'failed' });

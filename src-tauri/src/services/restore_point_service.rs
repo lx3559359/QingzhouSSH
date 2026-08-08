@@ -165,7 +165,7 @@ impl RestorePointService {
                 .mark_restore_point_rolling_back(point.id)
                 .await?;
             let result = self
-                .rollback_point(&connected.session, &details.run.server_id, &point)
+                .rollback_point(&connected, &details.run.server_id, &point)
                 .await;
             match result {
                 Ok(()) => {
@@ -219,13 +219,13 @@ impl RestorePointService {
 
     async fn rollback_point(
         &self,
-        session: &crate::core::ssh::transport::AuthenticatedSshSession,
+        connected: &crate::services::server_connector::ConnectedServer,
         server_id: &str,
         point: &WorkflowRestorePoint,
     ) -> AppResult<()> {
         validate_applicability(point, server_id)?;
         if !point.original_existed {
-            delete_remote_file(session, &point.remote_path).await?;
+            delete_remote_file(&connected.session, &point.remote_path).await?;
             return Ok(());
         }
         let relative_path = point
@@ -248,11 +248,13 @@ impl RestorePointService {
         }
         let mut events = VecEventSink::default();
         let restored = upload(
-            session,
+            &connected.session,
+            &connected.capabilities,
             &UploadRequest {
                 local_path,
                 remote_path: point.remote_path.clone(),
                 overwrite: true,
+                verification: crate::core::sftp::VerificationPolicy::Strict,
             },
             &mut events,
             CancellationToken::new(),
