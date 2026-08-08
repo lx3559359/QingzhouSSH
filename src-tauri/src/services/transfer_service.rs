@@ -244,6 +244,8 @@ impl TransferService {
                 "location": outcome.location,
                 "verificationLevel": outcome.verification_level,
                 "remoteHashCompared": outcome.remote_hash_compared,
+                "pipelineMaxInFlight": outcome.pipeline_max_in_flight,
+                "pipelineMaxBufferedBytes": outcome.pipeline_max_buffered_bytes,
                 "file": file,
             })),
         })

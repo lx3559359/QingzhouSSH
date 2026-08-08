@@ -1,16 +1,33 @@
-use std::path::{Path, PathBuf};
+use std::{
+    path::{Path, PathBuf},
+    sync::Arc,
+};
 
-use russh_sftp::{client::SftpSession, protocol::OpenFlags};
+use russh_sftp::{
+    client::{
+        error::Error as SftpClientError, rawsession::Limits, Config as SftpConfig, RawSftpSession,
+        SftpSession,
+    },
+    extensions,
+    protocol::{FileAttributes, OpenFlags, StatusCode},
+};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use tokio::{
     fs::File,
     io::{AsyncReadExt, AsyncWriteExt},
+    task::JoinSet,
 };
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
-use super::progress::{ProgressSnapshot, TransferPhase, TransferProgressTracker};
+use super::{
+    pipeline::{
+        effective_read_chunk, plan_window_from, Chunk, OrderedChunkBuffer, PipelineStats,
+        MAX_PIPELINE_BYTES, MAX_PIPELINE_REQUESTS,
+    },
+    progress::{ProgressSnapshot, TransferPhase, TransferProgressTracker},
+};
 
 use crate::{
     core::{
@@ -29,7 +46,7 @@ use crate::{
     error::{AppError, AppResult},
 };
 
-pub const TRANSFER_BLOCK_BYTES: usize = 64 * 1024;
+pub const TRANSFER_BLOCK_BYTES: usize = 256 * 1024;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -96,6 +113,8 @@ pub struct TransferOutcome {
     pub location: String,
     pub verification_level: VerificationLevel,
     pub remote_hash_compared: bool,
+    pub pipeline_max_in_flight: usize,
+    pub pipeline_max_buffered_bytes: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -344,6 +363,8 @@ async fn upload_to_partial<E: EventSink>(
         location: request.remote_path.clone(),
         verification_level: verification_level(verification),
         remote_hash_compared: remote_hash.is_some(),
+        pipeline_max_in_flight: 0,
+        pipeline_max_buffered_bytes: 0,
     })
 }
 
@@ -407,6 +428,7 @@ pub async fn download<E: EventSink>(
         overwrite: request.overwrite,
     };
     let result = download_to_partial(
+        ssh,
         &sftp,
         &request.remote_path,
         target,
@@ -434,6 +456,7 @@ struct LocalDownloadTarget<'a> {
 }
 
 async fn download_to_partial<E: EventSink>(
+    ssh: &AuthenticatedSshSession,
     sftp: &SftpSession,
     remote_path: &str,
     target: LocalDownloadTarget<'_>,
@@ -445,29 +468,38 @@ async fn download_to_partial<E: EventSink>(
     events: &mut E,
     cancel: CancellationToken,
 ) -> AppResult<TransferOutcome> {
-    let mut remote = sftp.open(remote_path).await.map_err(sftp_error)?;
     let mut local = File::create(target.partial).await?;
     let mut hasher = Sha256::new();
-    let mut block = vec![0_u8; TRANSFER_BLOCK_BYTES];
-    let mut transferred = 0_u64;
-    loop {
-        let read = tokio::select! {
-            _ = cancel.cancelled() => return Err(AppError::Cancelled),
-            result = remote.read(&mut block) => result?,
-        };
-        if read == 0 {
-            break;
+    let (transferred, pipeline_stats) = match total {
+        Some(total) => {
+            download_known_size_pipelined(
+                ssh,
+                remote_path,
+                total,
+                &mut local,
+                &mut hasher,
+                progress,
+                sequence,
+                events,
+                cancel.clone(),
+            )
+            .await?
         }
-        tokio::select! {
-            _ = cancel.cancelled() => return Err(AppError::Cancelled),
-            result = local.write_all(&block[..read]) => result?,
-        }
-        hasher.update(&block[..read]);
-        transferred = transferred.saturating_add(read as u64);
-        if let Some(snapshot) = progress.sample(transferred, now_millis()) {
-            emit_progress(events, sequence, snapshot)?;
-        }
-    }
+        None => (
+            download_unknown_size_sequential(
+                sftp,
+                remote_path,
+                &mut local,
+                &mut hasher,
+                progress,
+                sequence,
+                events,
+                cancel.clone(),
+            )
+            .await?,
+            PipelineStats::default(),
+        ),
+    };
     local.flush().await?;
     local.sync_all().await?;
     emit_progress(
@@ -511,7 +543,215 @@ async fn download_to_partial<E: EventSink>(
         location: relative.to_string_lossy().replace('\\', "/"),
         verification_level: verification_level(verification),
         remote_hash_compared: expected_hash.is_some(),
+        pipeline_max_in_flight: pipeline_stats.max_in_flight,
+        pipeline_max_buffered_bytes: pipeline_stats.max_buffered_bytes,
     })
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn download_unknown_size_sequential<E: EventSink>(
+    sftp: &SftpSession,
+    remote_path: &str,
+    local: &mut File,
+    hasher: &mut Sha256,
+    progress: &mut TransferProgressTracker,
+    sequence: &mut EventSequence,
+    events: &mut E,
+    cancel: CancellationToken,
+) -> AppResult<u64> {
+    let mut remote = sftp.open(remote_path).await.map_err(sftp_error)?;
+    let mut block = vec![0_u8; TRANSFER_BLOCK_BYTES];
+    let mut transferred = 0_u64;
+    loop {
+        let read = tokio::select! {
+            _ = cancel.cancelled() => return Err(AppError::Cancelled),
+            result = remote.read(&mut block) => result?,
+        };
+        if read == 0 {
+            break;
+        }
+        write_download_chunk(
+            local,
+            hasher,
+            progress,
+            sequence,
+            events,
+            &cancel,
+            &mut transferred,
+            &block[..read],
+        )
+        .await?;
+    }
+    Ok(transferred)
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn download_known_size_pipelined<E: EventSink>(
+    ssh: &AuthenticatedSshSession,
+    remote_path: &str,
+    total: u64,
+    local: &mut File,
+    hasher: &mut Sha256,
+    progress: &mut TransferProgressTracker,
+    sequence: &mut EventSequence,
+    events: &mut E,
+    cancel: CancellationToken,
+) -> AppResult<(u64, PipelineStats)> {
+    let (session, handle, chunk_bytes) = open_raw_download(ssh, remote_path).await?;
+    let result = run_download_pipeline(
+        session.clone(),
+        &handle,
+        chunk_bytes,
+        total,
+        local,
+        hasher,
+        progress,
+        sequence,
+        events,
+        cancel,
+    )
+    .await;
+    let _ = session.close(handle).await;
+    let _ = session.close_session();
+    result
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn run_download_pipeline<E: EventSink>(
+    session: Arc<RawSftpSession>,
+    handle: &str,
+    chunk_bytes: u64,
+    total: u64,
+    local: &mut File,
+    hasher: &mut Sha256,
+    progress: &mut TransferProgressTracker,
+    sequence: &mut EventSequence,
+    events: &mut E,
+    cancel: CancellationToken,
+) -> AppResult<(u64, PipelineStats)> {
+    let mut transferred = 0_u64;
+    let mut stats = PipelineStats::default();
+    while transferred < total {
+        let chunks = plan_window_from(transferred, total, chunk_bytes, MAX_PIPELINE_REQUESTS);
+        let window_end = chunks
+            .last()
+            .map(|chunk| chunk.offset.saturating_add(chunk.len as u64))
+            .ok_or_else(|| AppError::Integrity("SFTP 下载流水线无法规划剩余文件".into()))?;
+        let mut reads = JoinSet::new();
+        for chunk in chunks {
+            spawn_pipeline_read(&mut reads, session.clone(), handle.to_owned(), chunk);
+        }
+        let mut ordered = OrderedChunkBuffer::new(transferred);
+        stats.observe(reads.len(), ordered.buffered_bytes());
+        while !reads.is_empty() {
+            let joined = tokio::select! {
+                _ = cancel.cancelled() => {
+                    reads.abort_all();
+                    return Err(AppError::Cancelled);
+                }
+                joined = reads.join_next() => joined,
+            }
+            .ok_or_else(|| AppError::Transfer("SFTP 下载流水线提前结束".into()))?
+            .map_err(|error| AppError::Transfer(format!("SFTP 下载读取任务失败：{error}")))?;
+            let (chunk, response) = joined;
+            let data = match response {
+                Ok(data) => data.data,
+                Err(SftpClientError::Status(status)) if status.status_code == StatusCode::Eof => {
+                    reads.abort_all();
+                    return Err(AppError::Integrity(
+                        "远端文件在元数据声明的大小之前结束".into(),
+                    ));
+                }
+                Err(error) => {
+                    reads.abort_all();
+                    return Err(sftp_error(error));
+                }
+            };
+            if data.is_empty() || data.len() > chunk.len as usize {
+                reads.abort_all();
+                return Err(AppError::Integrity("远端返回了无效的 SFTP 数据块".into()));
+            }
+            if data.len() < chunk.len as usize {
+                let consumed = data.len() as u64;
+                spawn_pipeline_read(
+                    &mut reads,
+                    session.clone(),
+                    handle.to_owned(),
+                    Chunk {
+                        offset: chunk.offset.saturating_add(consumed),
+                        len: chunk.len - data.len() as u32,
+                    },
+                );
+            }
+            if !ordered.insert(chunk.offset, data) {
+                reads.abort_all();
+                return Err(AppError::Integrity(
+                    "远端返回了重复或重叠的 SFTP 数据块".into(),
+                ));
+            }
+            stats.observe(reads.len(), ordered.buffered_bytes());
+            if ordered.buffered_bytes() > MAX_PIPELINE_BYTES {
+                reads.abort_all();
+                return Err(AppError::Integrity(
+                    "SFTP 下载流水线缓冲区超过安全上限".into(),
+                ));
+            }
+            for (_, data) in ordered.drain_ready() {
+                write_download_chunk(
+                    local,
+                    hasher,
+                    progress,
+                    sequence,
+                    events,
+                    &cancel,
+                    &mut transferred,
+                    &data,
+                )
+                .await?;
+            }
+        }
+        if transferred != window_end || ordered.buffered_bytes() != 0 {
+            return Err(AppError::Integrity(
+                "SFTP 下载流水线未形成连续文件内容".into(),
+            ));
+        }
+    }
+    Ok((transferred, stats))
+}
+
+fn spawn_pipeline_read(
+    reads: &mut JoinSet<(Chunk, Result<russh_sftp::protocol::Data, SftpClientError>)>,
+    session: Arc<RawSftpSession>,
+    handle: String,
+    chunk: Chunk,
+) {
+    reads.spawn(async move {
+        let response = session.read(handle, chunk.offset, chunk.len).await;
+        (chunk, response)
+    });
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn write_download_chunk<E: EventSink>(
+    local: &mut File,
+    hasher: &mut Sha256,
+    progress: &mut TransferProgressTracker,
+    sequence: &mut EventSequence,
+    events: &mut E,
+    cancel: &CancellationToken,
+    transferred: &mut u64,
+    data: &[u8],
+) -> AppResult<()> {
+    tokio::select! {
+        _ = cancel.cancelled() => return Err(AppError::Cancelled),
+        result = local.write_all(data) => result?,
+    }
+    hasher.update(data);
+    *transferred = transferred.saturating_add(data.len() as u64);
+    if let Some(snapshot) = progress.sample(*transferred, now_millis()) {
+        emit_progress(events, sequence, snapshot)?;
+    }
+    Ok(())
 }
 
 pub(crate) async fn backup_remote_file(
@@ -628,6 +868,7 @@ async fn backup_remote_file_to(
         progress.change_phase(TransferPhase::Transferring, now_millis()),
     )?;
     let result = download_to_partial(
+        ssh,
         &sftp,
         remote_path,
         target,
@@ -743,9 +984,47 @@ async fn open_sftp(ssh: &AuthenticatedSshSession) -> AppResult<SftpSession> {
         .request_subsystem(true, "sftp")
         .await
         .map_err(AppError::from)?;
-    SftpSession::new(channel.into_stream())
+    SftpSession::new_with_config(channel.into_stream(), transfer_sftp_config(ssh))
         .await
         .map_err(sftp_error)
+}
+
+async fn open_raw_download(
+    ssh: &AuthenticatedSshSession,
+    remote_path: &str,
+) -> AppResult<(Arc<RawSftpSession>, String, u64)> {
+    let channel = ssh.open_session_channel().await?;
+    channel
+        .request_subsystem(true, "sftp")
+        .await
+        .map_err(AppError::from)?;
+    let mut session =
+        RawSftpSession::new_with_config(channel.into_stream(), transfer_sftp_config(ssh));
+    let version = session.init().await.map_err(sftp_error)?;
+    let mut limits = Limits::default();
+    if version
+        .extensions
+        .get(extensions::LIMITS)
+        .is_some_and(|version| version == "1")
+    {
+        limits = session.limits().await.map_err(sftp_error)?.into();
+        session.set_limits(limits);
+    }
+    let chunk_bytes = effective_read_chunk(limits.packet_len, limits.read_len);
+    let handle = session
+        .open(remote_path, OpenFlags::READ, FileAttributes::default())
+        .await
+        .map_err(sftp_error)?
+        .handle;
+    Ok((Arc::new(session), handle, chunk_bytes))
+}
+
+fn transfer_sftp_config(ssh: &AuthenticatedSshSession) -> SftpConfig {
+    SftpConfig {
+        max_packet_len: 2 * 1024 * 1024,
+        max_concurrent_writes: MAX_PIPELINE_REQUESTS,
+        request_timeout_secs: ssh.timeout().as_secs().max(1),
+    }
 }
 
 async fn validate_upload_request(request: &UploadRequest) -> AppResult<()> {

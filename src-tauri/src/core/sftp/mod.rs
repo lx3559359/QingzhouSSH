@@ -1,4 +1,5 @@
 mod browser;
+mod pipeline;
 mod progress;
 mod transfer;
 
