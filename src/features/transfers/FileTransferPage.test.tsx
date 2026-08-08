@@ -7,6 +7,9 @@ const apiMocks = vi.hoisted(() => ({
   listServers: vi.fn(),
   listLocalDirectory: vi.fn(),
   listRemoteDirectory: vi.fn(),
+  createRemoteDirectory: vi.fn(),
+  renameRemoteEntry: vi.fn(),
+  deleteRemoteEntry: vi.fn(),
   uploadFile: vi.fn(),
   downloadFile: vi.fn(),
   cancelExecution: vi.fn(),
@@ -85,6 +88,9 @@ describe('FileTransferPage', () => {
     apiMocks.listServers.mockResolvedValue([server]);
     apiMocks.listLocalDirectory.mockResolvedValue(localListing);
     apiMocks.listRemoteDirectory.mockImplementation(async (_serverId, path) => path === '/srv' ? remoteSrv : remoteRoot);
+    apiMocks.createRemoteDirectory.mockResolvedValue(undefined);
+    apiMocks.renameRemoteEntry.mockResolvedValue(undefined);
+    apiMocks.deleteRemoteEntry.mockResolvedValue(undefined);
     apiMocks.listTransferJobs.mockImplementation(async () => [...transferJobs]);
     apiMocks.cancelTransferJob.mockImplementation(async (jobId) => {
       const job = transferJobs.find((item) => item.id === jobId)!;
@@ -297,6 +303,8 @@ describe('FileTransferPage', () => {
     expect(within(menu).getAllByRole('menuitem').map((item) => item.textContent)).toEqual([
       '打开文件夹',
       '刷新当前目录',
+      '重命名',
+      '删除空文件夹',
       '复制完整路径',
     ]);
     fireEvent.keyDown(document, { key: 'Escape' });
@@ -308,6 +316,8 @@ describe('FileTransferPage', () => {
     expect(within(menu).getAllByRole('menuitem').map((item) => item.textContent)).toEqual([
       '下载',
       '搜索文件内容',
+      '重命名',
+      '删除文件',
       '复制文件名',
       '复制完整路径',
     ]);
@@ -322,6 +332,34 @@ describe('FileTransferPage', () => {
         verification: 'balanced',
       },
     );
+  });
+
+  it('creates, renames and safely deletes remote entries with explicit UI', async () => {
+    const user = userEvent.setup();
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    render(<FileTransferPage />);
+
+    const remotePane = await screen.findByRole('region', { name: '远程文件浏览器' });
+    await user.click(within(remotePane).getByRole('button', { name: '新建文件夹' }));
+    const createDialog = screen.getByRole('dialog', { name: '新建远程文件夹' });
+    await user.type(within(createDialog).getByLabelText('文件夹名称'), 'reports');
+    await user.click(within(createDialog).getByRole('button', { name: '创建' }));
+    await waitFor(() => expect(apiMocks.createRemoteDirectory).toHaveBeenCalledWith('server-1', '/', 'reports'));
+
+    const remoteFolder = await within(remotePane).findByRole('button', { name: '打开远程目录 srv' });
+    fireEvent.contextMenu(remoteFolder, { clientX: 50, clientY: 60 });
+    await user.click(within(screen.getByRole('menu')).getByRole('menuitem', { name: '重命名' }));
+    const renameDialog = screen.getByRole('dialog', { name: '重命名远程文件夹' });
+    const renameInput = within(renameDialog).getByLabelText('新名称');
+    await user.clear(renameInput);
+    await user.type(renameInput, 'services');
+    await user.click(within(renameDialog).getByRole('button', { name: '保存' }));
+    await waitFor(() => expect(apiMocks.renameRemoteEntry).toHaveBeenCalledWith('server-1', '/srv', 'services'));
+
+    fireEvent.contextMenu(remoteFolder, { clientX: 50, clientY: 60 });
+    await user.click(within(screen.getByRole('menu')).getByRole('menuitem', { name: '删除空文件夹' }));
+    await waitFor(() => expect(apiMocks.deleteRemoteEntry).toHaveBeenCalledWith('server-1', '/srv', 'directory'));
+    expect(window.confirm).toHaveBeenCalledWith(expect.stringContaining('仅当文件夹为空时'));
   });
 
   it('cancels queued work immediately and offers bounded retry for failed work', async () => {

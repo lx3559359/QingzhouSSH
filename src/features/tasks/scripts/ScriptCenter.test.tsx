@@ -46,7 +46,7 @@ function scriptDetails(enabled = false, body = 'echo ok'): PersonalScriptDetails
         warnings: [],
       },
       timeoutSeconds: 30,
-      shell: 'posix_sh',
+      shell: 'posix_sh' as const,
       compatibility: { osFamilies: ['linux', 'bsd'], requiredCommands: ['sh'] },
       createdAt: 1,
     },
@@ -130,7 +130,7 @@ function fixtureApi(initial: PersonalScriptDetails | null = null): PersonalScrip
       parameterNames: [],
       scanWarnings: [],
       timeoutSeconds: 30,
-      shell: 'posix_sh',
+      shell: 'posix_sh' as const,
       compatibility: { osFamilies: ['linux', 'bsd'], requiredCommands: ['sh'] },
     })),
     confirmPersonalScriptRun: vi.fn(async () => ({

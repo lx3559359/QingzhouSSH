@@ -95,12 +95,16 @@ describe('Tauri API wrapper', () => {
         content: 'uptime',
         timeoutSeconds: 30,
         dangerousConfirmed: true,
+        shell: 'posix_sh',
       },
       onEvent,
     );
     await api.cancelExecution('execution-1');
     await api.listLocalDirectory(null);
     await api.listRemoteDirectory('server-1', '/var/log');
+    await api.createRemoteDirectory('server-1', '/var/log', 'reports');
+    await api.renameRemoteEntry('server-1', '/var/log/old.log', 'new.log');
+    await api.deleteRemoteEntry('server-1', '/var/log/old.log', 'file');
     await api.searchLogs('server-1', logRequest, onEvent);
     await api.readLogResultPage('execution-1', '50', 50);
     await api.downloadLogResult('execution-1', 'result.txt');
@@ -150,6 +154,9 @@ describe('Tauri API wrapper', () => {
       ['cancel_execution', ['executionId']],
       ['list_local_directory', ['path']],
       ['list_remote_directory', ['serverId', 'path']],
+      ['create_remote_directory', ['serverId', 'parent', 'name']],
+      ['rename_remote_entry', ['serverId', 'path', 'newName']],
+      ['delete_remote_entry', ['serverId', 'path', 'expectedKind']],
       ['search_logs', ['serverId', 'request', 'onEvent']],
       ['read_log_result_page', ['executionId', 'cursor', 'pageSize']],
       ['download_log_result', ['executionId', 'suggestedName']],
@@ -293,6 +300,7 @@ describe('Tauri API wrapper', () => {
       body: "printf '%s\\n' ok",
       parameters: [],
       timeoutSeconds: 30,
+      shell: 'posix_sh' as const,
     };
     const metadata = { title: '服务巡检', category: '系统维护', tags: ['巡检'] };
     const events: number[] = [];
@@ -305,6 +313,7 @@ describe('Tauri API wrapper', () => {
       body: draft.body,
       parameters: [],
       timeoutSeconds: 45,
+      shell: 'posix_sh',
     });
     await tauriApi.updatePersonalScriptMetadata('script-1', metadata);
     await tauriApi.copyPersonalScript('script-1');

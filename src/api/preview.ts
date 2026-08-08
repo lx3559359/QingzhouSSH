@@ -1480,6 +1480,7 @@ export const previewApi = {
       body: source.activeVersion.body,
       parameters: clone(source.activeVersion.parameters),
       timeoutSeconds: source.activeVersion.timeoutSeconds,
+      shell: source.activeVersion.shell,
     });
   },
   setPersonalScriptFavorite: async (scriptId: string, favorite: boolean) => {
@@ -1812,6 +1813,9 @@ export const previewApi = {
           { name: 'app.log', path: `${path}/app.log`.replace('//', '/'), kind: 'file', size: 8192, modifiedAt: 1_775_000_000 },
         ],
   }),
+  createRemoteDirectory: async (_serverId: string, _parent: string, _name: string) => undefined,
+  renameRemoteEntry: async (_serverId: string, _path: string, _newName: string) => undefined,
+  deleteRemoteEntry: async (_serverId: string, _path: string, _expectedKind: 'directory' | 'file' | 'symlink' | 'other') => undefined,
   searchLogs: async (
     serverId: string,
     request: LogSearchRequest,

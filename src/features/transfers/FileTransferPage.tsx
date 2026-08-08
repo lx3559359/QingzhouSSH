@@ -8,6 +8,7 @@ import {
   FolderOpen,
   SpinnerGap,
   StopCircle,
+  X,
 } from '@phosphor-icons/react';
 import { useEffect, useRef, useState } from 'react';
 import type { MouseEvent as ReactMouseEvent } from 'react';
@@ -93,6 +94,8 @@ interface DirectoryPaneProps {
   onSelectFile: (entry: BrowserEntry) => void;
   onRefresh: () => void;
   onChooseDirectory?: () => void;
+  onCreateDirectory?: () => void;
+  remoteActionBusy?: boolean;
   onEntryContextMenu: (entry: BrowserEntry, event: ReactMouseEvent<HTMLButtonElement>) => void;
 }
 
@@ -108,6 +111,8 @@ function DirectoryPane({
   onSelectFile,
   onRefresh,
   onChooseDirectory,
+  onCreateDirectory,
+  remoteActionBusy = false,
   onEntryContextMenu,
 }: DirectoryPaneProps) {
   const scopeLabel = scope === 'local' ? '本地' : '远程';
@@ -123,6 +128,7 @@ function DirectoryPane({
         <code title={listing?.path}>{listing?.path ?? '正在读取…'}</code>
         {refreshing && <span className="browser-refreshing" role="status"><SpinnerGap className="spin" />正在刷新</span>}
         <button className="secondary-button" type="button" disabled={busy} onClick={onRefresh}>刷新</button>
+        {onCreateDirectory && <button className="secondary-button" type="button" disabled={busy || remoteActionBusy} onClick={onCreateDirectory}>新建文件夹</button>}
         {onChooseDirectory && <button className="secondary-button" type="button" disabled={busy} onClick={onChooseDirectory}>选择目录</button>}
       </div>
       {error && <p className="inline-message inline-message--error" role="alert">{error}</p>}
@@ -176,6 +182,10 @@ type BrowserContext = {
   entry: BrowserEntry;
 };
 
+type RemoteMutationDialog =
+  | { kind: 'create'; parent: string }
+  | { kind: 'rename'; entry: BrowserEntry };
+
 export function FileTransferPage({ onSearchRemoteFile }: FileTransferPageProps = {}) {
   const [servers, setServers] = useState<ServerProfile[]>([]);
   const [serverId, setServerId] = useState('');
@@ -195,8 +205,14 @@ export function FileTransferPage({ onSearchRemoteFile }: FileTransferPageProps =
   const [focusedJobId, setFocusedJobId] = useState<string | null>(null);
   const [notice, setNotice] = useState('');
   const [browserContext, setBrowserContext] = useState<BrowserContext | null>(null);
+  const [mutationDialog, setMutationDialog] = useState<RemoteMutationDialog | null>(null);
+  const [mutationName, setMutationName] = useState('');
+  const [mutationError, setMutationError] = useState('');
+  const [mutationBusy, setMutationBusy] = useState(false);
   const localRequestGeneration = useRef(0);
   const remoteRequestGeneration = useRef(0);
+  const activeServerId = useRef(serverId);
+  activeServerId.current = serverId;
 
   const mergeJob = (job: TransferJob) => {
     setJobs((current) => [job, ...current.filter((item) => item.id !== job.id)]);
@@ -267,6 +283,8 @@ export function FileTransferPage({ onSearchRemoteFile }: FileTransferPageProps =
   }, []);
 
   useEffect(() => {
+    setMutationDialog(null);
+    setMutationError('');
     if (serverId) void loadRemote(directorySessionCache.lastRemotePath(serverId));
     else {
       remoteRequestGeneration.current += 1;
@@ -374,6 +392,71 @@ export function FileTransferPage({ onSearchRemoteFile }: FileTransferPageProps =
     }
   };
 
+  const openCreateDirectory = () => {
+    if (!remoteListing || mutationBusy) return;
+    setMutationName('');
+    setMutationError('');
+    setMutationDialog({ kind: 'create', parent: remoteListing.path });
+  };
+
+  const openRenameEntry = (entry: BrowserEntry) => {
+    if (mutationBusy || !['file', 'directory'].includes(entry.kind)) return;
+    setMutationName(entry.name);
+    setMutationError('');
+    setMutationDialog({ kind: 'rename', entry });
+  };
+
+  const submitRemoteMutation = async () => {
+    if (!serverId || !remoteListing || !mutationDialog || mutationBusy) return;
+    const name = mutationName.trim();
+    if (!name || name === '.' || name === '..' || /[\\/\0]/.test(name)) {
+      setMutationError('名称不能为空，也不能包含路径分隔符、NUL、. 或 ..。');
+      return;
+    }
+    setMutationBusy(true);
+    setMutationError('');
+    const requestedServerId = serverId;
+    const refreshPath = remoteListing.path;
+    try {
+      if (mutationDialog.kind === 'create') {
+        await api.createRemoteDirectory(requestedServerId, mutationDialog.parent, name);
+        setNotice(`远程文件夹 ${name} 已创建`);
+      } else {
+        await api.renameRemoteEntry(requestedServerId, mutationDialog.entry.path, name);
+        setNotice(`远程对象已重命名为 ${name}`);
+      }
+      setMutationDialog(null);
+      directorySessionCache.invalidateRemote(requestedServerId, refreshPath);
+      if (activeServerId.current === requestedServerId) await loadRemote(refreshPath, true);
+    } catch (cause) {
+      setMutationError(asAppError(cause).message);
+    } finally {
+      setMutationBusy(false);
+    }
+  };
+
+  const deleteRemoteEntry = async (entry: BrowserEntry) => {
+    if (!serverId || !remoteListing || mutationBusy || !['file', 'directory'].includes(entry.kind)) return;
+    const directory = entry.kind === 'directory';
+    const message = directory
+      ? `将删除远程文件夹：${entry.path}\n\n仅当文件夹为空时才会删除，操作不可撤销。确定继续吗？`
+      : `将永久删除远程文件：${entry.path}\n\n操作不可撤销。确定继续吗？`;
+    if (!window.confirm(message)) return;
+    setMutationBusy(true);
+    const requestedServerId = serverId;
+    const refreshPath = remoteListing.path;
+    try {
+      await api.deleteRemoteEntry(requestedServerId, entry.path, entry.kind);
+      setNotice(directory ? '远程空文件夹已删除' : '远程文件已删除');
+      directorySessionCache.invalidateRemote(requestedServerId, refreshPath);
+      if (activeServerId.current === requestedServerId) await loadRemote(refreshPath, true);
+    } catch (cause) {
+      setNotice(`删除失败：${asAppError(cause).message}`);
+    } finally {
+      setMutationBusy(false);
+    }
+  };
+
   const copyBrowserValue = async (value: string, description: string) => {
     try {
       await copyText(value);
@@ -399,7 +482,7 @@ export function FileTransferPage({ onSearchRemoteFile }: FileTransferPageProps =
   const contextItems = (context: BrowserContext): ContextMenuItem[] => {
     const { entry, scope } = context;
     if (entry.kind === 'directory') {
-      return [
+      const items: ContextMenuItem[] = [
         {
           id: 'open',
           label: '打开文件夹',
@@ -412,12 +495,29 @@ export function FileTransferPage({ onSearchRemoteFile }: FileTransferPageProps =
             ? loadLocal(localListing?.path ?? null, true)
             : loadRemote(remoteListing?.path ?? '/', true),
         },
+      ];
+      if (scope === 'remote') items.push(
         {
+          id: 'rename',
+          label: '重命名',
+          disabled: mutationBusy,
+          disabledReason: '正在执行远程文件操作',
+          onSelect: () => openRenameEntry(entry),
+        },
+        {
+          id: 'delete',
+          label: '删除空文件夹',
+          disabled: mutationBusy,
+          disabledReason: '正在执行远程文件操作',
+          onSelect: () => deleteRemoteEntry(entry),
+        },
+      );
+      items.push({
           id: 'copy-path',
           label: '复制完整路径',
           onSelect: () => copyBrowserValue(entry.path, '完整路径'),
-        },
-      ];
+      });
+      return items;
     }
     if (scope === 'local') {
       return [
@@ -446,6 +546,20 @@ export function FileTransferPage({ onSearchRemoteFile }: FileTransferPageProps =
         disabled: !onSearchRemoteFile,
         disabledReason: '当前页面无法打开日志检索',
         onSelect: () => onSearchRemoteFile?.({ serverId, path: entry.path, keyword: entry.name }),
+      },
+      {
+        id: 'rename',
+        label: '重命名',
+        disabled: mutationBusy,
+        disabledReason: '正在执行远程文件操作',
+        onSelect: () => openRenameEntry(entry),
+      },
+      {
+        id: 'delete',
+        label: '删除文件',
+        disabled: mutationBusy,
+        disabledReason: '正在执行远程文件操作',
+        onSelect: () => deleteRemoteEntry(entry),
       },
       { id: 'copy-name', label: '复制文件名', onSelect: () => copyBrowserValue(entry.name, '文件名') },
       { id: 'copy-path', label: '复制完整路径', onSelect: () => copyBrowserValue(entry.path, '完整路径') },
@@ -478,7 +592,7 @@ export function FileTransferPage({ onSearchRemoteFile }: FileTransferPageProps =
           <label className="checkbox-field"><input aria-label="允许覆盖" type="checkbox" checked={overwrite} onChange={(event) => setOverwrite(event.target.checked)} /><span className="sftp-overwrite-copy"><span>允许覆盖同名文件</span><small>覆盖</small></span></label>
           <small>默认下载到当前系统的应用数据目录下的 downloads。</small>
         </aside>
-        <DirectoryPane scope="remote" title="远程目录" listing={remoteListing} selected={selectedRemote} loading={remoteLoading} refreshing={remoteRefreshing} error={remoteError} onOpenDirectory={(path) => void loadRemote(path)} onSelectFile={setSelectedRemote} onRefresh={() => void loadRemote(remoteListing?.path ?? '/', true)} onEntryContextMenu={(entry, event) => openBrowserContext('remote', entry, event)} />
+        <DirectoryPane scope="remote" title="远程目录" listing={remoteListing} selected={selectedRemote} loading={remoteLoading} refreshing={remoteRefreshing} error={remoteError} onOpenDirectory={(path) => void loadRemote(path)} onSelectFile={setSelectedRemote} onRefresh={() => void loadRemote(remoteListing?.path ?? '/', true)} onCreateDirectory={openCreateDirectory} remoteActionBusy={mutationBusy} onEntryContextMenu={(entry, event) => openBrowserContext('remote', entry, event)} />
       </div>
 
       {notice && <p className="inline-message" role="status">{notice}</p>}
@@ -525,6 +639,43 @@ export function FileTransferPage({ onSearchRemoteFile }: FileTransferPageProps =
           items={contextItems(browserContext)}
           onClose={() => setBrowserContext(null)}
         />
+      )}
+      {mutationDialog && (
+        <div className="dialog-backdrop" role="presentation">
+          <section
+            className="silver-card modal-card sftp-mutation-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="sftp-mutation-title"
+          >
+            <header className="modal-header">
+              <div>
+                <span className="eyebrow">安全 SFTP 文件操作</span>
+                <h2 id="sftp-mutation-title">
+                  {mutationDialog.kind === 'create'
+                    ? '新建远程文件夹'
+                    : `重命名远程${mutationDialog.entry.kind === 'directory' ? '文件夹' : '文件'}`}
+                </h2>
+              </div>
+              <button className="icon-button" type="button" aria-label="关闭" disabled={mutationBusy} onClick={() => setMutationDialog(null)}><X /></button>
+            </header>
+            <form className="form-stack" onSubmit={(event) => { event.preventDefault(); void submitRemoteMutation(); }}>
+              <label>
+                <span>{mutationDialog.kind === 'create' ? '文件夹名称' : '新名称'}</span>
+                <input autoFocus maxLength={255} value={mutationName} disabled={mutationBusy} onChange={(event) => setMutationName(event.target.value)} />
+              </label>
+              <small>名称只能是单个路径段；不会覆盖同名远程对象。</small>
+              {mutationError && <p className="inline-message inline-message--error" role="alert">{mutationError}</p>}
+              <footer className="modal-actions">
+                <button className="secondary-button" type="button" disabled={mutationBusy} onClick={() => setMutationDialog(null)}>取消</button>
+                <button className="success-button" type="submit" disabled={mutationBusy || !mutationName.trim()}>
+                  {mutationBusy && <SpinnerGap className="spin" />}
+                  {mutationDialog.kind === 'create' ? '创建' : '保存'}
+                </button>
+              </footer>
+            </form>
+          </section>
+        </div>
       )}
     </section>
   );

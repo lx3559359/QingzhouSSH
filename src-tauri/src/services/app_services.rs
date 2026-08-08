@@ -60,7 +60,7 @@ use crate::{
 
 use crate::core::{
     logs::{LogResultPage, LogSearchRequest},
-    sftp::{self, DirectoryListing, DownloadRequest, UploadRequest},
+    sftp::{self, BrowserEntryKind, DirectoryListing, DownloadRequest, UploadRequest},
     ssh::executor::EventSink,
 };
 
@@ -492,6 +492,36 @@ impl AppServices {
     ) -> AppResult<DirectoryListing> {
         let connected = self.connector.connect(server_id).await?;
         sftp::list_remote_directory(&connected.session, path).await
+    }
+
+    pub async fn create_remote_directory(
+        &self,
+        server_id: &str,
+        parent: &str,
+        name: &str,
+    ) -> AppResult<()> {
+        let connected = self.connector.connect(server_id).await?;
+        sftp::create_remote_directory(&connected.session, parent, name).await
+    }
+
+    pub async fn rename_remote_entry(
+        &self,
+        server_id: &str,
+        path: &str,
+        new_name: &str,
+    ) -> AppResult<()> {
+        let connected = self.connector.connect(server_id).await?;
+        sftp::rename_remote_entry(&connected.session, path, new_name).await
+    }
+
+    pub async fn delete_remote_entry(
+        &self,
+        server_id: &str,
+        path: &str,
+        expected_kind: BrowserEntryKind,
+    ) -> AppResult<()> {
+        let connected = self.connector.connect(server_id).await?;
+        sftp::delete_remote_entry(&connected.session, path, expected_kind).await
     }
 
     pub async fn upload_file<E: EventSink>(

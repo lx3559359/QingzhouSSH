@@ -49,6 +49,8 @@ const script: PersonalScriptSummary = {
   activeVersionId: 'version-1',
   activeVersionNumber: 1,
   bodySha256: 'abc',
+  shell: 'posix_sh',
+  compatibility: { osFamilies: ['linux', 'bsd'], requiredCommands: ['sh'] },
   updatedAt: 10,
 };
 

@@ -9,6 +9,7 @@ import type {
   DataMigrationPreview,
   DownloadRequest,
   DirectoryListing,
+  BrowserEntryKind,
   ExecutionDetails,
   ExecutionEvent,
   ExecutionFilter,
@@ -151,6 +152,12 @@ export const tauriApi = {
     invoke<DirectoryListing>('list_local_directory', { path }),
   listRemoteDirectory: (serverId: string, path: string) =>
     invoke<DirectoryListing>('list_remote_directory', { serverId, path }),
+  createRemoteDirectory: (serverId: string, parent: string, name: string) =>
+    invoke<void>('create_remote_directory', { serverId, parent, name }),
+  renameRemoteEntry: (serverId: string, path: string, newName: string) =>
+    invoke<void>('rename_remote_entry', { serverId, path, newName }),
+  deleteRemoteEntry: (serverId: string, path: string, expectedKind: BrowserEntryKind) =>
+    invoke<void>('delete_remote_entry', { serverId, path, expectedKind }),
   searchLogs: (
     serverId: string,
     request: LogSearchRequest,

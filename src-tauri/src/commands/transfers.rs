@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use tauri::{ipc::Channel, State};
 
 use crate::{
-    core::sftp::{DirectoryListing, DownloadRequest, UploadRequest},
+    core::sftp::{BrowserEntryKind, DirectoryListing, DownloadRequest, UploadRequest},
     domain::transfer_job::TransferJob,
     domain::{events::ExecutionEvent, execution::ExecutionDetails},
     error::AppResult,
@@ -32,6 +32,45 @@ pub async fn list_remote_directory(
     services(&state)
         .await?
         .list_remote_directory(&server_id, &path)
+        .await
+}
+
+#[tauri::command]
+pub async fn create_remote_directory(
+    server_id: String,
+    parent: String,
+    name: String,
+    state: State<'_, AppState>,
+) -> AppResult<()> {
+    services(&state)
+        .await?
+        .create_remote_directory(&server_id, &parent, &name)
+        .await
+}
+
+#[tauri::command]
+pub async fn rename_remote_entry(
+    server_id: String,
+    path: String,
+    new_name: String,
+    state: State<'_, AppState>,
+) -> AppResult<()> {
+    services(&state)
+        .await?
+        .rename_remote_entry(&server_id, &path, &new_name)
+        .await
+}
+
+#[tauri::command]
+pub async fn delete_remote_entry(
+    server_id: String,
+    path: String,
+    expected_kind: BrowserEntryKind,
+    state: State<'_, AppState>,
+) -> AppResult<()> {
+    services(&state)
+        .await?
+        .delete_remote_entry(&server_id, &path, expected_kind)
         .await
 }
 

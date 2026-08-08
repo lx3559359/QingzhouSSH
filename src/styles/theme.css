@@ -3882,6 +3882,15 @@ select {
   margin-top: 22px;
 }
 
+.sftp-mutation-dialog {
+  width: min(520px, 100%);
+}
+
+.sftp-mutation-dialog .form-stack > small {
+  color: #65748a;
+  line-height: 1.55;
+}
+
 .script-advisory {
   display: grid;
   gap: 8px;
