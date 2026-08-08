@@ -85,7 +85,7 @@ impl TransferJobRepository {
     }
 
     pub async fn next_runnable(&self) -> AppResult<Option<TransferJob>> {
-        sqlx::query("SELECT id,execution_id,server_id,direction,source_path,target_path,overwrite,verification,status,transferred,total,percent,bytes_per_second,average_bytes_per_second,eta_seconds,attempt_count,max_attempts,cancel_requested,retryable,error_category,error_message,sha256,location,created_at,updated_at,started_at,finished_at FROM transfer_jobs job WHERE status='queued' AND NOT EXISTS (SELECT 1 FROM transfer_jobs active WHERE active.server_id=job.server_id AND active.status IN ('connecting','transferring','verifying','finalizing')) ORDER BY created_at,id LIMIT 1")
+        sqlx::query("SELECT id,execution_id,server_id,direction,source_path,target_path,overwrite,verification,status,transferred,total,percent,bytes_per_second,average_bytes_per_second,eta_seconds,attempt_count,max_attempts,cancel_requested,retryable,error_category,error_message,sha256,location,created_at,updated_at,started_at,finished_at FROM transfer_jobs job WHERE status='queued' AND (SELECT COUNT(*) FROM transfer_jobs active WHERE active.server_id=job.server_id AND active.status IN ('connecting','transferring','verifying','finalizing')) < 2 ORDER BY created_at,id LIMIT 1")
             .fetch_optional(&self.pool)
             .await?
             .as_ref()
@@ -448,7 +448,7 @@ mod tests {
     }
 
     #[sqlx::test(migrations = "./migrations")]
-    async fn runs_different_servers_concurrently_and_retries_with_a_bound(pool: SqlitePool) {
+    async fn allows_two_jobs_per_server_before_scheduling_other_servers(pool: SqlitePool) {
         let first_server = insert_server(&pool, "first").await;
         let second_server = insert_server(&pool, "second").await;
         let repository = TransferJobRepository::new(pool);
@@ -456,10 +456,17 @@ mod tests {
             .create(draft(&first_server.id, "first.bin"))
             .await
             .unwrap();
+        tokio::time::sleep(std::time::Duration::from_millis(2)).await;
         let same_server = repository
             .create(draft(&first_server.id, "same.bin"))
             .await
             .unwrap();
+        tokio::time::sleep(std::time::Duration::from_millis(2)).await;
+        let third_same_server = repository
+            .create(draft(&first_server.id, "third.bin"))
+            .await
+            .unwrap();
+        tokio::time::sleep(std::time::Duration::from_millis(2)).await;
         let other_server = repository
             .create(draft(&second_server.id, "other.bin"))
             .await
@@ -468,9 +475,14 @@ mod tests {
         assert!(repository.claim(first.id).await.unwrap());
         assert_eq!(
             repository.next_runnable().await.unwrap().unwrap().id,
+            same_server.id
+        );
+        assert!(repository.claim(same_server.id).await.unwrap());
+        assert_eq!(
+            repository.next_runnable().await.unwrap().unwrap().id,
             other_server.id
         );
-        assert_ne!(same_server.id, other_server.id);
+        assert_ne!(third_same_server.id, other_server.id);
 
         repository
             .finish(

@@ -28,7 +28,7 @@ use crate::{
     services::{execution_service::ExecutionRegistry, transfer_service::TransferService},
 };
 
-const QUEUE_WORKERS: usize = 2;
+const QUEUE_WORKERS: usize = 3;
 
 #[derive(Clone)]
 pub struct TransferQueueService {
@@ -449,5 +449,10 @@ mod tests {
             TransferJobStatus::from(TransferPhase::Verifying),
             TransferJobStatus::Verifying
         );
+    }
+
+    #[test]
+    fn queue_uses_three_global_workers() {
+        assert_eq!(QUEUE_WORKERS, 3);
     }
 }
