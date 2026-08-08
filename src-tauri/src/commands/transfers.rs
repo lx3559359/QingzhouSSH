@@ -4,6 +4,7 @@ use tauri::{ipc::Channel, State};
 
 use crate::{
     core::sftp::{DirectoryListing, DownloadRequest, UploadRequest},
+    domain::transfer_job::TransferJob,
     domain::{events::ExecutionEvent, execution::ExecutionDetails},
     error::AppResult,
     state::AppState,
@@ -60,4 +61,55 @@ pub async fn download_file(
         .await?
         .download_file(&server_id, request, &mut events)
         .await
+}
+
+#[tauri::command]
+pub async fn enqueue_upload_file(
+    server_id: String,
+    request: UploadRequest,
+    state: State<'_, AppState>,
+) -> AppResult<TransferJob> {
+    services(&state)
+        .await?
+        .enqueue_upload_file(&server_id, request)
+        .await
+}
+
+#[tauri::command]
+pub async fn enqueue_download_file(
+    server_id: String,
+    request: DownloadRequest,
+    state: State<'_, AppState>,
+) -> AppResult<TransferJob> {
+    services(&state)
+        .await?
+        .enqueue_download_file(&server_id, request)
+        .await
+}
+
+#[tauri::command]
+pub async fn list_transfer_jobs(
+    server_id: Option<String>,
+    state: State<'_, AppState>,
+) -> AppResult<Vec<TransferJob>> {
+    services(&state)
+        .await?
+        .list_transfer_jobs(server_id.as_deref())
+        .await
+}
+
+#[tauri::command]
+pub async fn cancel_transfer_job(
+    job_id: uuid::Uuid,
+    state: State<'_, AppState>,
+) -> AppResult<TransferJob> {
+    services(&state).await?.cancel_transfer_job(job_id).await
+}
+
+#[tauri::command]
+pub async fn retry_transfer_job(
+    job_id: uuid::Uuid,
+    state: State<'_, AppState>,
+) -> AppResult<TransferJob> {
+    services(&state).await?.retry_transfer_job(job_id).await
 }

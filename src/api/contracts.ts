@@ -813,6 +813,48 @@ export interface DownloadRequest {
   verification: VerificationPolicy;
 }
 
+export type TransferDirection = 'upload' | 'download';
+export type TransferJobStatus =
+  | 'queued'
+  | 'connecting'
+  | 'transferring'
+  | 'verifying'
+  | 'finalizing'
+  | 'succeeded'
+  | 'failed'
+  | 'cancelled'
+  | 'uncertain';
+
+export interface TransferJob {
+  id: string;
+  executionId: string | null;
+  serverId: string;
+  direction: TransferDirection;
+  sourcePath: string;
+  targetPath: string;
+  overwrite: boolean;
+  verification: VerificationPolicy;
+  status: TransferJobStatus;
+  transferred: number;
+  total: number | null;
+  percent: number | null;
+  bytesPerSecond: number | null;
+  averageBytesPerSecond: number | null;
+  etaSeconds: number | null;
+  attemptCount: number;
+  maxAttempts: number;
+  cancelRequested: boolean;
+  retryable: boolean;
+  errorCategory: string | null;
+  errorMessage: string | null;
+  sha256: string | null;
+  location: string | null;
+  createdAt: number;
+  updatedAt: number;
+  startedAt: number | null;
+  finishedAt: number | null;
+}
+
 export interface ExecutionFilter {
   serverId?: string;
   category?: string;

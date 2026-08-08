@@ -31,6 +31,7 @@ import type {
   TaskRemediationPreview,
   TaskExecutionRequest,
   UploadRequest,
+  TransferJob,
   StartWorkflowRunRequest,
   WorkflowDefinition,
   WorkflowDiagnostic,
@@ -72,6 +73,7 @@ const previewServer: ServerProfile = {
 
 let previewServers = [previewServer];
 let previewExecutions: ExecutionDetails[] = [];
+let previewTransferJobs: TransferJob[] = [];
 let previewPersonalScripts = new Map<string, PersonalScriptDetails>();
 let previewPersonalScriptVersions = new Map<string, PersonalScriptVersion[]>();
 let previewPersonalScriptRuns = new Map<string, PersonalScriptRunPreview>();
@@ -314,6 +316,48 @@ function emitPreview(onEvent: (event: ExecutionEvent) => void, details: Executio
     durationMs: 360,
     result: null,
   });
+}
+
+function createPreviewTransferJob(
+  serverId: string,
+  direction: 'upload' | 'download',
+  sourcePath: string,
+  targetPath: string,
+  overwrite: boolean,
+  verification: UploadRequest['verification'],
+): TransferJob {
+  const now = Date.now();
+  const job: TransferJob = {
+    id: `preview-transfer-${previewTransferJobs.length + 1}`,
+    executionId: null,
+    serverId,
+    direction,
+    sourcePath,
+    targetPath,
+    overwrite,
+    verification,
+    status: 'succeeded',
+    transferred: 1024,
+    total: 1024,
+    percent: 100,
+    bytesPerSecond: 4096,
+    averageBytesPerSecond: 3072,
+    etaSeconds: 0,
+    attemptCount: 1,
+    maxAttempts: 3,
+    cancelRequested: false,
+    retryable: false,
+    errorCategory: null,
+    errorMessage: null,
+    sha256: 'a'.repeat(64),
+    location: direction === 'download' ? `downloads/${targetPath}` : targetPath,
+    createdAt: now,
+    updatedAt: now + 360,
+    startedAt: now,
+    finishedAt: now + 360,
+  };
+  previewTransferJobs = [job, ...previewTransferJobs];
+  return job;
 }
 
 function emitTransferPreview(
@@ -1825,6 +1869,44 @@ export const previewApi = {
     });
     emitTransferPreview(onEvent, details, `downloads/${request.suggestedName}`);
     return details;
+  },
+  enqueueUploadFile: async (serverId: string, request: UploadRequest) =>
+    createPreviewTransferJob(
+      serverId,
+      'upload',
+      request.localPath,
+      request.remotePath,
+      request.overwrite,
+      request.verification,
+    ),
+  enqueueDownloadFile: async (serverId: string, request: DownloadRequest) =>
+    createPreviewTransferJob(
+      serverId,
+      'download',
+      request.remotePath,
+      request.suggestedName,
+      request.overwrite,
+      request.verification,
+    ),
+  listTransferJobs: async (serverId: string | null) =>
+    previewTransferJobs.filter((job) => !serverId || job.serverId === serverId),
+  cancelTransferJob: async (jobId: string) => {
+    const job = previewTransferJobs.find((item) => item.id === jobId);
+    if (!job) throw new Error('传输任务不存在');
+    job.status = 'cancelled';
+    job.cancelRequested = true;
+    job.finishedAt = Date.now();
+    return job;
+  },
+  retryTransferJob: async (jobId: string) => {
+    const job = previewTransferJobs.find((item) => item.id === jobId);
+    if (!job) throw new Error('传输任务不存在');
+    job.status = 'queued';
+    job.cancelRequested = false;
+    job.errorCategory = null;
+    job.errorMessage = null;
+    job.finishedAt = null;
+    return job;
   },
   listExecutions: async (filter: ExecutionFilter) =>
     previewExecutions

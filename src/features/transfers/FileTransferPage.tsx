@@ -15,9 +15,9 @@ import type { MouseEvent as ReactMouseEvent } from 'react';
 import type {
   BrowserEntry,
   DirectoryListing,
-  ExecutionDetails,
-  ExecutionEvent,
   ServerProfile,
+  TransferJob,
+  TransferJobStatus,
   TransferPhase,
 } from '../../api/contracts';
 import { chooseDirectory } from '../../api/dialogs';
@@ -40,6 +40,18 @@ const transferPhaseLabels: Record<TransferPhase, string> = {
   finalizing: '收尾中',
 };
 
+const transferStatusLabels: Record<TransferJobStatus, string> = {
+  queued: '等待中',
+  connecting: '连接中',
+  transferring: '传输中',
+  verifying: '校验中',
+  finalizing: '收尾中',
+  succeeded: '已完成',
+  failed: '失败',
+  cancelled: '已取消',
+  uncertain: '待确认',
+};
+
 function formatEta(seconds: number | null) {
   if (seconds == null) return '—';
   if (seconds <= 0) return '已完成';
@@ -48,18 +60,21 @@ function formatEta(seconds: number | null) {
   return `约 ${minutes} 分钟`;
 }
 
-function transferMessage(details: ExecutionDetails) {
-  if (details.record.status === 'cancelled') return '传输已取消';
-  if (details.record.status === 'uncertain') return '远端传输状态无法确认，请核对目标文件。';
-  if (details.record.status === 'failed') {
-    switch (details.record.errorCategory) {
+function transferMessage(job: TransferJob) {
+  if (job.status === 'queued') return '已加入队列，等待可用连接';
+  if (job.cancelRequested && !['cancelled', 'failed', 'succeeded'].includes(job.status)) return '正在安全取消传输…';
+  if (job.status === 'cancelled') return '传输已取消';
+  if (job.status === 'uncertain') return '远端传输状态无法确认，请核对目标文件后再决定是否重试。';
+  if (job.status === 'failed') {
+    switch (job.errorCategory) {
       case 'permission': return '远程账号没有读写目标目录的权限，请更换目录或账号。';
       case 'validation': return '文件选择无效，请重新选择来源文件和目标目录。';
       case 'ssh': return '服务器连接中断，请确认网络和 SSH 服务后重试。';
-      default: return details.record.errorMessage || 'SFTP 传输失败，请检查服务器连接、目录权限和磁盘空间。';
+      default: return job.errorMessage || 'SFTP 传输失败，请检查服务器连接、目录权限和磁盘空间。';
     }
   }
-  return '传输成功';
+  if (job.status === 'succeeded') return '传输成功';
+  return transferStatusLabels[job.status];
 }
 
 function remoteFilePath(directory: string, name: string) {
@@ -175,23 +190,18 @@ export function FileTransferPage({ onSearchRemoteFile }: FileTransferPageProps =
   const [localError, setLocalError] = useState('');
   const [remoteError, setRemoteError] = useState('');
   const [overwrite, setOverwrite] = useState(false);
-  const [running, setRunning] = useState(false);
-  const [executionId, setExecutionId] = useState<string | null>(null);
-  const [transferred, setTransferred] = useState(0);
-  const [total, setTotal] = useState<number | null>(null);
-  const [percent, setPercent] = useState<number | null>(null);
-  const [phase, setPhase] = useState<TransferPhase | null>(null);
-  const [speed, setSpeed] = useState<number | null>(null);
-  const [averageSpeed, setAverageSpeed] = useState<number | null>(null);
-  const [etaSeconds, setEtaSeconds] = useState<number | null>(null);
-  const [sha256, setSha256] = useState<string | null>(null);
-  const [location, setLocation] = useState<string | null>(null);
-  const [status, setStatus] = useState<string | null>(null);
-  const [source, setSource] = useState('');
-  const [target, setTarget] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [jobs, setJobs] = useState<TransferJob[]>([]);
+  const [focusedJobId, setFocusedJobId] = useState<string | null>(null);
+  const [notice, setNotice] = useState('');
   const [browserContext, setBrowserContext] = useState<BrowserContext | null>(null);
   const localRequestGeneration = useRef(0);
   const remoteRequestGeneration = useRef(0);
+
+  const mergeJob = (job: TransferJob) => {
+    setJobs((current) => [job, ...current.filter((item) => item.id !== job.id)]);
+    setFocusedJobId(job.id);
+  };
 
   const loadLocal = async (path: string | null, force = false) => {
     const generation = ++localRequestGeneration.current;
@@ -253,7 +263,7 @@ export function FileTransferPage({ onSearchRemoteFile }: FileTransferPageProps =
     api.listServers().then((loaded) => {
       setServers(loaded);
       setServerId(loaded[0]?.id || '');
-    }).catch(() => setStatus('服务器列表加载失败'));
+    }).catch(() => setNotice('服务器列表加载失败'));
   }, []);
 
   useEffect(() => {
@@ -267,128 +277,109 @@ export function FileTransferPage({ onSearchRemoteFile }: FileTransferPageProps =
     }
   }, [serverId]);
 
-  const resetProgress = () => {
-    setTransferred(0);
-    setTotal(null);
-    setPercent(null);
-    setPhase(null);
-    setSpeed(null);
-    setAverageSpeed(null);
-    setEtaSeconds(null);
-    setSha256(null);
-    setLocation(null);
-    setStatus(null);
-    setExecutionId(null);
-  };
-
-  const onEvent = (event: ExecutionEvent) => {
-    if (event.type === 'started') {
-      setExecutionId(event.executionId);
-      setPhase('connecting');
+  useEffect(() => {
+    if (!serverId) {
+      setJobs([]);
+      setFocusedJobId(null);
+      return undefined;
     }
-    if (event.type === 'progress') {
-      setPhase(event.phase);
-      setTransferred(event.transferred);
-      setTotal(event.total);
-      setPercent(event.percent);
-      if (event.bytesPerSecond != null) setSpeed(event.bytesPerSecond);
-      if (event.averageBytesPerSecond != null) setAverageSpeed(event.averageBytesPerSecond);
-      if (event.etaSeconds != null) setEtaSeconds(event.etaSeconds);
-    }
-    if (event.type === 'fileProduced') setLocation(event.file.relativePath);
-    if (event.type === 'finished' && event.result && typeof event.result === 'object') {
-      const result = event.result as Record<string, unknown>;
-      if (typeof result.sha256 === 'string') setSha256(result.sha256);
-      if (typeof result.location === 'string') setLocation(result.location);
-    }
-    if (event.type === 'failed') setStatus(event.category === 'cancelled' ? '传输已取消' : event.message);
-  };
-
-  const applyResult = (details: ExecutionDetails) => {
-    setExecutionId(details.record.id);
-    setStatus(transferMessage(details));
-    if (details.record.status !== 'succeeded') {
-      setSha256(null);
-      return;
-    }
-    const file = details.files.find((item) => item.purpose === 'download');
-    if (file) {
-      setLocation(file.relativePath);
-      setSha256(file.sha256);
-      setTransferred(file.sizeBytes);
-      setTotal(file.sizeBytes);
-      setPercent(100);
-    } else if (details.record.outputSummary) {
-      const hash = details.record.outputSummary.match(/[a-f\d]{64}/i)?.[0];
-      if (hash) setSha256(hash);
-    }
-  };
+    let disposed = false;
+    const refresh = async () => {
+      try {
+        const loaded = await api.listTransferJobs(serverId);
+        if (disposed) return;
+        setJobs(loaded);
+        setFocusedJobId((current) => loaded.some((job) => job.id === current) ? current : loaded[0]?.id ?? null);
+      } catch (cause) {
+        if (disposed) return;
+        setNotice(`无法读取传输队列：${asAppError(cause).message}`);
+      }
+    };
+    void refresh();
+    const timer = setInterval(refresh, 500);
+    return () => {
+      disposed = true;
+      clearInterval(timer);
+    };
+  }, [serverId]);
 
   const upload = async (entry: BrowserEntry | null = selectedLocal) => {
-    if (!serverId || !entry || entry.kind !== 'file' || !remoteListing || running) return;
+    if (!serverId || !entry || entry.kind !== 'file' || !remoteListing || submitting) return;
     const destination = remoteFilePath(remoteListing.path, entry.name);
-    resetProgress();
+    if (overwrite && !window.confirm(`远程文件 ${destination} 若已存在将被覆盖。确定继续吗？`)) return;
     setSelectedLocal(entry);
-    setSource(entry.path);
-    setTarget(destination);
-    setRunning(true);
+    setSubmitting(true);
     try {
-      applyResult(await api.uploadFile(serverId, {
+      const job = await api.enqueueUploadFile(serverId, {
         localPath: entry.path,
         remotePath: destination,
         overwrite,
         verification: 'balanced',
-      }, onEvent));
-      await loadRemote(remoteListing.path, true);
+      });
+      mergeJob(job);
+      setNotice('上传已加入传输队列');
+      if (job.status === 'succeeded') await loadRemote(remoteListing.path, true);
     } catch (cause) {
-      setStatus(`SFTP 上传失败：${asAppError(cause).message}`);
+      setNotice(`SFTP 上传排队失败：${asAppError(cause).message}`);
     } finally {
-      setRunning(false);
+      setSubmitting(false);
     }
   };
 
   const download = async (entry: BrowserEntry | null = selectedRemote) => {
-    if (!serverId || !entry || entry.kind !== 'file' || running) return;
-    resetProgress();
+    if (!serverId || !entry || entry.kind !== 'file' || submitting) return;
+    if (overwrite && !window.confirm(`本地文件 ${entry.name} 若已存在将被覆盖。确定继续吗？`)) return;
     setSelectedRemote(entry);
-    setSource(entry.path);
-    setTarget(`项目数据目录/downloads/${entry.name}`);
-    setRunning(true);
+    setSubmitting(true);
     try {
-      applyResult(await api.downloadFile(serverId, {
+      const job = await api.enqueueDownloadFile(serverId, {
         remotePath: entry.path,
         suggestedName: entry.name,
         overwrite,
         verification: 'balanced',
-      }, onEvent));
-      if (localListing) await loadLocal(localListing.path, true);
+      });
+      mergeJob(job);
+      setNotice('下载已加入传输队列');
+      if (job.status === 'succeeded' && localListing) await loadLocal(localListing.path, true);
     } catch (cause) {
-      setStatus(`SFTP 下载失败：${asAppError(cause).message}`);
+      setNotice(`SFTP 下载排队失败：${asAppError(cause).message}`);
     } finally {
-      setRunning(false);
+      setSubmitting(false);
     }
   };
 
   const chooseLocalDirectory = async () => {
     const selected = await chooseDirectory({
       title: '选择本地目录',
-      previewPath: localListing?.path ?? '.local\\dev-data（项目目录内）',
+      previewPath: localListing?.path ?? '应用数据目录',
     });
     if (typeof selected === 'string') await loadLocal(selected);
   };
 
-  const cancel = async () => {
-    if (!executionId) return;
-    await api.cancelExecution(executionId);
-    setStatus('正在取消传输…');
+  const cancel = async (job: TransferJob) => {
+    try {
+      mergeJob(await api.cancelTransferJob(job.id));
+      setNotice(job.status === 'queued' ? '已取消排队传输' : '正在安全取消传输…');
+    } catch (cause) {
+      setNotice(`取消失败：${asAppError(cause).message}`);
+    }
+  };
+
+  const retry = async (job: TransferJob) => {
+    try {
+      mergeJob(await api.retryTransferJob(job.id));
+      setNotice('传输已重新加入队列');
+    } catch (cause) {
+      setNotice(`重试失败：${asAppError(cause).message}`);
+    }
   };
 
   const copyBrowserValue = async (value: string, description: string) => {
     try {
       await copyText(value);
-      setStatus(`${description}已复制`);
+      setNotice(`${description}已复制`);
     } catch (cause) {
-      setStatus(asAppError(cause).message);
+      setNotice(asAppError(cause).message);
     }
   };
 
@@ -433,8 +424,8 @@ export function FileTransferPage({ onSearchRemoteFile }: FileTransferPageProps =
         {
           id: 'upload',
           label: '上传',
-          disabled: !remoteListing || running,
-          disabledReason: running ? '当前有传输正在进行' : '请先读取远程目录',
+          disabled: !remoteListing || submitting,
+          disabledReason: submitting ? '正在加入传输队列' : '请先读取远程目录',
           onSelect: () => upload(entry),
         },
         { id: 'copy-name', label: '复制文件名', onSelect: () => copyBrowserValue(entry.name, '文件名') },
@@ -445,8 +436,8 @@ export function FileTransferPage({ onSearchRemoteFile }: FileTransferPageProps =
       {
         id: 'download',
         label: '下载',
-        disabled: running,
-        disabledReason: '当前有传输正在进行',
+        disabled: submitting,
+        disabledReason: '正在加入传输队列',
         onSelect: () => download(entry),
       },
       {
@@ -461,38 +452,72 @@ export function FileTransferPage({ onSearchRemoteFile }: FileTransferPageProps =
     ];
   };
 
-  const showTransferDetails = Boolean(source || target || status || running);
+  const currentJob = jobs.find((job) => job.id === focusedJobId) ?? jobs[0] ?? null;
+  const activeStatuses: TransferJobStatus[] = ['queued', 'connecting', 'transferring', 'verifying', 'finalizing'];
+  const currentActive = currentJob ? activeStatuses.includes(currentJob.status) : false;
+  const currentPhase = currentJob && ['connecting', 'transferring', 'verifying', 'finalizing'].includes(currentJob.status)
+    ? currentJob.status as TransferPhase
+    : null;
+  const currentTarget = currentJob?.direction === 'download'
+    ? `应用数据目录/downloads/${currentJob.targetPath}`
+    : currentJob?.targetPath ?? '';
+  const showTransferDetails = Boolean(currentJob);
 
   return (
     <section className="transfer-page" aria-labelledby="transfer-title">
       <header className="page-heading transfer-heading">
-        <div><span className="eyebrow">双栏 SFTP · 分块传输 · SHA-256 校验</span><h1 id="transfer-title">文件传输</h1><p>像 SFTP 客户端一样浏览两端目录；下载始终写入 D 盘项目数据目录。</p></div>
+        <div><span className="eyebrow">双栏 SFTP · 分块传输 · SHA-256 校验</span><h1 id="transfer-title">文件传输</h1><p>像 SFTP 客户端一样浏览两端目录；传输在后台队列中持续运行。</p></div>
         <label className="server-selector"><span>目标服务器</span><select aria-label="传输服务器" value={serverId} onChange={(event) => setServerId(event.target.value)}><option value="">请选择服务器</option>{servers.map((server) => <option key={server.id} value={server.id}>{server.name}</option>)}</select></label>
       </header>
 
       <div className="sftp-workspace">
         <DirectoryPane scope="local" title="本地目录" listing={localListing} selected={selectedLocal} loading={localLoading} refreshing={localRefreshing} error={localError} onOpenDirectory={(path) => void loadLocal(path)} onSelectFile={setSelectedLocal} onRefresh={() => void loadLocal(localListing?.path ?? null, true)} onChooseDirectory={() => void chooseLocalDirectory()} onEntryContextMenu={(entry, event) => openBrowserContext('local', entry, event)} />
         <aside className="sftp-actions" aria-label="传输操作">
-          <button className="primary-button" type="button" aria-label="上传到右侧目录" title="把左侧选中的本地文件上传到右侧当前目录" disabled={!selectedLocal || !remoteListing || running} onClick={() => void upload()}><ArrowRight weight="bold" /><span>上传</span></button>
-          <button className="success-button" type="button" aria-label="下载到项目目录" title="把右侧选中的远程文件下载到项目数据目录" disabled={!selectedRemote || running} onClick={() => void download()}><ArrowLeft weight="bold" /><span>下载</span></button>
+          <button className="primary-button" type="button" aria-label="上传到右侧目录" title="把左侧选中的本地文件加入上传队列" disabled={!selectedLocal || !remoteListing || submitting} onClick={() => void upload()}><ArrowRight weight="bold" /><span>上传</span></button>
+          <button className="success-button" type="button" aria-label="下载到项目目录" title="把右侧选中的远程文件加入下载队列" disabled={!selectedRemote || submitting} onClick={() => void download()}><ArrowLeft weight="bold" /><span>下载</span></button>
           <label className="checkbox-field"><input aria-label="允许覆盖" type="checkbox" checked={overwrite} onChange={(event) => setOverwrite(event.target.checked)} /><span className="sftp-overwrite-copy"><span>允许覆盖同名文件</span><small>覆盖</small></span></label>
-          <small>下载位置固定为项目数据目录下的 downloads，避免占用 C 盘。</small>
+          <small>默认下载到当前系统的应用数据目录下的 downloads。</small>
         </aside>
         <DirectoryPane scope="remote" title="远程目录" listing={remoteListing} selected={selectedRemote} loading={remoteLoading} refreshing={remoteRefreshing} error={remoteError} onOpenDirectory={(path) => void loadRemote(path)} onSelectFile={setSelectedRemote} onRefresh={() => void loadRemote(remoteListing?.path ?? '/', true)} onEntryContextMenu={(entry, event) => openBrowserContext('remote', entry, event)} />
       </div>
+
+      {notice && <p className="inline-message" role="status">{notice}</p>}
+
+      {jobs.length > 0 && <section className="silver-card transfer-queue" role="region" aria-label="传输队列">
+        <header><div><span className="eyebrow">后台传输</span><h2>传输队列</h2></div><strong>{jobs.filter((job) => activeStatuses.includes(job.status)).length} 个进行中或等待中</strong></header>
+        <div className="transfer-queue-list" role="list">
+          {jobs.map((job) => {
+            const canCancel = activeStatuses.includes(job.status) && !job.cancelRequested;
+            const canRetry = ['failed', 'uncertain'].includes(job.status) && job.retryable && job.attemptCount < job.maxAttempts;
+            const destination = job.direction === 'download' ? `downloads/${job.targetPath}` : job.targetPath;
+            return <article key={job.id} role="listitem" className={job.id === currentJob?.id ? 'is-selected' : ''}>
+              <button className="transfer-queue-main" type="button" onClick={() => setFocusedJobId(job.id)}>
+                <span className={`transfer-direction transfer-direction--${job.direction}`}>{job.direction === 'upload' ? '上传' : '下载'}</span>
+                <span><strong title={job.sourcePath}>{job.sourcePath}</strong><small title={destination}>→ {destination}</small></span>
+                <span><strong>{transferStatusLabels[job.status]}</strong><small>{job.percent == null ? `第 ${job.attemptCount || 1}/${job.maxAttempts} 次` : `${Number(job.percent.toFixed(1))}%`}</small></span>
+              </button>
+              <div className="transfer-queue-actions">
+                {canCancel && <button className="secondary-button" type="button" aria-label={`取消 ${job.sourcePath}`} onClick={() => void cancel(job)}>取消</button>}
+                {canRetry && <button className="secondary-button" type="button" aria-label={`重试 ${job.sourcePath}`} onClick={() => void retry(job)}>重试</button>}
+              </div>
+            </article>;
+          })}
+        </div>
+      </section>}
 
       {showTransferDetails && <article
         className="silver-card transfer-status-card sftp-status-card"
         role="region"
         aria-label="传输状态"
       >
-        <header><div><span className="eyebrow">实时状态{phase ? ` · ${transferPhaseLabels[phase]}` : ''}</span><h2>{status ?? '等待选择文件'}</h2></div>{sha256 ? <CheckCircle weight="fill" /> : running ? <SpinnerGap className="spin" weight="bold" /> : null}</header>
-        <dl className="transfer-paths"><div><dt>来源</dt><dd>{source || '—'}</dd></div><div><dt>目标</dt><dd>{target || '—'}</dd></div></dl>
-        <div className="transfer-progress"><div><span style={{ width: `${percent ?? 0}%` }} /></div><strong>{percent == null ? '—' : `${Number(percent.toFixed(1))}%`}</strong></div>
-        <div className="transfer-metrics"><span><small>已传输</small><strong>{formatBytes(transferred)}{total == null ? '' : ` / ${formatBytes(total)}`}</strong></span><span><small>当前速度</small><strong>{speed != null && speed > 0 ? `${formatBytes(speed)}/s` : '—'}</strong></span><span><small>平均速度</small><strong>{averageSpeed != null && averageSpeed > 0 ? `${formatBytes(averageSpeed)}/s` : '—'}</strong></span><span><small>预计剩余</small><strong>{formatEta(etaSeconds)}</strong></span><span><small>完整性</small><strong>{sha256 ? 'SHA-256 已校验' : '等待校验'}</strong></span></div>
-        {sha256 && <code className="transfer-hash">{sha256}</code>}
-        {location && <p className="inline-message inline-message--success">{location}</p>}
-        {running && executionId && <button className="danger-button" type="button" onClick={() => void cancel()}><StopCircle weight="bold" />取消传输</button>}
+        <header><div><span className="eyebrow">实时状态 · {currentPhase ? transferPhaseLabels[currentPhase] : transferStatusLabels[currentJob!.status]}</span><h2>{transferMessage(currentJob!)}</h2></div>{currentJob!.sha256 ? <CheckCircle weight="fill" /> : currentActive ? <SpinnerGap className="spin" weight="bold" /> : null}</header>
+        <dl className="transfer-paths"><div><dt>来源</dt><dd>{currentJob!.sourcePath}</dd></div><div><dt>目标</dt><dd>{currentTarget}</dd></div></dl>
+        <div className="transfer-progress"><div><span style={{ width: `${currentJob!.percent ?? 0}%` }} /></div><strong>{currentJob!.percent == null ? '—' : `${Number(currentJob!.percent.toFixed(1))}%`}</strong></div>
+        <div className="transfer-metrics"><span><small>已传输</small><strong>{formatBytes(currentJob!.transferred)}{currentJob!.total == null ? '' : ` / ${formatBytes(currentJob!.total)}`}</strong></span><span><small>当前速度</small><strong>{currentJob!.bytesPerSecond != null && currentJob!.bytesPerSecond > 0 ? `${formatBytes(currentJob!.bytesPerSecond)}/s` : '—'}</strong></span><span><small>平均速度</small><strong>{currentJob!.averageBytesPerSecond != null && currentJob!.averageBytesPerSecond > 0 ? `${formatBytes(currentJob!.averageBytesPerSecond)}/s` : '—'}</strong></span><span><small>预计剩余</small><strong>{formatEta(currentJob!.etaSeconds)}</strong></span><span><small>完整性</small><strong>{currentJob!.sha256 ? 'SHA-256 已校验' : '等待校验'}</strong></span></div>
+        {currentJob!.sha256 && <code className="transfer-hash">{currentJob!.sha256}</code>}
+        {currentJob!.location && <p className="inline-message inline-message--success">{currentJob!.location}</p>}
+        {currentActive && !currentJob!.cancelRequested && <button className="danger-button" type="button" onClick={() => void cancel(currentJob!)}><StopCircle weight="bold" />取消传输</button>}
+        {['failed', 'uncertain'].includes(currentJob!.status) && currentJob!.retryable && currentJob!.attemptCount < currentJob!.maxAttempts && <button className="secondary-button" type="button" onClick={() => void retry(currentJob!)}>重试传输</button>}
       </article>}
       {browserContext && (
         <ContextMenu

@@ -31,7 +31,7 @@ use crate::{
         operation_repository::OperationRepository,
         operation_restore_repository::OperationRestoreRepository,
         script_repository::ScriptRepository, server_repository::ServerRepository,
-        workflow_repository::WorkflowRepository,
+        transfer_job_repository::TransferJobRepository, workflow_repository::WorkflowRepository,
     },
     services::{
         data_migration_service::DataMigrationService,
@@ -49,6 +49,7 @@ use crate::{
         script_service::ScriptService,
         server_connector::ServerConnector,
         task_remediation_service::TaskRemediationService,
+        transfer_queue_service::TransferQueueService,
         transfer_service::TransferService,
         workflow_diagnostics::WorkflowDiagnosticsService,
         workflow_nodes::{execution::ExecutionNodeAdapter, io::IoNodeAdapter},
@@ -92,6 +93,7 @@ pub struct AppServices {
     scripts: ScriptService,
     logs: LogService,
     transfers: TransferService,
+    transfer_queue: TransferQueueService,
     workflows: WorkflowRepository,
     restore_points: RestorePointService,
     workflow_runner: WorkflowService,
@@ -113,6 +115,8 @@ impl AppServices {
         let vault = Vault::new(root, protector);
         let execution_repository = ExecutionRepository::new(database.pool().clone());
         execution_repository.recover_interrupted().await?;
+        let transfer_job_repository = TransferJobRepository::new(database.pool().clone());
+        transfer_job_repository.recover_interrupted().await?;
         let operation_repository = OperationRepository::new(database.pool().clone());
         operation_repository.recover_interrupted().await?;
         let operation_restore_repository = OperationRestoreRepository::new(database.pool().clone());
@@ -174,10 +178,13 @@ impl AppServices {
         );
         let transfers = TransferService::new(
             root.to_path_buf(),
-            execution_repository,
+            execution_repository.clone(),
             connector.clone(),
-            registry,
+            registry.clone(),
         );
+        let transfer_queue =
+            TransferQueueService::new(transfer_job_repository, transfers.clone(), registry);
+        transfer_queue.start();
         let workflow_runner = WorkflowService::new(
             workflow_repository.clone(),
             ExecutionNodeAdapter::new(executions.clone()),
@@ -210,6 +217,7 @@ impl AppServices {
             scripts,
             logs,
             transfers,
+            transfer_queue,
             workflows: workflow_repository,
             restore_points,
             workflow_runner,
@@ -242,6 +250,7 @@ impl AppServices {
     pub async fn ensure_idle_for_data_migration(&self) -> AppResult<()> {
         let idle = self.executions.is_idle().await
             && self.transfers.is_idle().await
+            && self.transfer_queue.is_idle().await
             && self.scripts.is_idle().await
             && self.operation_batches.is_idle().await
             && self.workflow_runner.is_idle().await;
@@ -498,6 +507,45 @@ impl AppServices {
         events: &mut E,
     ) -> AppResult<ExecutionDetails> {
         self.transfers.download(server_id, request, events).await
+    }
+
+    pub async fn enqueue_upload_file(
+        &self,
+        server_id: &str,
+        request: UploadRequest,
+    ) -> AppResult<crate::domain::transfer_job::TransferJob> {
+        self.transfer_queue.enqueue_upload(server_id, request).await
+    }
+
+    pub async fn enqueue_download_file(
+        &self,
+        server_id: &str,
+        request: DownloadRequest,
+    ) -> AppResult<crate::domain::transfer_job::TransferJob> {
+        self.transfer_queue
+            .enqueue_download(server_id, request)
+            .await
+    }
+
+    pub async fn list_transfer_jobs(
+        &self,
+        server_id: Option<&str>,
+    ) -> AppResult<Vec<crate::domain::transfer_job::TransferJob>> {
+        self.transfer_queue.list(server_id).await
+    }
+
+    pub async fn cancel_transfer_job(
+        &self,
+        job_id: Uuid,
+    ) -> AppResult<crate::domain::transfer_job::TransferJob> {
+        self.transfer_queue.cancel(job_id).await
+    }
+
+    pub async fn retry_transfer_job(
+        &self,
+        job_id: Uuid,
+    ) -> AppResult<crate::domain::transfer_job::TransferJob> {
+        self.transfer_queue.retry(job_id).await
     }
 
     pub async fn list_executions(

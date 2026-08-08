@@ -5,6 +5,7 @@ pub mod operation_batch;
 pub mod operation_restore;
 pub mod script;
 pub mod server;
+pub mod transfer_job;
 pub mod update;
 pub mod workflow;
 pub mod workflow_events;

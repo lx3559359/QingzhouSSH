@@ -124,6 +124,21 @@ describe('Tauri API wrapper', () => {
       },
       onEvent,
     );
+    await api.enqueueUploadFile('server-1', {
+      localPath: 'D:\\payload.zip',
+      remotePath: '/tmp/payload.zip',
+      overwrite: false,
+      verification: 'balanced',
+    });
+    await api.enqueueDownloadFile('server-1', {
+      remotePath: '/tmp/result.zip',
+      suggestedName: 'result.zip',
+      overwrite: false,
+      verification: 'balanced',
+    });
+    await api.listTransferJobs('server-1');
+    await api.cancelTransferJob('job-1');
+    await api.retryTransferJob('job-1');
     await api.listExecutions({ status: 'failed' });
     await api.getExecution('execution-1');
 
@@ -140,6 +155,11 @@ describe('Tauri API wrapper', () => {
       ['download_log_result', ['executionId', 'suggestedName']],
       ['upload_file', ['serverId', 'request', 'onEvent']],
       ['download_file', ['serverId', 'request', 'onEvent']],
+      ['enqueue_upload_file', ['serverId', 'request']],
+      ['enqueue_download_file', ['serverId', 'request']],
+      ['list_transfer_jobs', ['serverId']],
+      ['cancel_transfer_job', ['jobId']],
+      ['retry_transfer_job', ['jobId']],
       ['list_executions', ['filter']],
       ['get_execution', ['executionId']],
     ]);

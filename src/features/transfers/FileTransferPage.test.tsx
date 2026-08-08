@@ -10,11 +10,16 @@ const apiMocks = vi.hoisted(() => ({
   uploadFile: vi.fn(),
   downloadFile: vi.fn(),
   cancelExecution: vi.fn(),
+  enqueueUploadFile: vi.fn(),
+  enqueueDownloadFile: vi.fn(),
+  listTransferJobs: vi.fn(),
+  cancelTransferJob: vi.fn(),
+  retryTransferJob: vi.fn(),
 }));
 vi.mock('../../api/tauri', () => ({ api: apiMocks }));
 vi.mock('@tauri-apps/plugin-dialog', () => ({ open: vi.fn() }));
 
-import type { ExecutionDetails } from '../../api/contracts';
+import type { TransferJob } from '../../api/contracts';
 import { directorySessionCache } from '../file-browser/directorySessionCache';
 import { FileTransferPage } from './FileTransferPage';
 
@@ -38,26 +43,72 @@ const remoteSrv = {
   entries: [{ name: 'report.log', path: '/srv/report.log', kind: 'file' as const, size: 4096, modifiedAt: 1_700_000_100 }],
 };
 
-function result(taskId: string, status: 'succeeded' | 'cancelled' = 'succeeded'): ExecutionDetails {
-  return { record: { id: 'transfer-1', serverId: server.id, taskId, taskVersion: 1, category: 'transfer', status, createdAt: 1, startedAt: 1, finishedAt: 2, durationMs: 1000, exitCode: null, errorCategory: status === 'cancelled' ? 'cancelled' : null, errorMessage: null, retryable: false, parametersSummary: null, outputSummary: status === 'succeeded' ? `传输 2048 字节，SHA-256 ${'a'.repeat(64)}` : null, remoteProcessGroup: null }, parameters: [], files: taskId.endsWith('download') && status === 'succeeded' ? [{ id: 'file-1', relativePath: 'downloads/report.log', purpose: 'download', sizeBytes: 2048, sha256: 'a'.repeat(64) }] : [] };
+let transferJobs: TransferJob[] = [];
+
+function transferJob(direction: 'upload' | 'download', status: TransferJob['status'] = 'succeeded'): TransferJob {
+  return {
+    id: `transfer-${transferJobs.length + 1}`,
+    executionId: status === 'queued' ? null : 'execution-1',
+    serverId: server.id,
+    direction,
+    sourcePath: direction === 'upload' ? 'D:\\project\\upload.bin' : '/srv/report.log',
+    targetPath: direction === 'upload' ? '/srv/upload.bin' : 'report.log',
+    overwrite: false,
+    verification: 'balanced',
+    status,
+    transferred: status === 'succeeded' ? 2048 : 1024,
+    total: 2048,
+    percent: status === 'succeeded' ? 100 : 50,
+    bytesPerSecond: 2048,
+    averageBytesPerSecond: 1024,
+    etaSeconds: status === 'succeeded' ? 0 : 1,
+    attemptCount: 1,
+    maxAttempts: 3,
+    cancelRequested: false,
+    retryable: status === 'failed',
+    errorCategory: status === 'failed' ? 'io' : null,
+    errorMessage: status === 'failed' ? 'connection reset' : null,
+    sha256: status === 'succeeded' ? 'a'.repeat(64) : null,
+    location: status === 'succeeded' ? (direction === 'download' ? 'downloads/report.log' : '/srv/upload.bin') : null,
+    createdAt: 1,
+    updatedAt: 2,
+    startedAt: status === 'queued' ? null : 1,
+    finishedAt: ['succeeded', 'failed', 'cancelled', 'uncertain'].includes(status) ? 2 : null,
+  };
 }
 
 describe('FileTransferPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    transferJobs = [];
     directorySessionCache.clear();
     apiMocks.listServers.mockResolvedValue([server]);
     apiMocks.listLocalDirectory.mockResolvedValue(localListing);
     apiMocks.listRemoteDirectory.mockImplementation(async (_serverId, path) => path === '/srv' ? remoteSrv : remoteRoot);
-    apiMocks.cancelExecution.mockResolvedValue(undefined);
-    apiMocks.uploadFile.mockImplementation(async (_id, _request, onEvent) => {
-      onEvent({ type: 'started', executionId: 'transfer-1', startedAt: 1000, sequence: 1, emittedAt: 1000 });
-      onEvent({ type: 'progress', phase: 'transferring', transferred: 1024, total: 2048, percent: 50, bytesPerSecond: 2048, averageBytesPerSecond: 1024, etaSeconds: 1, sequence: 2, emittedAt: 2000 });
-      onEvent({ type: 'progress', phase: 'finalizing', transferred: 2048, total: 2048, percent: 100, bytesPerSecond: 2048, averageBytesPerSecond: 1024, etaSeconds: 0, sequence: 3, emittedAt: 2001 });
-      onEvent({ type: 'finished', status: 'succeeded', exitCode: null, durationMs: 1000, result: { bytes: 2048, sha256: 'a'.repeat(64), location: '/srv/upload.bin' }, sequence: 4, emittedAt: 2002 });
-      return result('transfer.upload');
+    apiMocks.listTransferJobs.mockImplementation(async () => [...transferJobs]);
+    apiMocks.cancelTransferJob.mockImplementation(async (jobId) => {
+      const job = transferJobs.find((item) => item.id === jobId)!;
+      job.status = 'cancelled';
+      job.cancelRequested = true;
+      return job;
     });
-    apiMocks.downloadFile.mockResolvedValue(result('transfer.download'));
+    apiMocks.retryTransferJob.mockImplementation(async (jobId) => {
+      const job = transferJobs.find((item) => item.id === jobId)!;
+      job.status = 'queued';
+      job.errorCategory = null;
+      job.errorMessage = null;
+      return job;
+    });
+    apiMocks.enqueueUploadFile.mockImplementation(async () => {
+      const job = transferJob('upload');
+      transferJobs = [job, ...transferJobs];
+      return job;
+    });
+    apiMocks.enqueueDownloadFile.mockImplementation(async () => {
+      const job = transferJob('download');
+      transferJobs = [job, ...transferJobs];
+      return job;
+    });
   });
 
   it('reuses a remote directory after the page is reopened in the same session', async () => {
@@ -162,7 +213,7 @@ describe('FileTransferPage', () => {
     await user.click(await screen.findByRole('button', { name: '打开远程目录 srv' }));
     await user.click(screen.getByRole('button', { name: '上传到右侧目录' }));
 
-    expect(apiMocks.uploadFile).toHaveBeenCalledWith(
+    expect(apiMocks.enqueueUploadFile).toHaveBeenCalledWith(
       'server-1',
       {
         localPath: 'D:\\project\\upload.bin',
@@ -170,13 +221,12 @@ describe('FileTransferPage', () => {
         overwrite: false,
         verification: 'balanced',
       },
-      expect.any(Function),
     );
     expect(await screen.findByText('2 KB / 2 KB')).toBeVisible();
-    expect(screen.getByText('实时状态 · 收尾中')).toBeVisible();
+    expect(screen.getByText('实时状态 · 已完成')).toBeVisible();
     expect(screen.getByText('2 KB/s')).toBeVisible();
     expect(screen.getByText('1 KB/s')).toBeVisible();
-    expect(screen.getByText('已完成')).toBeVisible();
+    expect(within(screen.getByRole('region', { name: '传输状态' })).getByText('已完成')).toBeVisible();
     expect(screen.getByText('SHA-256 已校验')).toBeVisible();
   });
 
@@ -189,7 +239,7 @@ describe('FileTransferPage', () => {
     await user.click(await screen.findByRole('button', { name: '选择远程文件 report.log' }));
     await user.click(screen.getByRole('button', { name: '下载到项目目录' }));
 
-    expect(apiMocks.downloadFile).toHaveBeenCalledWith(
+    expect(apiMocks.enqueueDownloadFile).toHaveBeenCalledWith(
       'server-1',
       {
         remotePath: '/srv/report.log',
@@ -197,7 +247,6 @@ describe('FileTransferPage', () => {
         overwrite: false,
         verification: 'balanced',
       },
-      expect.any(Function),
     );
     await waitFor(() => expect(screen.getByText('downloads/report.log')).toBeVisible());
   });
@@ -250,7 +299,7 @@ describe('FileTransferPage', () => {
     ]);
     await user.click(within(menu).getByRole('menuitem', { name: '下载' }));
 
-    expect(apiMocks.downloadFile).toHaveBeenCalledWith(
+    expect(apiMocks.enqueueDownloadFile).toHaveBeenCalledWith(
       'server-1',
       {
         remotePath: '/srv/report.log',
@@ -258,7 +307,22 @@ describe('FileTransferPage', () => {
         overwrite: false,
         verification: 'balanced',
       },
-      expect.any(Function),
     );
+  });
+
+  it('cancels queued work immediately and offers bounded retry for failed work', async () => {
+    const queued = transferJob('upload', 'queued');
+    const failed = transferJob('download', 'failed');
+    failed.id = 'transfer-failed';
+    transferJobs = [failed, queued];
+    const user = userEvent.setup();
+    render(<FileTransferPage />);
+
+    const queue = await screen.findByRole('region', { name: '传输队列' });
+    await user.click(within(queue).getByRole('button', { name: `取消 ${queued.sourcePath}` }));
+    expect(apiMocks.cancelTransferJob).toHaveBeenCalledWith(queued.id);
+
+    await user.click(within(queue).getByRole('button', { name: `重试 ${failed.sourcePath}` }));
+    expect(apiMocks.retryTransferJob).toHaveBeenCalledWith(failed.id);
   });
 });

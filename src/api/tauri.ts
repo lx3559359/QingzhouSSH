@@ -37,6 +37,7 @@ import type {
   TaskRemediationPreview,
   TaskExecutionRequest,
   UploadRequest,
+  TransferJob,
   ExecutionFile,
   StartWorkflowRunRequest,
   WorkflowDefinition,
@@ -184,6 +185,16 @@ export const tauriApi = {
       request,
       onEvent: createEventChannel(onEvent),
     }),
+  enqueueUploadFile: (serverId: string, request: UploadRequest) =>
+    invoke<TransferJob>('enqueue_upload_file', { serverId, request }),
+  enqueueDownloadFile: (serverId: string, request: DownloadRequest) =>
+    invoke<TransferJob>('enqueue_download_file', { serverId, request }),
+  listTransferJobs: (serverId: string | null) =>
+    invoke<TransferJob[]>('list_transfer_jobs', { serverId }),
+  cancelTransferJob: (jobId: string) =>
+    invoke<TransferJob>('cancel_transfer_job', { jobId }),
+  retryTransferJob: (jobId: string) =>
+    invoke<TransferJob>('retry_transfer_job', { jobId }),
   listExecutions: (filter: ExecutionFilter) =>
     invoke<ExecutionRecord[]>('list_executions', { filter }),
   getExecution: (executionId: string) =>

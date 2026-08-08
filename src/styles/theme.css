@@ -3882,6 +3882,87 @@ select {
   margin-top: 22px;
 }
 
+.transfer-queue {
+  display: grid;
+  gap: 14px;
+  margin-top: 22px;
+  padding: 18px;
+}
+
+.transfer-queue > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.transfer-queue > header h2 { font-size: 1rem; }
+.transfer-queue > header > strong { color: var(--muted); font-size: 0.72rem; }
+
+.transfer-queue-list {
+  display: grid;
+  gap: 8px;
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.transfer-queue-list > article {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid #b8c3d1;
+  border-radius: 11px;
+  background: rgb(255 255 255 / 47%);
+}
+
+.transfer-queue-list > article.is-selected {
+  border-color: #7794dc;
+  box-shadow: 0 0 0 2px rgb(77 119 231 / 18%);
+}
+
+.transfer-queue-main {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 11px;
+  padding: 10px 12px;
+  border: 0;
+  background: transparent;
+  color: #2b3a50;
+  text-align: left;
+}
+
+.transfer-queue-main > span:nth-child(2) {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.transfer-queue-main > span:nth-child(2) strong,
+.transfer-queue-main > span:nth-child(2) small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.transfer-queue-main > span:last-child { display: grid; gap: 3px; text-align: right; }
+.transfer-queue-main small { color: var(--muted); font-size: 0.66rem; }
+
+.transfer-direction {
+  padding: 4px 7px;
+  border-radius: 7px;
+  background: #dfe8ff;
+  color: #365aad;
+  font-size: 0.66rem;
+  font-weight: 800;
+}
+
+.transfer-direction--download { background: #d9f1e6; color: #237052; }
+.transfer-queue-actions { display: flex; gap: 6px; padding-right: 10px; }
+.transfer-queue-actions .secondary-button { min-height: 34px; padding: 6px 10px; }
+
 .download-file-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -4652,6 +4733,24 @@ textarea {
   .sftp-actions .checkbox-field,
   .sftp-actions > small {
     grid-column: 1 / -1;
+  }
+
+  .transfer-queue-list > article {
+    grid-template-columns: 1fr;
+  }
+
+  .transfer-queue-main {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .transfer-queue-main > span:last-child {
+    grid-column: 2;
+    text-align: left;
+  }
+
+  .transfer-queue-actions {
+    justify-content: flex-end;
+    padding: 0 10px 10px;
   }
 }
 

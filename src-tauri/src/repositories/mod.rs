@@ -4,4 +4,5 @@ pub mod operation_repository;
 pub mod operation_restore_repository;
 pub mod script_repository;
 pub mod server_repository;
+pub mod transfer_job_repository;
 pub mod workflow_repository;
