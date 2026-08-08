@@ -54,25 +54,35 @@ struct HostKeyVerifier {
     observation: Arc<Mutex<Option<HostKeyObservation>>>,
 }
 
+#[derive(Clone)]
 pub struct AuthenticatedSshSession {
+    inner: Arc<AuthenticatedSshSessionInner>,
+}
+
+struct AuthenticatedSshSessionInner {
     handle: client::Handle<HostKeyVerifier>,
     timeout: Duration,
 }
 
 impl AuthenticatedSshSession {
     pub async fn open_session_channel(&self) -> AppResult<russh::Channel<client::Msg>> {
-        Ok(self.handle.channel_open_session().await?)
+        Ok(self.inner.handle.channel_open_session().await?)
     }
 
-    pub async fn disconnect(self) {
+    pub fn is_closed(&self) -> bool {
+        self.inner.handle.is_closed()
+    }
+
+    pub async fn disconnect(&self) {
         let _ = self
+            .inner
             .handle
             .disconnect(Disconnect::ByApplication, "", "")
             .await;
     }
 
     pub fn timeout(&self) -> Duration {
-        self.timeout
+        self.inner.timeout
     }
 }
 
@@ -315,7 +325,7 @@ pub(crate) async fn execute_authenticated(
         ));
     }
     with_timeout(session.timeout(), "SSH 命令执行或输出读取", async {
-        run_command(&session.handle, command).await
+        run_command(&session.inner.handle, command).await
     })
     .await
 }
@@ -331,7 +341,7 @@ pub async fn execute(
     let session =
         connect_authenticated(endpoint, username, credential, expected_fingerprint).await?;
     let output = with_timeout(endpoint.timeout, "SSH 命令执行或输出读取", async {
-        run_command(&session.handle, command).await
+        run_command(&session.inner.handle, command).await
     })
     .await;
     session.disconnect().await;
@@ -358,8 +368,10 @@ pub async fn connect_authenticated(
     })
     .await?;
     Ok(AuthenticatedSshSession {
-        handle: session,
-        timeout: endpoint.timeout,
+        inner: Arc::new(AuthenticatedSshSessionInner {
+            handle: session,
+            timeout: endpoint.timeout,
+        }),
     })
 }
 
@@ -396,6 +408,13 @@ pub async fn probe_system(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn assert_clone<T: Clone>() {}
+
+    #[test]
+    fn authenticated_session_is_shareable() {
+        assert_clone::<AuthenticatedSshSession>();
+    }
 
     #[test]
     fn rejects_invalid_endpoint_before_network_access() {
