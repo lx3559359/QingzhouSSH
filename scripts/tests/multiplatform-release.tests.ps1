@@ -77,6 +77,13 @@ try {
   if ($license.Count -ne 1 -or -not (Test-Path -LiteralPath (Join-Path $releaseRoot 'LICENSE') -PathType Leaf)) {
     throw 'Multiplatform release must include the Apache-2.0 license'
   }
+  $licenseBytes = [IO.File]::ReadAllBytes((Join-Path $releaseRoot 'LICENSE'))
+  if ($licenseBytes -contains 13) {
+    throw 'Published LICENSE must use canonical LF line endings for byte-identical release mirrors'
+  }
+  if ($licenseBytes.Length -ge 3 -and $licenseBytes[0] -eq 0xEF -and $licenseBytes[1] -eq 0xBB -and $licenseBytes[2] -eq 0xBF) {
+    throw 'Published LICENSE must use UTF-8 without a BOM'
+  }
   $github = Get-Content -Raw -Encoding utf8 (Join-Path $releaseRoot 'github\latest.json') | ConvertFrom-Json
   $modelscope = Get-Content -Raw -Encoding utf8 (Join-Path $releaseRoot 'modelscope\latest.json') | ConvertFrom-Json
   foreach ($platform in $platforms) {

@@ -149,7 +149,9 @@ try {
   $licenseSource = Join-Path $projectRoot 'LICENSE'
   if (-not (Test-Path -LiteralPath $licenseSource -PathType Leaf)) { throw 'Apache-2.0 license file is missing' }
   $licenseDestination = Join-Path $staging 'LICENSE'
-  Copy-Item -LiteralPath $licenseSource -Destination $licenseDestination
+  $licenseText = [IO.File]::ReadAllText($licenseSource)
+  $canonicalLicenseText = $licenseText.Replace("`r`n", "`n").Replace("`r", "`n")
+  [IO.File]::WriteAllText($licenseDestination, $canonicalLicenseText, [Text.UTF8Encoding]::new($false))
   $fileRecords += New-FileRecord $licenseDestination 'license' 'all'
 
   function New-Manifest($Platforms) {
