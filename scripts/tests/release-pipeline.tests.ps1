@@ -102,6 +102,19 @@ foreach ($requiredCredential in @(
 )) {
   if (-not $preflightBlock.Contains($requiredCredential)) { throw "Release preflight is missing: $requiredCredential" }
 }
+foreach ($applePolicy in @(
+  'Apple signing credentials must be either fully configured or fully omitted',
+  "APPLE_SIGNING_IDENTITY = '-'",
+  'macOS candidate uses ad-hoc signing'
+)) {
+  if (-not $workflow.Contains($applePolicy)) { throw "Release workflow is missing Apple fallback policy: $applePolicy" }
+}
+$adHocSigningStart = $workflow.IndexOf("APPLE_SIGNING_IDENTITY = '-'", [StringComparison]::Ordinal)
+$nativeBuildCommandStart = $workflow.IndexOf('pnpm tauri build --bundles', [StringComparison]::Ordinal)
+if ($adHocSigningStart -lt 0 -or $nativeBuildCommandStart -lt 0 -or $adHocSigningStart -gt $nativeBuildCommandStart) {
+  throw 'macOS ad-hoc signing must be configured before the native Tauri build starts'
+}
+
 if (-not $workflow.Contains('prepare_modelscope_mirror')) {
   throw 'Manual ModelScope mirror bootstrap input is missing'
 }

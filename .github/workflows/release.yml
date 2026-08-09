@@ -40,22 +40,40 @@ jobs:
           QINGZHOU_MODELSCOPE_NAMESPACE: ${{ vars.QINGZHOU_MODELSCOPE_NAMESPACE }}
         run: |
           $ErrorActionPreference = 'Stop'
-          foreach ($name in @(
+          $requiredCredentialNames = @(
             'TAURI_SIGNING_PRIVATE_KEY',
             'TAURI_SIGNING_PRIVATE_KEY_PASSWORD',
+            'MODELSCOPE_API_TOKEN',
+            'QINGZHOU_MODELSCOPE_NAMESPACE'
+          )
+          foreach ($name in $requiredCredentialNames) {
+            $value = [Environment]::GetEnvironmentVariable($name)
+            if ([string]::IsNullOrWhiteSpace($value)) { throw "$name is not configured for tagged releases" }
+            if ($value[0] -eq [char]0xFEFF) { throw "$name begins with a UTF-8 BOM" }
+            if ($value -ne $value.Trim()) { throw "$name contains leading or trailing whitespace" }
+          }
+
+          $appleCredentialNames = @(
             'APPLE_CERTIFICATE',
             'APPLE_CERTIFICATE_PASSWORD',
             'APPLE_SIGNING_IDENTITY',
             'APPLE_ID',
             'APPLE_PASSWORD',
-            'APPLE_TEAM_ID',
-            'MODELSCOPE_API_TOKEN',
-            'QINGZHOU_MODELSCOPE_NAMESPACE'
-          )) {
+            'APPLE_TEAM_ID'
+          )
+          $configuredAppleCredentialNames = @($appleCredentialNames | Where-Object {
+            -not [string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($_))
+          })
+          if ($configuredAppleCredentialNames.Count -ne 0 -and $configuredAppleCredentialNames.Count -ne $appleCredentialNames.Count) {
+            throw 'Apple signing credentials must be either fully configured or fully omitted'
+          }
+          foreach ($name in $configuredAppleCredentialNames) {
             $value = [Environment]::GetEnvironmentVariable($name)
-            if ([string]::IsNullOrWhiteSpace($value)) { throw "$name is not configured for tagged releases" }
             if ($value[0] -eq [char]0xFEFF) { throw "$name begins with a UTF-8 BOM" }
             if ($value -ne $value.Trim()) { throw "$name contains leading or trailing whitespace" }
+          }
+          if ($configuredAppleCredentialNames.Count -eq 0) {
+            Write-Warning 'Apple Developer signing is not configured; macOS artifacts will use ad-hoc signing and remain release candidates.'
           }
 
   platform-native-checks:
@@ -149,6 +167,10 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           $PSNativeCommandUseErrorActionPreference = $true
+          if ('${{ matrix.platform }}' -like 'macos-*' -and [string]::IsNullOrWhiteSpace($env:APPLE_CERTIFICATE)) {
+            $env:APPLE_SIGNING_IDENTITY = '-'
+            Write-Output 'macOS candidate uses ad-hoc signing because Apple Developer credentials are not configured.'
+          }
           pnpm tauri build --bundles ${{ matrix.bundle }} --target ${{ matrix.rustTarget }}
           $targetRelease = Join-Path $env:CARGO_TARGET_DIR '${{ matrix.rustTarget }}/release'
           $arguments = @{
