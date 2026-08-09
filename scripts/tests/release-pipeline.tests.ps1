@@ -61,8 +61,8 @@ foreach ($requiredText in @(
 $nativeBundles = @(
   @{ platform = 'windows-x86_64-nsis'; bundle = 'nsis' },
   @{ platform = 'windows-aarch64-nsis'; bundle = 'nsis' },
-  @{ platform = 'macos-x86_64-dmg'; bundle = 'dmg' },
-  @{ platform = 'macos-aarch64-dmg'; bundle = 'dmg' },
+  @{ platform = 'macos-x86_64-dmg'; bundle = 'app,dmg' },
+  @{ platform = 'macos-aarch64-dmg'; bundle = 'app,dmg' },
   @{ platform = 'linux-x86_64-appimage'; bundle = 'appimage' },
   @{ platform = 'linux-aarch64-appimage'; bundle = 'appimage' }
 )

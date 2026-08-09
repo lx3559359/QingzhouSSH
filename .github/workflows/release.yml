@@ -95,11 +95,11 @@ jobs:
           - platform: macos-x86_64-dmg
             runner: macos-15-intel
             rustTarget: x86_64-apple-darwin
-            bundle: dmg
+            bundle: app,dmg
           - platform: macos-aarch64-dmg
             runner: macos-15
             rustTarget: aarch64-apple-darwin
-            bundle: dmg
+            bundle: app,dmg
           - platform: linux-x86_64-appimage
             runner: ubuntu-22.04
             rustTarget: x86_64-unknown-linux-gnu

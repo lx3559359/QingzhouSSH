@@ -26,8 +26,8 @@ if ($release.modelscope.namespaceEnvironment -ne 'QINGZHOU_MODELSCOPE_NAMESPACE'
 $expectedPlatforms = [ordered]@{
   'windows-x86_64-nsis' = @('windows-2025', 'x86_64-pc-windows-msvc', 'nsis')
   'windows-aarch64-nsis' = @('windows-11-arm', 'aarch64-pc-windows-msvc', 'nsis')
-  'macos-x86_64-dmg' = @('macos-15-intel', 'x86_64-apple-darwin', 'dmg')
-  'macos-aarch64-dmg' = @('macos-15', 'aarch64-apple-darwin', 'dmg')
+  'macos-x86_64-dmg' = @('macos-15-intel', 'x86_64-apple-darwin', 'app,dmg')
+  'macos-aarch64-dmg' = @('macos-15', 'aarch64-apple-darwin', 'app,dmg')
   'linux-x86_64-appimage' = @('ubuntu-22.04', 'x86_64-unknown-linux-gnu', 'appimage')
   'linux-aarch64-appimage' = @('ubuntu-22.04-arm', 'aarch64-unknown-linux-gnu', 'appimage')
 }
