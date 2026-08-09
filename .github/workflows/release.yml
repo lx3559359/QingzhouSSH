@@ -168,6 +168,16 @@ jobs:
           $ErrorActionPreference = 'Stop'
           $PSNativeCommandUseErrorActionPreference = $true
           if ('${{ matrix.platform }}' -like 'macos-*' -and [string]::IsNullOrWhiteSpace($env:APPLE_CERTIFICATE)) {
+            $emptyAppleVariableNames = @(
+              'APPLE_CERTIFICATE',
+              'APPLE_CERTIFICATE_PASSWORD',
+              'APPLE_ID',
+              'APPLE_PASSWORD',
+              'APPLE_TEAM_ID'
+            )
+            foreach ($name in $emptyAppleVariableNames) {
+              [Environment]::SetEnvironmentVariable($name, $null)
+            }
             $env:APPLE_SIGNING_IDENTITY = '-'
             Write-Output 'macOS candidate uses ad-hoc signing because Apple Developer credentials are not configured.'
           }
