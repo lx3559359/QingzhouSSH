@@ -168,20 +168,18 @@ jobs:
           $ErrorActionPreference = 'Stop'
           $PSNativeCommandUseErrorActionPreference = $true
           if ('${{ matrix.platform }}' -like 'macos-*' -and [string]::IsNullOrWhiteSpace($env:APPLE_CERTIFICATE)) {
-            $emptyAppleVariableNames = @(
-              'APPLE_CERTIFICATE',
-              'APPLE_CERTIFICATE_PASSWORD',
-              'APPLE_ID',
-              'APPLE_PASSWORD',
-              'APPLE_TEAM_ID'
-            )
-            foreach ($name in $emptyAppleVariableNames) {
-              [Environment]::SetEnvironmentVariable($name, $null)
-            }
             $env:APPLE_SIGNING_IDENTITY = '-'
             Write-Output 'macOS candidate uses ad-hoc signing because Apple Developer credentials are not configured.'
+            & /usr/bin/env `
+              -u APPLE_CERTIFICATE `
+              -u APPLE_CERTIFICATE_PASSWORD `
+              -u APPLE_ID `
+              -u APPLE_PASSWORD `
+              -u APPLE_TEAM_ID `
+              pnpm tauri build --bundles ${{ matrix.bundle }} --target ${{ matrix.rustTarget }}
+          } else {
+            pnpm tauri build --bundles ${{ matrix.bundle }} --target ${{ matrix.rustTarget }}
           }
-          pnpm tauri build --bundles ${{ matrix.bundle }} --target ${{ matrix.rustTarget }}
           $targetRelease = Join-Path $env:CARGO_TARGET_DIR '${{ matrix.rustTarget }}/release'
           $arguments = @{
             Platform = '${{ matrix.platform }}'

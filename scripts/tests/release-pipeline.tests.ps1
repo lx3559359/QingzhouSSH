@@ -104,8 +104,7 @@ foreach ($requiredCredential in @(
 }
 foreach ($applePolicy in @(
   'Apple signing credentials must be either fully configured or fully omitted',
-  '$emptyAppleVariableNames = @(',
-  '[Environment]::SetEnvironmentVariable($name, $null)',
+  '& /usr/bin/env',
   "APPLE_SIGNING_IDENTITY = '-'",
   'macOS candidate uses ad-hoc signing'
 )) {
@@ -118,22 +117,22 @@ $emptyAppleVariables = @(
   'APPLE_PASSWORD',
   'APPLE_TEAM_ID'
 )
-$clearAppleVariablesStart = $workflow.IndexOf('$emptyAppleVariableNames = @(', [StringComparison]::Ordinal)
+$sanitizedAppleBuildStart = $workflow.IndexOf('& /usr/bin/env', [StringComparison]::Ordinal)
 $adHocSigningStart = $workflow.IndexOf("APPLE_SIGNING_IDENTITY = '-'", [StringComparison]::Ordinal)
 $nativeBuildCommandStart = $workflow.IndexOf('pnpm tauri build --bundles', [StringComparison]::Ordinal)
 if (
-  $clearAppleVariablesStart -lt 0 -or
+  $sanitizedAppleBuildStart -lt 0 -or
   $adHocSigningStart -lt 0 -or
   $nativeBuildCommandStart -lt 0 -or
-  $clearAppleVariablesStart -gt $nativeBuildCommandStart -or
+  $sanitizedAppleBuildStart -gt $nativeBuildCommandStart -or
   $adHocSigningStart -gt $nativeBuildCommandStart
 ) {
-  throw 'Empty Apple variables must be removed and ad-hoc signing configured before the native Tauri build starts'
+  throw 'The macOS Tauri child process must sanitize empty Apple variables and configure ad-hoc signing before its build starts'
 }
-$appleFallbackBlock = $workflow.Substring($clearAppleVariablesStart, $nativeBuildCommandStart - $clearAppleVariablesStart)
+$appleFallbackBlock = $workflow.Substring($sanitizedAppleBuildStart, $nativeBuildCommandStart - $sanitizedAppleBuildStart)
 foreach ($name in $emptyAppleVariables) {
-  if (-not $appleFallbackBlock.Contains("'$name'")) {
-    throw "macOS ad-hoc fallback must remove empty $name before Tauri evaluates its environment"
+  if (-not $appleFallbackBlock.Contains("-u $name")) {
+    throw "macOS ad-hoc fallback must launch Tauri with $name removed from its child environment"
   }
 }
 
